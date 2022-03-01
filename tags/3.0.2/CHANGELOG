@@ -1,0 +1,28 @@
+=== 0.1.0 2014-08-16
+* Online payments
+* Sandbox testing capability.
+* Option to save customer profile.
+* Card validation at Conekta's servers so you don't have to be PCI.
+* Client side validation for credit cards.
+=== 0.1.1 2014-09-01
+* Offline payments
+* Barcode sent in mail and displayed in order the confirmation page
+* Order Status changed dynamically once webhook is added in Conekta.io Account 
+=== 0.2.0 2015-05-11
+* Added option for difered payments for 3, 6, and 12 months
+* Enable or disable difered payments from the admin
+=== 0.2.1 2015-06-15
+* Added additional parameters required for more robust anti-fraude service for card payments
+=== 0.3.0 2016-03-31
+* Added Banorte CEP and SPEI.
+=== 0.4.0 2016-06-30
+* Email notifications for offline payment methods
+* Support locale option
+=== 2.0.11
+* Fix for conflict with other plugins in checkout "`token_id` is required".
+=== 2.0.12
+* Send only integer values for round adjustment.
+* Send current plugin version for line items tag.
+=== 2.0.13 
+* name the SPEI account owner in admin input section[NEW FEATURE]
+* new marketplace review validations

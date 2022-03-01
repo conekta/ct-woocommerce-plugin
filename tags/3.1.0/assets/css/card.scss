@@ -1,0 +1,50 @@
+/**
+ * card.scss
+ * Custom card checkout
+ */
+.conekta_delete_card {
+    float:right;
+    cursor:pointer;
+}
+
+  
+.info_card {
+    border-bottom: 0.1rem solid #dedfdf;
+    padding:2rem;
+}
+
+.customer-payment-sources {
+    margin: 2rem;
+}
+
+#new_payment_card {
+    background-color:transparent;
+    color:#cd2653;
+    font-size: 1.7rem;
+    width:100%; 
+    cursor:pointer;
+    text-decoration:none;
+}
+
+@media (max-width:615px){
+    #new_payment_card {
+        font-size: 1.3rem;
+    }
+}
+
+#new_payment_card:hover {
+    text-decoration:underline;
+}
+.content_new_card{
+    text-align: center;
+}
+.card_details {
+    display: flex;
+}
+#ckpg_checkout_delete_loader-gif{
+    float:right;
+    display: none;
+}
+.radio_payment_source{
+    float:left;
+}
