@@ -161,8 +161,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
         echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . esc_html( get_post_meta( $order->get_id(), 'conekta-referencia', true ) ). '</p>';
         echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
-        echo '<p>INSTRUCCIONES:'. $this->settings['instructions'] .'</p>';
-
+        echo '<p>INSTRUCCIONES:'. esc_html($this->settings['instructions']) .'</p>';
     }
 
     /**
@@ -193,7 +192,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         if (get_post_meta( $order->get_id(), '_payment_method', true ) === $this->id){
             $instructions = $this->form_fields['instructions'];
             if ( $instructions && 'on-hold' === $order->get_status() ) {
-                echo wpautop( wptexturize( $instructions['default'] ) ) . PHP_EOL;
+                echo wpautop( wptexturize( esc_html($instructions['default'] ) ) ). PHP_EOL;
             }
         }
     }

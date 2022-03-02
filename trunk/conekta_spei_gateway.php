@@ -172,7 +172,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
             {
                 echo '<p><h4><strong>'.esc_html(__('Clabe')).':</strong> '
                 . get_post_meta( esc_html($order->get_id()), 'conekta-clabe', true ). '</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.$this->account_owner.'</h4></p>';
+                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->account_owner).'</h4></p>';
                 echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
             }
     }
@@ -188,7 +188,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         $instructions = $this->form_fields['instructions'];
         if ( $instructions && 'on-hold' === $order->get_status() ) {
-            echo wpautop( wptexturize( $this->settings['instructions'] ) ) . PHP_EOL;
+            echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
         }
     }
 
