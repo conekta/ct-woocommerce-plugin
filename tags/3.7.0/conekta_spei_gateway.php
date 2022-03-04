@@ -156,7 +156,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
         echo '<p><h4><strong>'.__('Clabe').':</strong> ' . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
-        echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.$this->account_owner.'</h4></p>';
+        echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->account_owner).'</h4></p>';
         echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
     }
 
