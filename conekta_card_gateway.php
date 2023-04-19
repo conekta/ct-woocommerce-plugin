@@ -19,6 +19,21 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
     protected $transaction_error_message = null;
     protected $currencies                = array('MXN', 'USD');
 
+    public $id;
+    public $method_title;
+    public $has_fields;
+    public $icon;
+    public $title;
+    public $use_sandbox_api;
+    public $enable_meses;
+    public $test_api_key;
+    public $live_api_key;
+    public $test_publishable_key;
+    public $live_publishable_key;
+    public $publishable_key;
+    public $secret_key;
+    public $lang_options;
+
     public function __construct() {
         $this->id = 'conektacard';
         $this->method_title = __('Conekta Card', 'conektacard');

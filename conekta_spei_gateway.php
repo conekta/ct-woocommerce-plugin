@@ -18,6 +18,16 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
     protected $conekta_test_api_key      = '';
     protected $conekta_live_api_key      = '';
     protected $publishable_key           = '';
+    public $id;
+    public $method_title;
+    public $has_fields;
+    public $title;
+    public $icon;
+    public $test_api_key;
+    public $live_api_key;
+    public $account_owner;
+    public $secret_key;
+    public $lang_options;
 
     public function __construct()
     {
