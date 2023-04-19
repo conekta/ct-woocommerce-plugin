@@ -43,7 +43,7 @@ class OrderTest extends BaseTest
         array(
           'payment_method' => array(
             'type' => 'oxxo_cash',
-            'expires_at' => strtotime(date("Y-m-d H:i:s")) + "36000"
+            'expires_at' => strtotime(gmdate("Y-m-d H:i:s")) + "36000"
             ),
           'amount' => 20000
           )

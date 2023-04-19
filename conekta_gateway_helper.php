@@ -26,7 +26,7 @@ function ckpg_check_balance($order, $total) {
     }
 
     if ($amount != $total) {
-        $adjustment = $total - $amount;
+        $adjustment = abs($amount - $total);
 
         $order['tax_lines'][0]['amount'] =
             $order['tax_lines'][0]['amount'] + intval($adjustment);
@@ -149,10 +149,21 @@ function ckpg_build_shipping_lines($data)
 function ckpg_build_discount_lines($data)
 {
     $discount_lines = array();
-
     if (!empty($data['discount_lines'])) {
-        $discount_lines = $data['discount_lines'];
-    }
+        $discounts = $data['discount_lines'];
+        foreach ($discounts as $discount) {
+            $discount_lines = array_merge(
+                $discount_lines,
+                    array(
+                        array(
+                            'code' => (string) $discount['code'],
+                            'amount' => (string) $discount['amount'] * 100,
+                            'type'=> 'coupon'
+                        )
+                    )
+                );
+            }
+        }
 
     return $discount_lines;
 }
@@ -211,7 +222,7 @@ function ckpg_get_request_data($order)
         if (!empty($shipping_method)) {
             $shipping_lines  = array(
                 array(
-                    'amount'  => $amountShipping,
+                    'amount'  => (int) number_format($amountShipping),
                     'carrier' => $shipping_method,
                     'method'  => $shipping_method
                 )
@@ -262,11 +273,11 @@ function ckpg_get_request_data($order)
         );
         //PARAMS VALIDATION
         if (!empty($_POST['conekta_token'])) {
-            $token = string_validation($_POST['conekta_token']);
+            $token = sanitize_text_field($_POST['conekta_token']);
         }
 
         if (!empty($_POST['monthly_installments'])) {
-            $monthly_installments = int_validation($_POST['monthly_installments']);
+            $monthly_installments = (int) $_POST['monthly_installments'];
         }
 
         $amount               = validate_total($order->get_total());
@@ -303,7 +314,7 @@ function ckpg_get_request_data($order)
 
 function amount_validation($amount='')
 {
-    if(is_numeric($amount)){
+    if(intval($amount)){
      $amount = (float) $amount * 100;
     }
 
@@ -322,7 +333,7 @@ function item_name_validation($item='')
 function string_validation($string='')
 {
     if((string) $string == true ){
-        return  esc_html($string);
+        return $string;
     }
 
     return $string;
@@ -340,7 +351,7 @@ function post_code_validation($post_code='')
 function int_validation($input_field)
 {
     if(is_numeric($input_field)){
-        return intval($input_field);
+        return sanitize_text_field(intval($input_field));
     }
 
     return $input_field;

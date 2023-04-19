@@ -9,4 +9,4 @@
 
 
 <span class='payment-errors required'></span>
-<?php echo $this->settings['description']; ?>
+<?php echo esc_html($this->settings['description']); ?>
