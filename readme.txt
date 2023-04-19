@@ -1,9 +1,9 @@
 === Conekta Payment Gateway ===
 Contributors: cristinarandall, eduardoconekta, jovalo
 Tags: free, oxxo, conekta, mexico, payment gateway
-Requires at least: 3.8.1
-Tested up to: 5.3.2
-Stable tag: 3.0.6
+Requires at least: 4.2.0
+Tested up to: 5.4.1
+Stable tag: 3.0.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -49,6 +49,22 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+= 3.0.7 =
+* Fix problem whit amount -1
+* Fix problem whit reference oxxo pay
+
+= 3.0.6 =
+* Fix problem with amount -1
+
+= 3.0.5 =
+* Updated images for Conekta Payments
+
+= 3.0.4 =
+* Fix for error token already used
+
+= 3.0.3 =
+* Update PHP Lib compatible with PHP 7+
+
 = 3.0.2 =
 * Fix: Order info in email templates
 * Feature: Custom instructions and description for Oxxo and Spei payment
