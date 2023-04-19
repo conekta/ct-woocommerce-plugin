@@ -25,7 +25,7 @@ Current version features:
 
 Custom Instructions example
 
-You can add below text in custom instructions field
+You can add below text in custom field instructions
 
     <li>Acude a la tienda OXXO más cercana.</li>
     <li>Inidica en caja que quieres realizar un pago de <b>OXXOPay</b>.</li>
@@ -60,6 +60,10 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+
+= 3.0.3 =
+* Fix: Fix Compatibility with php 7.0.2
+
 = 3.0.2 =
 * Fix: Order info in email templates
 * Feature: Custom instructions and description for Oxxo and Spei payment
