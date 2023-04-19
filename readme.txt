@@ -2,8 +2,8 @@
 Contributors: cristinarandall, eduardoconekta, jovalo
 Tags: free, oxxo, conekta, mexico, payment gateway
 Requires at least: 4.2.0
-Tested up to: 5.4.1
-Stable tag: 3.0.7
+Tested up to: 5.5.3
+Stable tag: 3.0.8
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -49,6 +49,9 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+= 3.0.8 =
+* Fix problem whit amount in discount_lines
+
 = 3.0.7 =
 * Fix problem whit amount -1
 * Fix problem whit reference oxxo pay
