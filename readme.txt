@@ -3,7 +3,7 @@ Contributors: cristinarandall, eduardoconekta, jovalo
 Tags:  credit card, oxxo, conekta, mexico, payment, spei
 Requires at least: 3.5.2
 Tested up to: 4.8.1
-Stable tag: 3.0.3
+Stable tag: 3.0.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -60,6 +60,9 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+
+= 3.0.4 =
+* Fix: Fix Token already used
 
 = 3.0.3 =
 * Fix: Fix Compatibility with php 7.0.2
