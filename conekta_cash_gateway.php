@@ -110,7 +110,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'type'        => 'text',
                 'title'       => __('Title', 'woothemes'),
                 'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-                'default'     => __('Oxxo Pay Payment', 'woothemes')
+                'default'     => __('Conekta PAgo en Efectivo en Oxxo Pay', 'woothemes')
             ),
             'test_api_key' => array(
                 'type'        => 'password',
@@ -158,6 +158,15 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     // this echo's may were safe of validation, because there are proveided by os
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
+
+        /*
+        session_start();
+        $intans = $_SESSION['intans'];
+        $instan = $_SESSION['instan'];
+
+        echo '<p"><strong>'.('instances').':</strong> ' . $intans . '</p>';
+        echo '<p"><strong>'.('instance').':</strong> ' . $instan . '</p>';
+        */
 
         echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . get_post_meta( esc_html($order->get_id()), 'conekta-referencia', true ). '</p>';
         echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
@@ -363,6 +372,7 @@ function ckpg_conekta_cash_order_status_completed($order_id = null)
     }
 
     $data = get_post_meta( $order_id );
+
     $total = $data['_order_total'][0] * 100;
 
     $amount = floatval($_POST['amount']);
