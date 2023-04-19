@@ -1,3 +1,7 @@
+## [3.0.7]() - 2020-05-30
+- Fix problem whit amount -1
+- Fix problem whit reference oxxo pay
+
 ## [3.0.6]() - 2020-01-10
 - Fix problem with amount -1
 
