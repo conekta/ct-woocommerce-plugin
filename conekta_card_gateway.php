@@ -112,7 +112,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
             'type'        => 'text',
             'title'       => __('Title', 'woothemes'),
             'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-            'default'     => __('Credit Card Payment', 'woothemes')
+            'default'     => __('Pago con Tarjeta de Crédito o Débito', 'woothemes')
             ),
          'test_api_key' => array(
              'type'        => 'password',
