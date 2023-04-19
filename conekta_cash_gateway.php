@@ -219,7 +219,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         \Conekta\Conekta::setLocale('es');
 
         $data             = ckpg_get_request_data($this->order);
-        $amount           = $data['amount'];
+        $amount           = (int) $data['amount'];
         $items            = $this->order->get_items();
         $taxes            = $this->order->get_taxes();
         $line_items       = ckpg_build_line_items($items, parent::ckpg_get_version());
