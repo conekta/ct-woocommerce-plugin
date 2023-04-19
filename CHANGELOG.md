@@ -1,9 +1,13 @@
+## [3.1.0]() - 2021-01-21
+- Fix problem
+
 ## [3.0.8]() - 2020-06-19
 - Fix problem whit amount in discount_lines
 
 ## [3.0.7]() - 2020-05-30
 - Fix problem whit amount -1
 - Fix problem whit reference oxxo pay
+- Fix amount in discount_lines
 
 ## [3.0.6]() - 2020-01-10
 - Fix problem with amount -1
@@ -12,7 +16,7 @@
 - Updated images for Conekta Payments
 
 ## [3.0.4](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.4) - 2018-04-11
-## Fix 
+## Fix
 - Fix for error token already used
 
 ## [3.0.3](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.3) - 2018-01-10
@@ -41,7 +45,7 @@ If you have WooCommerce 2.x, you can view this branch with latest stable version
 ## [2.0.14](https://github.com/conekta/conekta-woocommerce/releases/tag/v2.0.14) - 2017-08-03
 ### Fix
 - HotFix include email in order
-- Error typo OXOO 
+- Error typo OXOO
 
 ### Changed
 - Bundle CA Root Certificates
@@ -107,7 +111,7 @@ If you have WooCommerce 2.x, you can view this branch with latest stable version
 - Webhooks for cash and spei payment are working now
 
 ## [2.0.0](https://github.com/conekta/conekta-woocommerce/releases/tag/v.2.0.0) - 2017-02-23
-### Fix 
+### Fix
 - Fix shipping tax calculation
 ### Feature
 - Add Oxxo Pay
@@ -166,7 +170,7 @@ If you have WooCommerce 2.x, you can view this branch with latest stable version
 ### Feature
 - Offline payments
 - Barcode sent in mail and displayed in order the confirmation page
-- Order Status changed dynamically once webhook is added in Conekta.io Account 
+- Order Status changed dynamically once webhook is added in Conekta.io Account
 
 ## [0.1.0]() - 2014-08-16
 ### Update
