@@ -282,12 +282,12 @@ function ckpg_get_request_data($order)
             'customer_info'        => $customer_info,
             'shipping_lines'       => $shipping_lines
         );
-
-        if (!empty($order->get_shipping_address_1())) {
+        $address_1 = $order->get_shipping_address_1();
+        if (!empty($address1)) {
             $data = array_merge($data, array('shipping_contact' => $shipping_contact));
         }
-
-        if (!empty($order->get_customer_note())) {
+        $customer_note = $order->get_customer_note();
+        if (!empty($customer_note)) {
             $data = array_merge($data, array('customer_message' => $order->get_customer_note()));
         }
 
