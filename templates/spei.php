@@ -9,4 +9,4 @@
 
 
 <span class='payment-errors required'></span>
-<?php  _e($this->lang_options['spei']); ?>
+<?php echo $this->settings['description']; ?>
