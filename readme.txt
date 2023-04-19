@@ -1,9 +1,9 @@
 === Conekta Payment Gateway ===
 Contributors: cristinarandall, eduardoconekta, jovalo
-Tags:  credit card, oxxo, conekta, mexico, payment, spei
-Requires at least: 3.5.2
-Tested up to: 4.8.1
-Stable tag: 3.0.4
+Tags: free, oxxo, conekta, mexico, payment gateway
+Requires at least: 3.6.5
+Tested up to: 5.2.3
+Stable tag: 3.0.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -21,17 +21,6 @@ Current version features:
 * Sandbox testing capability.
 * Automatic order status management
 * Email notifications on successful purchase
-* Custom Instructions and description
-
-Custom Instructions example
-
-You can add below text in custom field instructions
-
-    <li>Acude a la tienda OXXO más cercana.</li>
-    <li>Inidica en caja que quieres realizar un pago de <b>OXXOPay</b>.</li>
-    <li>Dicta al cajero el número de referencia en esta ficha para que la tecleé directamente en la pantalla de venta.</li>
-    <li>Realiza el pago correspondiente con dinero en efectivo.</li>
-    <li>Al confirmar tu pago, el cajero te entregará un comprobante impreso. <b>En él podrás verificar que se haya realizado correctamente</b>. Conserva este comprobante de pago.</li>
 
 == Installation ==
 Please note, v. 3.0.1 requires WooCommerce 3.x.
@@ -60,13 +49,6 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
-
-= 3.0.4 =
-* Fix: Fix Token already used
-
-= 3.0.3 =
-* Fix: Fix Compatibility with php 7.0.2
-
 = 3.0.2 =
 * Fix: Order info in email templates
 * Feature: Custom instructions and description for Oxxo and Spei payment
