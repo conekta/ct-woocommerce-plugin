@@ -1,3 +1,6 @@
+## [3.0.8]() - 2020-06-19
+- Fix problem whit amount in discount_lines
+
 ## [3.0.7]() - 2020-05-30
 - Fix problem whit amount -1
 - Fix problem whit reference oxxo pay

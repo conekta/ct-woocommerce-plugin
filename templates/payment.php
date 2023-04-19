@@ -9,7 +9,7 @@
 <span style="width: 100%; float: left; color: red;" class='payment-errors required'></span>
 <div class="form-row form-row-wide">
   <label for="conekta-card-number"><?php echo esc_html($this->lang_options["card_number"]); ?><span class="required">*</span></label>
-  <input id="conekta-card-number" class="input-text" type="text" data-conekta="card[number]" />
+  <input id="conekta-card-number" class="input-text" type="text" data-conekta="card[number]" maxlength=16 onKeypress="if (event.keyCode < 48 || event.keyCode > 57) event.returnValue = false;" />
 </div>
 
 <div class="form-row form-row-wide">
