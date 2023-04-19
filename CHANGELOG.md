@@ -1,8 +1,8 @@
-## [3.0.3](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.3) - 2017-11-30
+## [3.0.3](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.2) - 2017-11-30
 ## Feature
 - Adding support to PHP 7.0
 
-## [3.0.2](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.3) - 2017-11-30
+## [3.0.2](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.2) - 2017-11-30
 ## Feature
 - Custom instructions and description for Oxxo and Spei payment
 

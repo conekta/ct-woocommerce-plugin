@@ -2,14 +2,9 @@
 
 namespace Conekta;
 
-class ErrorTest extends BaseTest
+class ErrorHandlerTest extends BaseTest
 {   
-  function unsetApiKey()
-  {
-    if (isset($env) == false) {
-      $env = Conekta::setApiKey('');
-    }
-  }
+
   public static $validOrder = array(
     'line_items' => array(
       array(
@@ -33,10 +28,17 @@ class ErrorTest extends BaseTest
       'email' => 'hola@hola.com'
       )
     );
-  public static $invalidCustomer =
-  array('email' => 'hola@hola.com',
+  public static $invalidCustomer = array(
+    'email' => 'hola@hola.com',
     'cards' => array('tok_test_visa_4241')
     );
+
+  function unsetApiKey()
+  {
+    if (isset($env) == false) {
+      $env = Conekta::setApiKey('');
+    }
+  }
 
   public function testNoIdError()
   {
@@ -82,9 +84,9 @@ class ErrorTest extends BaseTest
   public function testAuthenticationError()
   {
     $this->unsetApiKey();
-    try {
+    try{
       $customer = Customer::create();
-    } catch (\Exception $e){
+    }catch(\Exception $e){
       $this->assertTrue(strpos(get_class($e), 'AuthenticationError') == true);
     }
     $this->setApiKey();
@@ -92,18 +94,19 @@ class ErrorTest extends BaseTest
   public function testUnknowApiRequest()
   {
     $this->setApiKey();
-    $validVisaCard =array(
+    $valid_visa_card =array(
       'payment_method' => array(
         'type' => 'card',
         'token_id' => 'tok_test_insufficient_funds')
       );
 
-    try {
+    try{
       $orderParams = array_merge(self::$validOrder, self::$otherParams);
       $order  = Order::create($orderParams);
-      $charge = $order->createCharge($validVisaCard);
-    } catch (\Exception $e){
-      $this->assertTrue(strpos(get_class($e), 'ResourceNotFoundError') == true);
+      $charge = $order->createCharge($valid_visa_card);
+    }catch(\Exception $e){
+      $this->assertTrue(strpos(get_class($e), 'ProcessingError') == true);
     }
   }
+
 }
