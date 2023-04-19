@@ -110,7 +110,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'type'        => 'text',
                 'title'       => __('Title', 'woothemes'),
                 'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-                'default'     => __('Oxxo Pay Payment', 'woothemes')
+                'default'     => __('Conekta PAgo en Efectivo en Oxxo Pay', 'woothemes')
             ),
             'test_api_key' => array(
                 'type'        => 'password',
@@ -159,10 +159,9 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
 
-        echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . get_post_meta( esc_html($order->get_id()), 'conekta-referencia', true ). '</p>';
+        echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . esc_html( get_post_meta( $order->get_id(), 'conekta-referencia', true ) ). '</p>';
         echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
-        echo '<p>INSTRUCCIONES:'. $this->settings['instructions'] .'</p>';
-
+        echo '<p>INSTRUCCIONES:'. esc_html($this->settings['instructions']) .'</p>';
     }
 
     /**
@@ -175,9 +174,9 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     function ckpg_email_reference($order) {
         if (get_post_meta( $order->get_id(), 'conekta-referencia', true ) != null)
             {
-                echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . get_post_meta( $order->get_id(), 'conekta-referencia', true ). '</p>';
+                echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . esc_html(get_post_meta( $order->get_id(), 'conekta-referencia', true )). '</p>';
                 echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES:'. $this->settings['instructions'] .'</p>';
+                echo '<p>INSTRUCCIONES:'. esc_html($this->settings['instructions']) .'</p>';
             }
     }
 
@@ -193,7 +192,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         if (get_post_meta( $order->get_id(), '_payment_method', true ) === $this->id){
             $instructions = $this->form_fields['instructions'];
             if ( $instructions && 'on-hold' === $order->get_status() ) {
-                echo wpautop( wptexturize( $instructions['default'] ) ) . PHP_EOL;
+                echo wpautop( wptexturize( esc_html($instructions['default'] ) ) ). PHP_EOL;
             }
         }
     }
@@ -249,7 +248,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $order_details = ckpg_check_balance($order_details, $amount);
 
         try {
-            $conekta_order_id = get_post_meta($this->order->get_id(), 'conekta-order-id', true);
+            $conekta_order_id = esc_html(get_post_meta($this->order->get_id(), 'conekta-order-id', true));
             if (!empty($conekta_order_id)) {
                 $order = \Conekta\Order::find($conekta_order_id);
                 $order->update($order_details);
@@ -363,6 +362,7 @@ function ckpg_conekta_cash_order_status_completed($order_id = null)
     }
 
     $data = get_post_meta( $order_id );
+
     $total = $data['_order_total'][0] * 100;
 
     $amount = floatval($_POST['amount']);
