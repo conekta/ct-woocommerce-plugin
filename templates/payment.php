@@ -9,7 +9,7 @@
 <span style="width: 100%; float: left; color: red;" class='payment-errors required'></span>
 <div class="form-row form-row-wide">
   <label for="conekta-card-number"><?php echo esc_html($this->lang_options["card_number"]); ?><span class="required">*</span></label>
-  <input id="conekta-card-number" class="input-text" type="text" data-conekta="card[number]" />
+  <input id="conekta-card-number" class="input-text" type="text" data-conekta="card[number]" maxlength=16 onKeypress="if (event.keyCode < 48 || event.keyCode > 57) event.returnValue = false;" />
 </div>
 
 <div class="form-row form-row-wide">
@@ -24,7 +24,7 @@
     <select id="card_expiration" data-conekta="card[exp_month]" class="month" autocomplete="off">
              <option selected="selected" value=""><?php echo esc_html($this->lang_options["month"]) ?></option>
              <?php foreach($this->lang_options["card_expiration"] as $month => $description): ?>
-              <option value="<?php echo esc_html($month); ?>"><?php echo esc_html($description); ?></option>
+              <option value="<?php echo esc_attr($month); ?>"><?php echo esc_html($description); ?></option>
              <?php endforeach; ?>
     </select>
 </p>
@@ -33,10 +33,10 @@
     <select id="card_expiration_yr" data-conekta="card[exp_year]" class="year" autocomplete="off">
               <option selected="selected" value=""> <?php echo esc_html($this->lang_options["year"]) ?></option>
               <?php
-              $start_year = (integer) date("Y");
-              $end_year = (integer) date("Y", strtotime("+10 years"));
+              $start_year = (integer) gmdate("Y");
+              $end_year = (integer) gmdate("Y", strtotime("+10 years"));
               for($i = $start_year; $i <= $end_year; $i++): ?>
-                <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
+                <option value="<?php echo esc_attr($i); ?>"><?php echo esc_html($i); ?></option>
               <?php endfor; ?>
     </select>
 </p>
@@ -59,7 +59,7 @@
   <select id="monthly_installments" name="monthly_installments" autocomplete="off">
     <option selected="selected" value="1"><?php echo esc_html($this->lang_options["single_payment"]) ?></option>
     <?php foreach($this->lang_options["monthly_installments"] AS $months => $description): ?>
-      <option value="<?php echo esc_html($months); ?>"><?php echo esc_html($description); ?></option>
+      <option value="<?php echo esc_attr($months); ?>"><?php echo esc_html($description); ?></option>
     <?php endforeach; ?>
   </select>
 </p>

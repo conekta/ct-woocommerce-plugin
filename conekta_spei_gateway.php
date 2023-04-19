@@ -109,7 +109,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
                 'type'        => 'text',
                 'title'       => __('Title', 'woothemes'),
                 'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-                'default'     => __('Spei Payment', 'woothemes')
+                'default'     => __('Pago con SPEI', 'woothemes')
             ),
             'account_owner' => array(
                  'type'        => 'Account owner',
@@ -155,8 +155,8 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
      */
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
-        echo '<p><h4><strong>'.__('Clabe').':</strong> ' . get_post_meta( esc_html($order->get_id()), 'conekta-clabe', true ). '</h4></p>';
-        echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.$this->account_owner.'</h4></p>';
+        echo '<p><h4><strong>'.__('Clabe').':</strong> ' . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
+        echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->account_owner).'</h4></p>';
         echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
     }
 
@@ -171,8 +171,8 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
         if (get_post_meta( $order->get_id(), 'conekta-clabe', true ) != null)
             {
                 echo '<p><h4><strong>'.esc_html(__('Clabe')).':</strong> '
-                . get_post_meta( esc_html($order->get_id()), 'conekta-clabe', true ). '</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.$this->account_owner.'</h4></p>';
+                . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
+                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->account_owner).'</h4></p>';
                 echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
             }
     }
@@ -188,7 +188,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         $instructions = $this->form_fields['instructions'];
         if ( $instructions && 'on-hold' === $order->get_status() ) {
-            echo wpautop( wptexturize( $this->settings['instructions'] ) ) . PHP_EOL;
+            echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
         }
     }
 

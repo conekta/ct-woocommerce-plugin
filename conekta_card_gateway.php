@@ -81,7 +81,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
                 .' but the <a href="%s">force SSL option</a> is disabled; your checkout'
                 .' is not secure! Please enable SSL and ensure your server has a valid SSL'
                 .' certificate.', 'woothemes'),
-                $this->GATEWAY_NAME, admin_url('admin.php?page=settings')
+                    esc_html($this->GATEWAY_NAME), esc_url(admin_url('admin.php?page=settings'))
               )
             .'</p></div>';
         }
@@ -112,7 +112,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
             'type'        => 'text',
             'title'       => __('Title', 'woothemes'),
             'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-            'default'     => __('Credit Card Payment', 'woothemes')
+            'default'     => __('Pago con Tarjeta de Crédito o Débito', 'woothemes')
             ),
          'test_api_key' => array(
              'type'        => 'password',
@@ -157,7 +157,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
             return;
         }
 
-        wp_enqueue_script('conekta_js', 'https://conektaapi.s3.amazonaws.com/v0.3.2/js/conekta.js', '', '', true);
+        wp_enqueue_script('conekta_js', WP_PLUGIN_URL."/".plugin_basename(dirname(__FILE__)).'/assets/js/conekta.js', '', '', true);
         wp_enqueue_script('tokenize', WP_PLUGIN_URL."/".plugin_basename(dirname(__FILE__)).'/assets/js/tokenize.js', '', '1.0', true); //check import convention
 
         //PCI
@@ -213,7 +213,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
         $order_details = ckpg_check_balance($order_details, $amount);
 
         try {
-            $conekta_order_id = get_post_meta($this->order->get_id(), 'conekta-order-id', true);
+            $conekta_order_id = esc_html(get_post_meta($this->order->get_id(), 'conekta-order-id', true));
             if (!empty($conekta_order_id)) {
                 $order = \Conekta\Order::find($conekta_order_id);
                 $order->update($order_details);
@@ -251,7 +251,9 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
             if (version_compare($wp_version, '4.1', '>=')) {
                 wc_add_notice(__('Error: ', 'woothemes') . $description , $notice_type = 'error');
             } else {
-                error_log('Gateway Error:' . $description . "\n");
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG === true ) {
+                    error_log('Gateway Error:' . $description . "\n");
+                }
                 $woocommerce->add_error(__('Error: ', 'woothemes') . $description);
             }
             return false;
