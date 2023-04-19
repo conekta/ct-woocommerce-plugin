@@ -1,9 +1,9 @@
 === Conekta Payment Gateway ===
 Contributors: cristinarandall, eduardoconekta, jovalo
 Tags: free, oxxo, conekta, mexico, payment gateway
-Requires at least: 4.2.0
-Tested up to: 5.5.3
-Stable tag: 3.1.0
+Requires at least: 3.5.2
+Tested up to: 4.8.1
+Stable tag: 3.0.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -23,9 +23,9 @@ Current version features:
 * Email notifications on successful purchase
 
 == Installation ==
-Please note, v. 3.0.8 requires WooCommerce 3.x.
+Please note, v. 3.0.1 requires WooCommerce 3.x.
 You can download an older version [here.](https://wordpress.org/plugins/conekta-payment-gateway/advanced/)
-Make sure that you have at least PHP Version 7.4 since the Conekta PHP library requires this version.
+Make sure that you have at least PHP Version 5.6 since the Conekta PHP library requires this version.
 
 ###Automatic
 Log in to your  Wordpress Dashboard, navigate to the plugins menu and click Add New, in the search field type “Conekta Payment Gateway” and click Search Plugins. Once you’ve found our plugin you can view details about it, you can install it by simply clicking “Install Now”.
@@ -49,27 +49,6 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
-
-= 3.1.0 =
-* a
-= 3.0.8 =
-* Fix problem with amount -1
-
-= 3.0.7 =
-* Fix problem whit amount -1
-* Fix problem whit reference oxxo pay
-* Fix amount in discount_lines
-
-
-= 3.0.5 =
-* Updated images for Conekta Payments
-
-= 3.0.4 =
-* Fix for error token already used
-
-= 3.0.3 =
-* Update PHP Lib compatible with PHP 7+
-
 = 3.0.2 =
 * Fix: Order info in email templates
 * Feature: Custom instructions and description for Oxxo and Spei payment
