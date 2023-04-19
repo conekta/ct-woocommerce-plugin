@@ -109,7 +109,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
                 'type'        => 'text',
                 'title'       => __('Title', 'woothemes'),
                 'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-                'default'     => __('Spei Payment', 'woothemes')
+                'default'     => __('Pago con SPEI', 'woothemes')
             ),
             'account_owner' => array(
                  'type'        => 'Account owner',

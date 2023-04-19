@@ -1,3 +1,9 @@
+## [3.0.6]() - 2020-01-10
+- Fix problem with amount -1
+
+## [3.0.5]() - 2019-08-10
+- Updated images for Conekta Payments
+
 ## [3.0.4](https://github.com/conekta/conekta-woocommerce/releases/tag/v3.0.4) - 2018-04-11
 ## Fix 
 - Fix for error token already used
