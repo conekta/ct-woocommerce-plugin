@@ -4,7 +4,7 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-woocommerce/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments in OXXO and monthly installments for Mexican credit cards.
-Version: 2.0.13
+Version: 3.0.0
 Author: Conekta.io
 Author URI: https://www.conekta.io
 License: GNU General Public License v3.0
@@ -25,8 +25,8 @@ function ckpg_conekta_checkout_init_your_gateway()
             if (array_key_exists("payment_method", $_POST)) {
                 include_once('conekta_gateway_helper.php');
                 include_once('conekta_plugin.php');
-                $paymentMethod = sanitize_text_field( (string)$_POST["payment_method"]);
-                switch ($paymentMethod) {
+                $payment_method = sanitize_text_field( (string)$_POST["payment_method"]);
+                switch ($payment_method) {
                     case 'conektacard': default:
                         include_once('conekta_card_gateway.php');
                     break;
