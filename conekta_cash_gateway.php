@@ -161,7 +161,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
         echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . get_post_meta( esc_html($order->get_id()), 'conekta-referencia', true ). '</p>';
         echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES:<ol><li>Acude a la tienda OXXO más cercana.</li><li>Inidica en caja que quieres realizar un pago de <b>OXXOPay</b>.</li><li>Dicta al cajero el número de referencia en esta ficha para que la tecleé directamente en la pantalla de venta.</li><li>Realiza el pago correspondiente con dinero en efectivo.</li><li>Al confirmar tu pago, el cajero te entregará un comprobante impreso. <b>En él podrás verificar que se haya realizado correctamente</b>. Conserva este comprobante de pago.</li></ol>';
+        echo '<p>INSTRUCCIONES:'. $this->settings['instructions'] .'</p>';
 
     }
 
@@ -177,7 +177,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             {
                 echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . get_post_meta( $order->get_id(), 'conekta-referencia', true ). '</p>';
                 echo '<p>OXXO cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES:<ol><li>Acude a la tienda OXXO más cercana.</li><li>Inidica en caja que quieres realizar un pago de <b>OXXOPay</b>.</li><li>Dicta al cajero el número de referencia en esta ficha para que la tecleé directamente en la pantalla de venta.</li><li>Realiza el pago correspondiente con dinero en efectivo.</li><li>Al confirmar tu pago, el cajero te entregará un comprobante impreso. <b>En él podrás verificar que se haya realizado correctamente</b>. Conserva este comprobante de pago.</li></ol>';
+                echo '<p>INSTRUCCIONES:'. $this->settings['instructions'] .'</p>';
             }
     }
 
@@ -307,6 +307,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                     'result' => 'success',
                     'redirect' => $this->get_return_url($this->order)
                 );
+
                 return $result;
             }
         else
