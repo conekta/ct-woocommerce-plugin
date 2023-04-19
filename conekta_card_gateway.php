@@ -307,6 +307,7 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
         else
         {
             $this->ckpg_mark_as_failed_payment();
+            WC()->session->reload_checkout = true;
         }
     }
 
