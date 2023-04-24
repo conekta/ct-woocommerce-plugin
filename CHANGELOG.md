@@ -1,3 +1,6 @@
+## [3.7.2]() - 2023-04-24
+- Update versions
+
 ## [3.7.1]() - 2023-04-18
 - Update conekta-php library
 
