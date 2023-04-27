@@ -1,3 +1,6 @@
+## [3.7.3]() - 2023-04-27
+- Fix error when create charge in php 7.4
+
 ## [3.7.2]() - 2023-04-24
 - Update versions
 
