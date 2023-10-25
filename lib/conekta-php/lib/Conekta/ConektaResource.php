@@ -179,7 +179,7 @@ abstract class ConektaResource extends ConektaObject
 
         $this->loadFromArray();
       }
-      $instances = $this->$member;
+      $instances = (array) $this->$member;
       $instance = $instances[count($instances) - 1];
     } else {
       $class = '\\Conekta\\' . ucfirst($member);
