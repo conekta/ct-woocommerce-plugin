@@ -2,9 +2,9 @@
 Contributors: gretelg
 Tags: free, oxxo, conekta, mexico, payment gateway
 Requires at least: 5.5
-Tested up to: 5.9
+Tested up to: 6.2
 Requires PHP: 7.4 or greater
-Stable tag: 3.7.1
+Stable tag: 3.7.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -24,7 +24,7 @@ Current version features:
 * Email notifications on successful purchase
 
 == Installation ==
-Please note, v. 3.7.1 requires WooCommerce 3.x.
+Please note, v. 3.7.3 requires WooCommerce 3.x.
 You can download an older version [here.](https://wordpress.org/plugins/conekta-payment-gateway/advanced/)
 Make sure that you have at least PHP Version 5.6 since the Conekta PHP library requires this version.
 
@@ -50,6 +50,12 @@ Replace to tusitio.com with your domain name
 4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+= 3.7.3 =
+* Fix error when create charge in php 7.4
+
+= 3.7.2 =
+* Update versions
+
 = 3.7.1 =
 * Update conekta-php library
 
