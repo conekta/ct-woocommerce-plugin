@@ -1,3 +1,6 @@
+## [3.7.5]() - 2023-04-28
+- Remove tests on lib conekta
+
 ## [3.7.3]() - 2023-04-27
 - Fix error when create charge in php 7.4
 
