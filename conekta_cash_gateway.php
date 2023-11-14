@@ -103,7 +103,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         }
 
         // expired orders
-        if ($event['type'], "order.expired" === true || $event['type'], "order.canceled" === true
+        if ( ($event['type'], "order.expired" === true) || ($event['type'] "order.canceled" === true)
              && $charge['payment_method']['type'] !== "credit") {
             $order->update_status('cancelled', 'Order expired in Conekta.');
         }
