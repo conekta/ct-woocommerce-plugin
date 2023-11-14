@@ -92,7 +92,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $order         = new WC_Order($order_id);
 
         // paid orders
-        if ($event['type'], "order.paid") === true
+        if ($event['type'], "order.paid" === true
             && $charge['payment_method']['type'] !== "credit") {
                 $paid_at = date("Y-m-d", $charge['paid_at']);
                 update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
