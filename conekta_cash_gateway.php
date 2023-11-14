@@ -86,6 +86,14 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         header('HTTP/1.1 200 OK');
         $body          = @file_get_contents('php://input');
         $event         = json_decode($body, true);
+
+         // Respondiendo a eventos "ping"
+         if (isset($event['type']) && $event['type'] === 'webhook_ping') {
+            header('Content-Type: application/json');
+            echo json_encode(['message' => 'OK']);
+            exit; // Salir de la función después de manejar el evento ping
+        }
+
         $conekta_order = $event['data']['object'];
         $charge        = $conekta_order['charges']['data'][0];
         $order_id      = $conekta_order['metadata']['reference_id'];
@@ -93,7 +101,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
         // paid orders
         if ($event['type'] === "order.paid"
-            && $charge['payment_method']['type'] !== "credit") {
+            && $charge['payment_method']['type'] === "oxxo") {
                 $paid_at = date("Y-m-d", $charge['paid_at']);
                 update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
                 $order->payment_complete();
@@ -103,8 +111,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         }
 
         // expired orders
-        if ( ($event['type'] === "order.expired" ) || ($event['type'] ==="order.canceled")
-             && $charge['payment_method']['type'] !== "credit") {
+        if ( ($event['type'] === "order.expired"  || $event['type'] ==="order.canceled")
+             && $charge['payment_method']['type'] === "oxxo") {
             $order->update_status('cancelled', 'Order expired in Conekta.');
         }
     }

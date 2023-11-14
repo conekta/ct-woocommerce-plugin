@@ -82,21 +82,36 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
         header('HTTP/1.1 200 OK');
         $body          = @file_get_contents('php://input');
         $event         = json_decode($body, true);
+        
+         // Respondiendo a eventos "ping"
+        if (isset($event['type']) && $event['type'] === 'webhook_ping') {
+            header('Content-Type: application/json');
+            echo json_encode(['message' => 'OK']);
+            exit; // Salir de la función después de manejar el evento ping
+        }
+
         $conekta_order = $event['data']['object'];
         $charge        = $conekta_order['charges']['data'][0];
         $order_id      = $conekta_order['metadata']['reference_id'];
-        $paid_at       = date("Y-m-d", $charge['paid_at']);
         $order         = new WC_Order($order_id);
 
-        if (strpos($event['type'], "order.paid") !== false
+       
+        if ( $event['type']=== "order.paid" 
             && $charge['payment_method']['type'] === "spei")
-            {
-                update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
-                $order->payment_complete();
-                $order->add_order_note(sprintf("Payment completed in Spei and notification of payment received"));
+        {
+            $paid_at = date("Y-m-d", $charge['paid_at']);
+            update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
+            $order->payment_complete();
+            $order->add_order_note(sprintf("Payment completed in Spei and notification of payment received"));
 
-                parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
-            }
+            parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
+        }
+         // expired orders
+         if ( ($event['type'] === "order.expired"  || $event['type'] ==="order.canceled")
+            && $charge['payment_method']['type'] === "spei") 
+        {
+            $order->update_status('cancelled', 'Order expired in Conekta.');
+        }
     }
 
     public function ckpg_init_form_fields()
