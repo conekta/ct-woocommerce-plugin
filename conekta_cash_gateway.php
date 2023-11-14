@@ -89,18 +89,24 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $conekta_order = $event['data']['object'];
         $charge        = $conekta_order['charges']['data'][0];
         $order_id      = $conekta_order['metadata']['reference_id'];
-        $paid_at       = date("Y-m-d", $charge['paid_at']);
         $order         = new WC_Order($order_id);
 
-        if (strpos($event['type'], "order.paid") !== false
-            && $charge['payment_method']['type'] === "oxxo")
-            {
+        // paid orders
+        if ($event['type'], "order.paid") === true
+            && $charge['payment_method']['type'] !== "credit") {
+                $paid_at = date("Y-m-d", $charge['paid_at']);
                 update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
                 $order->payment_complete();
                 $order->add_order_note(sprintf("Payment completed in Oxxo and notification of payment received"));
 
                 parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
-            }
+        }
+
+        // expired orders
+        if ($event['type'], "order.expired" === true || $event['type'], "order.canceled" === true
+             && $charge['payment_method']['type'] !== "credit") {
+            $order->update_status('cancelled', 'Order expired in Conekta.');
+        }
     }
 
     public function ckpg_init_form_fields()
