@@ -92,7 +92,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $order         = new WC_Order($order_id);
 
         // paid orders
-        if ($event['type'], "order.paid" === true
+        if ($event['type'] === "order.paid"
             && $charge['payment_method']['type'] !== "credit") {
                 $paid_at = date("Y-m-d", $charge['paid_at']);
                 update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
@@ -103,7 +103,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         }
 
         // expired orders
-        if ( ($event['type'], "order.expired" === true) || ($event['type'] "order.canceled" === true)
+        if ( ($event['type'] === "order.expired" ) || ($event['type'] ==="order.canceled")
              && $charge['payment_method']['type'] !== "credit") {
             $order->update_status('cancelled', 'Order expired in Conekta.');
         }
