@@ -51,7 +51,8 @@ Replace to tusitio.com with your domain name
 
 == Changelog ==
 = 3.7.6 =
-* supports order.expired and order.cancelled for changing order status
+* supports events listening (order.expired and order.cancelled) for OXXO and SPEI
+*  update order status (cancelled and expired)
 
 = 3.7.5 =
 * Fix error when create charge in php 7.4
