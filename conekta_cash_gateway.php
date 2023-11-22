@@ -86,21 +86,35 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         header('HTTP/1.1 200 OK');
         $body          = @file_get_contents('php://input');
         $event         = json_decode($body, true);
+
+         // Respondiendo a eventos "ping"
+         if (isset($event['type']) && $event['type'] === 'webhook_ping') {
+            header('Content-Type: application/json');
+            echo json_encode(['message' => 'OK']);
+            exit; // Salir de la función después de manejar el evento ping
+        }
+
         $conekta_order = $event['data']['object'];
         $charge        = $conekta_order['charges']['data'][0];
         $order_id      = $conekta_order['metadata']['reference_id'];
-        $paid_at       = date("Y-m-d", $charge['paid_at']);
         $order         = new WC_Order($order_id);
 
-        if (strpos($event['type'], "order.paid") !== false
-            && $charge['payment_method']['type'] === "oxxo")
-            {
+        // paid orders
+        if ($event['type'] === "order.paid"
+            && $charge['payment_method']['type'] === "oxxo") {
+                $paid_at = date("Y-m-d", $charge['paid_at']);
                 update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
                 $order->payment_complete();
                 $order->add_order_note(sprintf("Payment completed in Oxxo and notification of payment received"));
 
                 parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
-            }
+        }
+
+        // expired orders
+        if ( ($event['type'] === "order.expired"  || $event['type'] ==="order.canceled")
+             && $charge['payment_method']['type'] === "oxxo") {
+            $order->update_status('cancelled', 'Order expired in Conekta.');
+        }
     }
 
     public function ckpg_init_form_fields()
@@ -122,7 +136,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'type'        => 'text',
                 'title'       => __('Title', 'woothemes'),
                 'description' => __('This controls the title which the user sees during checkout.', 'woothemes'),
-                'default'     => __('Conekta PAgo en Efectivo en Oxxo Pay', 'woothemes')
+                'default'     => __('Conekta Pago en Efectivo en Oxxo Pay', 'woothemes')
             ),
             'test_api_key' => array(
                 'type'        => 'password',
@@ -239,7 +253,11 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $shipping_contact = ckpg_build_shipping_contact($data);
         $tax_lines        = ckpg_build_tax_lines($taxes);
         $customer_info    = ckpg_build_customer_info($data);
-        $order_metadata   = ckpg_build_order_metadata($data);
+        $order_metadata   = ckpg_build_order_metadata($data + array(
+                                                                    'plugin_conekta_version' => $this->version,
+                                                                    'woocommerce_version'   => $woocommerce->version,
+                                                                )
+                                                    );
         $order_details    = array(
             'currency'         => $data['currency'],
             'line_items'       => $line_items,

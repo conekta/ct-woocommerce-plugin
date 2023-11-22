@@ -47,7 +47,10 @@ function ckpg_check_balance($order, $total) {
 function ckpg_build_order_metadata($data)
 {
     $metadata = array(
-        'reference_id' => $data['order_id']
+        'reference_id' => $data['order_id'],
+        'plugin_conekta_version' => $data['plugin_conekta_version'],
+        'plugin' => 'woocommerce',
+        'woocommerce_version' => $data['woocommerce_version'],
     );
 
     if (!empty($data['customer_message'])) {

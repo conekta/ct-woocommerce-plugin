@@ -206,7 +206,11 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
         $shipping_contact = ckpg_build_shipping_contact($data);
         $tax_lines        = ckpg_build_tax_lines($taxes);
         $customer_info    = ckpg_build_customer_info($data);
-        $order_metadata   = ckpg_build_order_metadata($data);
+        $order_metadata   = ckpg_build_order_metadata($data + array(
+                                                                    'plugin_conekta_version' => $this->version,
+                                                                    'woocommerce_version'   => $woocommerce->version,
+                                                                    )
+                                                    );
         $order_details    = array(
             'currency'         => $data['currency'],
             'line_items'       => $line_items,
