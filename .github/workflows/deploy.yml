@@ -1,0 +1,39 @@
+name: Deploy to WordPress.org
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  tag-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout código fuente
+      uses: actions/checkout@v2
+
+    - name: Despliegue en WordPress.org
+      env:
+        SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+        SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+      run: |
+        # Instalar SVN
+        sudo apt-get -y install subversion
+
+        # Checkout del repositorio SVN de WordPress.org
+        svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+
+        # Sincroniza los archivos
+        rsync -av --exclude=".git" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
+
+        # Cambia al directorio SVN
+        cd svn-dir
+
+        # Agrega nuevos archivos y elimina los eliminados
+        svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add x
+        svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete x
+
+        # Crea una copia en la carpeta tags
+        svn cp trunk tags/${{ github.ref_name }}
+
+        # Commit a SVN
+        svn commit -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
