@@ -1,3 +1,6 @@
+## [3.7.6]() - 2023-11-14
+- supports order.expired and order.cancelled for changing order status
+
 ## [3.7.5]() - 2023-04-28
 - Remove tests on lib conekta
 
