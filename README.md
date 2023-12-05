@@ -1,6 +1,6 @@
 <div align="center">
 
-# Conekta Woocommerce v.3.7.6
+# Conekta Woocommerce v.3.7.7
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
 [![By Conekta](https://img.shields.io/badge/by-conekta-red.svg?style=for-the-badge&colorA=ee6130&colorB=00a4ac)](https://conekta.com)
 </div>
@@ -102,10 +102,3 @@ Developed in Mexico by [Conekta](https://www.conekta.com) in. Available with [MI
    Make sure that, if you add new features to our library, be sure that corresponding **unit tests** are added.
 
    If you go to your repository on GitHub, you’ll see a Compare & pull request button. Click on that button.
-
-***
-
-## We are always hiring!
-
-If you are a comfortable working with a range of backend languages (Java, Python, Ruby, PHP, etc) and frameworks, you have solid foundation in data structures, algorithms and software design with strong analytical and debugging skills, check our open positions: https://www.conekta.com/careers
-
