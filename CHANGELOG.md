@@ -1,3 +1,6 @@
+## [3.7.7]() - 2023-12-05
+- fix shipping lines amount
+
 ## [3.7.6]() - 2023-11-14
 - supports order.expired and order.cancelled for changing order status
 
