@@ -6,7 +6,8 @@
  * Url     : https://www.conekta.io/es/docs/plugins/woocommerce
  */
 
-function ckpg_check_balance($order, $total) {
+function ckpg_check_balance($order, $total): array
+{
     $amount = 0;
 
     foreach ($order['line_items'] as $line_item) {
@@ -102,7 +103,7 @@ function ckpg_build_line_items($items, $version)
     return $line_items;
 }
 
-function ckpg_build_tax_lines($taxes)
+function ckpg_build_tax_lines($taxes): array
 {
     $tax_lines = array();
 
@@ -149,7 +150,7 @@ function ckpg_build_shipping_lines($data)
     return $shipping_lines;
 }
 
-function ckpg_build_discount_lines($data)
+function ckpg_build_discount_lines($data): array
 {
     $discount_lines = array();
     if (!empty($data['discount_lines'])) {
@@ -192,7 +193,6 @@ function ckpg_build_customer_info($data)
 
 /**
 * Bundle and format the order information
-* @param WC_Order $order
 * Send as much information about the order as possible to Conekta
 */
 function ckpg_get_request_data($order)
@@ -218,14 +218,14 @@ function ckpg_get_request_data($order)
         }
 
         //PARAMS VALIDATION
-        $amountShipping = amount_validation($order->get_total_shipping());
+        $amountShipping = amount_validation($order->get_shipping_total());
 
         // Shipping Lines
         $shipping_method = $order->get_shipping_method();
         if (!empty($shipping_method)) {
             $shipping_lines  = array(
                 array(
-                    'amount'  => (int) number_format($amountShipping),
+                    'amount'  => $amountShipping,
                     'carrier' => $shipping_method,
                     'method'  => $shipping_method
                 )
@@ -315,18 +315,14 @@ function ckpg_get_request_data($order)
     return false;
 }
 
-function amount_validation($amount='')
+function amount_validation(float $amount) : int
 {
-    if(intval($amount)){
-     $amount = (float) $amount * 100;
-    }
-
-    return $amount;
+    return  $amount * 100;
 }
 
 function item_name_validation($item='')
 {
-    if((string) $item == true){
+    if((string)$item){
       return sanitize_text_field($item);
     }
 
@@ -335,10 +331,6 @@ function item_name_validation($item='')
 
 function string_validation($string='')
 {
-    if((string) $string == true ){
-        return $string;
-    }
-
     return $string;
 }
 
