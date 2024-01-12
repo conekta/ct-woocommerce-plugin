@@ -28,6 +28,23 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 		return $this->version;
 	}
 
+    /**
+     * Plugin url.
+     *
+     * @return string
+     */
+    public static function plugin_url() {
+        return untrailingslashit( plugins_url( '/', __FILE__ ) );
+    }
+
+    /**
+     * Plugin url.
+     *
+     * @return string
+     */
+    public static function plugin_abspath() {
+        return trailingslashit( plugin_dir_path( __FILE__ ) );
+    }
 	public function ckpg_set_locale_options()
 	{
 		if (function_exists("get_locale") && get_locale() !== "") {

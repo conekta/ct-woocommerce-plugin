@@ -15,9 +15,6 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
     protected $order                     = null;
     protected $transaction_id            = null;
     protected $transaction_error_message = null;
-    protected $conekta_test_api_key      = '';
-    protected $conekta_live_api_key      = '';
-    protected $publishable_key           = '';
     public $id;
     public $method_title;
     public $has_fields;
@@ -38,8 +35,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
         $this->init_settings();
         $this->title           = $this->settings['title'];
         $this->description     = '';
-        $this->icon            = $this->settings['alternate_imageurl'] ?
-                                 $this->settings['alternate_imageurl']  :
+        $this->icon            = $this->settings['alternate_imageurl'] ?:
                                  WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__)) . '/images/spei.png';
         $this->use_sandbox_api = strcmp($this->settings['debug'], 'yes') == 0;
         $this->test_api_key    = $this->settings['test_api_key'  ];
@@ -102,7 +98,7 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
             $paid_at = date("Y-m-d", $charge['paid_at']);
             update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
             $order->payment_complete();
-            $order->add_order_note(sprintf("Payment completed in Spei and notification of payment received"));
+            $order->add_order_note("Payment completed in Spei and notification of payment received");
 
             parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
         }
@@ -398,3 +394,17 @@ function ckpg_conektacheckout_add_spei_gateway($methods)
 
 add_filter('woocommerce_payment_gateways',                      'ckpg_conektacheckout_add_spei_gateway');
 add_action('woocommerce_order_status_processing_to_completed',  'ckpg_conekta_spei_order_status_completed' );
+
+
+add_action( 'woocommerce_blocks_loaded',  'woocommerce_gateway_dummy_woocommerce_block_support' ) ;
+function woocommerce_gateway_dummy_woocommerce_block_support() {
+    if ( class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
+        require_once 'includes/blocks/class-wc-dummy-payments-blocks.php';
+        add_action(
+            'woocommerce_blocks_payment_method_type_registration',
+            function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
+                $payment_method_registry->register( new WC_Gateway_Dummy_Blocks_Support() );
+            }
+        );
+    }
+}

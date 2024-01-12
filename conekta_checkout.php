@@ -39,6 +39,7 @@ function ckpg_conekta_checkout_init_your_gateway()
                 }
             }
         } else {
+            include_once('includes/blocks/class-wc-dummy-payments-blocks.php');
             include_once('conekta_gateway_helper.php');
             include_once('conekta_plugin.php');
             include_once('conekta_card_gateway.php');
