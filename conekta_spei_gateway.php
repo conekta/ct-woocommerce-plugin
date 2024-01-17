@@ -67,7 +67,9 @@ class WC_Conekta_Spei_Gateway extends WC_Conekta_Plugin
             'woocommerce_api_' . strtolower(get_class($this)),
             array($this, 'ckpg_webhook_handler')
         );
+
     }
+
 
     /**
      * Updates the status of the order.
@@ -394,17 +396,3 @@ function ckpg_conektacheckout_add_spei_gateway($methods)
 
 add_filter('woocommerce_payment_gateways',                      'ckpg_conektacheckout_add_spei_gateway');
 add_action('woocommerce_order_status_processing_to_completed',  'ckpg_conekta_spei_order_status_completed' );
-
-
-add_action( 'woocommerce_blocks_loaded',  'woocommerce_gateway_dummy_woocommerce_block_support' ) ;
-function woocommerce_gateway_dummy_woocommerce_block_support() {
-    if ( class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
-        require_once 'includes/blocks/class-wc-dummy-payments-blocks.php';
-        add_action(
-            'woocommerce_blocks_payment_method_type_registration',
-            function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
-                $payment_method_registry->register( new WC_Gateway_Dummy_Blocks_Support() );
-            }
-        );
-    }
-}

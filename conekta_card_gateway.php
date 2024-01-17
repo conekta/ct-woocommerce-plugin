@@ -158,8 +158,6 @@ class WC_Conekta_Card_Gateway extends WC_Conekta_Plugin
            'title'       => __('Alternate Image to display on checkout, use fullly qualified url, served via https', 'woothemes'),
            'default'     => __('', 'woothemes')
            ),
-
-
          );
     }
 

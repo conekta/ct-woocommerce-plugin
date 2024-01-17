@@ -1,0 +1,17 @@
+{
+    "name": "conekta/conekta-payment-gateway",
+    "autoload": {
+        "psr-4": {
+            "Franklin\\ConektaPaymentGateway\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "conekta",
+            "email": "engineering@conekta.com"
+        }
+    ],
+    "require": {
+        "conekta/conekta-php": "dev-master"
+    }
+}

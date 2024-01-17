@@ -2,16 +2,16 @@
 use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType;
 
 /**
- * Dummy Payments Blocks integration
+ * Card Payments Blocks integration
  *
  * @since 1.0.3
  */
-final class WC_Gateway_Dummy_Blocks_Support extends AbstractPaymentMethodType {
+final class WC_Gateway_Card_Blocks_Support extends AbstractPaymentMethodType {
 
 	/**
 	 * The gateway instance.
 	 *
-	 * @var WC_Conekta_Spei_Gateway
+	 * @var WC_Conekta_Card_Gateway
 	 */
 	private $gateway;
 
@@ -20,13 +20,13 @@ final class WC_Gateway_Dummy_Blocks_Support extends AbstractPaymentMethodType {
 	 *
 	 * @var string
 	 */
-	protected $name = 'conektaspei';
+	protected $name = 'conekta';
 
 	/**
 	 * Initializes the payment method type.
 	 */
 	public function initialize() {
-		$this->settings = get_option( 'woocommerce_dummy_settings', [] );
+		$this->settings = get_option( 'woocommerce_card_settings', [] );
 		$gateways       = WC()->payment_gateways->payment_gateways();
 		$this->gateway  = $gateways[ $this->name ];
 	}
@@ -57,14 +57,14 @@ final class WC_Gateway_Dummy_Blocks_Support extends AbstractPaymentMethodType {
 		$script_url        = WC_Conekta_Plugin::plugin_url() . $script_path;
 
 		wp_register_script(
-			'wc-dummy-payments-blocks',
+			'wc-card-payments-blocks',
 			$script_url,
 			$script_asset[ 'dependencies' ],
 			$script_asset[ 'version' ],
 			true
 		);
 
-		return [ 'wc-dummy-payments-blocks' ];
+		return [ 'wc-card-payments-blocks' ];
 	}
 
 	/**

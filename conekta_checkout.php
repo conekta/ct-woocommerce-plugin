@@ -39,15 +39,24 @@ function ckpg_conekta_checkout_init_your_gateway()
                 }
             }
         } else {
-            include_once('includes/blocks/class-wc-dummy-payments-blocks.php');
             include_once('conekta_gateway_helper.php');
             include_once('conekta_plugin.php');
             include_once('conekta_card_gateway.php');
             include_once('conekta_cash_gateway.php');
             include_once('conekta_spei_gateway.php');
+            include_once('conekta_block_gateway.php');
         }
 
     }
 }
 
 add_action('plugins_loaded', 'ckpg_conekta_checkout_init_your_gateway', 0);
+
+add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ),   'plugin_action_links' );
+
+function plugin_action_links(  ) {
+    $plugin_links = [
+        '<a href="admin.php?page=wc-settings&tab=checkout&section=conekta">' . esc_html__( 'Settings', 'WC_Conekta_Gateway' ) . '</a>',
+    ];
+    return $plugin_links;
+}

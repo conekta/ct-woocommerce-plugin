@@ -161,7 +161,7 @@ function ckpg_build_discount_lines($data): array
                     array(
                         array(
                             'code' => (string) $discount['code'],
-                            'amount' => (string) $discount['amount'] * 100,
+                            'amount' => $discount['amount'] ,
                             'type'=> 'coupon'
                         )
                     )
@@ -358,5 +358,5 @@ function validate_total($total='')
         return (float) $total * 100;
     }
 
-    return total;
+    return $total;
 }

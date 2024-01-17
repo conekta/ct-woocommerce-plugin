@@ -2,42 +2,40 @@
 import { registerPaymentMethod } from '@woocommerce/blocks-registry';
 import { decodeEntities } from '@wordpress/html-entities';
 
-
-
-const label =  'Pago con SPEI';
+const labelCard =  'Pago con Conekta';
 /**
  * Content component
  */
-const Content = () => {
-	return decodeEntities(  'Por favor realiza el pago en el portal de tu banco utilizando los datos que te enviamos por correo.' );
+
+const ContentCard = () => {
+	return decodeEntities(  '' );
 };
-/**
- * Label component
- *
- * @param {*} props Props from payment API.
- */
-const Label = ( props ) => {
+
+
+const LabelCard = ( props ) => {
 	const { PaymentMethodLabel } = props.components;
-	return <PaymentMethodLabel text={ label } />;
+	return <PaymentMethodLabel text={ labelCard } />;
 };
-const SpeiIcon = () => (
+
+const CadIcon = () => (
 	<img src={`${window.location.origin}/images/spei.png`} alt="Pago con SPEI" />
 );
 
-/**
- * Dummy payment method config object.
- */
-const Dummy = {
-	name: "conektaspei",
-	label: <Label />,
-	content: <Content />,
-	edit: <Content />,
-	canMakePayment: () => true,
-	ariaLabel: label,
-	supports: {
 
-	},
-	icons: [<SpeiIcon />],
+/**
+ * card payment method config object.
+ */
+const Card = {
+	name: "conekta",
+	label: <LabelCard />,
+	content: <ContentCard />,
+	edit: <ContentCard />,
+	canMakePayment: () => true,
+	ariaLabel: labelCard,
+	supports: {},
+	icons: [<CadIcon />],
 };
 
-registerPaymentMethod( Dummy );
+
+
+registerPaymentMethod( Card );
