@@ -26,7 +26,7 @@ final class WC_Gateway_Card_Blocks_Support extends AbstractPaymentMethodType {
 	 * Initializes the payment method type.
 	 */
 	public function initialize() {
-		$this->settings = get_option( 'woocommerce_card_settings', [] );
+		$this->settings = get_option( 'woocommerce_conekta_settings', [] );
 		$gateways       = WC()->payment_gateways->payment_gateways();
 		$this->gateway  = $gateways[ $this->name ];
 	}
@@ -74,9 +74,10 @@ final class WC_Gateway_Card_Blocks_Support extends AbstractPaymentMethodType {
 	 */
 	public function get_payment_method_data() {
 		return [
-			'title'       => $this->get_setting( 'title' ),
-			'description' => $this->get_setting( 'description' ),
-			'supports'    => array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
+			'is_cash_enabled'       => filter_var($this->get_setting( 'is_cash_enabled' ),FILTER_VALIDATE_BOOLEAN),
+			'title'       				  => $this->get_setting( 'title' ),
+			'description' 				  => 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.',
+			'supports'    					=> array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
 		];
 	}
 }

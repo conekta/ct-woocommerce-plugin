@@ -15,11 +15,7 @@ use Conekta\Model\EventTypes;
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
     protected $GATEWAY_NAME              = "WC_Conekta_Gateway";
-    protected $is_sandbox                = true;
     protected $order                     = null;
-    protected $transaction_id            = null;
-    protected $conekta_order_id          = null;
-    protected $transaction_error_message = null;
     protected $currencies                = array('MXN', 'USD');
     private const TIME_ZONE              = 'America/Mexico_City';
 
@@ -28,6 +24,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $has_fields;
     public $icon;
     public $title;
+    public $description;
     public $api_key;
     protected static OrdersApi $apiInstance;
 
@@ -35,12 +32,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->id = 'conekta';
         $this->method_title = __('Conekta', 'Conekta');
         $this->has_fields = true;
-
+        $this->icon      =   WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__)) . '/images/credits.png';
         $this->ckpg_init_form_fields();
         $this->init_settings();
         $this->title       = $this->settings['title'];
-        $this->description = '';
-        $this->api_key              = $this->settings['api_key'];
+        $this->description = 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.';
+        $this->api_key     = $this->settings['api_key'];
      
         add_action( 'woocommerce_update_options_payment_gateways_'.$this->id,array($this, 'process_admin_options'));
         add_action( 'woocommerce_thankyou_' . $this->id, array( $this, 'ckpg_thankyou_page'));
@@ -139,11 +136,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
-
-    /**
+ 
+      /**
      * Output for the order received page.
      * @param string $order_id
-     * @throws \Conekta\ApiException
      */
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
@@ -263,27 +259,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
          );
     }
 
-    protected function ckpg_completeOrder()
-    {
-        global $woocommerce;
-
-        if ($this->order->get_status() == 'completed')
-            return;
-
-            // adjust stock levels and change order status
-        $this->order->payment_complete();
-        $woocommerce->cart->empty_cart();
-
-        $this->order->add_order_note(
-           sprintf(
-               "%s payment completed with Transaction Id of '%s'",
-               $this->GATEWAY_NAME,
-               $this->transaction_id
-               )
-           );
-
-        unset($_SESSION['order_awaiting_payment']);
-    }
     protected function get_allowed_payment_methods(){
         $allowed_payment_methods = array();
         if (strcmp($this->settings['is_cash_enabled'], 'yes') == 0) {
