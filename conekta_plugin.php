@@ -10,7 +10,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
 	public $version  = "4.0.0";
 	public $name = "WooCommerce 2";
-	public $description = "Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments in OXXO and monthly installments for Mexican credit cards.";
+	public $description = "Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
 	public $plugin_URI = "https://wordpress.org/plugins/conekta-woocommerce/";
 	public $author = "Conekta.io";

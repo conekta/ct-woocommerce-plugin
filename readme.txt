@@ -1,6 +1,6 @@
 === Conekta Payment Gateway ===
 Contributors: gretelg
-Tags: free, oxxo, conekta, mexico, payment gateway
+Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 5.5
 Tested up to: 6.2
 Requires PHP: 7.4 or greater
