@@ -2,16 +2,16 @@
 use Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType;
 
 /**
- * Card Payments Blocks integration
+ * conekta Payments Blocks integration
  *
  * @since 1.0.3
  */
-final class WC_Gateway_Card_Blocks_Support extends AbstractPaymentMethodType {
+final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType {
 
 	/**
 	 * The gateway instance.
 	 *
-	 * @var WC_Conekta_Card_Gateway
+	 * @var WC_Conekta_Gateway
 	 */
 	private $gateway;
 
@@ -57,14 +57,14 @@ final class WC_Gateway_Card_Blocks_Support extends AbstractPaymentMethodType {
 		$script_url        = WC_Conekta_Plugin::plugin_url() . $script_path;
 
 		wp_register_script(
-			'wc-card-payments-blocks',
+			'wc-conekta-payments-blocks',
 			$script_url,
 			$script_asset[ 'dependencies' ],
 			$script_asset[ 'version' ],
 			true
 		);
 
-		return [ 'wc-card-payments-blocks' ];
+		return [ 'wc-conekta-payments-blocks' ];
 	}
 
 	/**

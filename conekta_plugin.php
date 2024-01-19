@@ -1,9 +1,5 @@
 <?php
 
-if (!class_exists('Conekta')) {
-	require_once("lib/conekta-php/lib/Conekta.php");
-}
-
 /*
 * Title   : Conekta Payment extension for WooCommerce
 * Author  : Conekta.io
@@ -12,7 +8,7 @@ if (!class_exists('Conekta')) {
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "3.7.7";
+	public $version  = "3.8.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments in OXXO and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -20,8 +16,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	public $author = "Conekta.io";
 	public $author_URI = "https://www.conekta.io";
 
-	protected $lang;
-	protected $lang_messages;
+
 
 	public function ckpg_get_version()
 	{
@@ -45,25 +40,6 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     public static function plugin_abspath() {
         return trailingslashit( plugin_dir_path( __FILE__ ) );
     }
-	public function ckpg_set_locale_options()
-	{
-		if (function_exists("get_locale") && get_locale() !== "") {
-			$current_lang = explode("_", get_locale());
-			$this->lang = $current_lang[0];
-			$filename = "lang/" . $this->lang . ".php";
-			if (!file_exists(plugin_dir_path(__FILE__) . $filename))
-				$filename = "lang/en.php";
-			$this->lang_messages = require($filename);
-			\Conekta\Conekta::setLocale($this->lang);
-		}
-
-		return $this;
-	}
-
-	public function ckpg_get_lang_options()
-	{
-		return $this->lang_messages;
-	}
 
 	public function ckpg_offline_payment_notification($order_id, $customer)
 	{
@@ -102,4 +78,5 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 
 		return ob_get_clean();
 	}
+	
 }

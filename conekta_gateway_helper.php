@@ -197,8 +197,6 @@ function ckpg_build_customer_info($data)
 */
 function ckpg_get_request_data($order)
 {
-    $token = "";
-    $monthly_installments = "";
     if ($order AND $order != null)
     {
         // Discount Lines
@@ -243,24 +241,44 @@ function ckpg_get_request_data($order)
 
 
             $shipping_contact = array(
-            'phone'    => $order->get_billing_phone(),
-            'receiver' => sprintf('%s %s', $name, $last),
-            'address' => array(
-                'street1'     => $address1,
-                'street2'     => $address2,
-                'city'        => $city,
-                'state'       => $state,
-                'country'     => $country,
-                'postal_code' => $postal
-            ),
-        );
+                'phone'    => $order->get_billing_phone(),
+                'receiver' => sprintf('%s %s', $name, $last),
+                'address' => array(
+                    'street1'     => $address1,
+                    'street2'     => $address2,
+                    'city'        => $city,
+                    'state'       => $state,
+                    'country'     => $country,
+                    'postal_code' => $postal
+                ),
+            );
         } else {
+            $name      = string_validation($order->get_billing_first_name());
+            $last      = string_validation($order->get_billing_last_name());
+            $address1  = string_validation($order->get_billing_address_1());
+            $address2  = string_validation($order->get_billing_address_2());
+            $city      = string_validation($order->get_billing_city());
+            $state     = string_validation($order->get_billing_state());
+            $country   = string_validation($order->get_billing_country());
+            $postal    = post_code_validation($order->get_billing_postcode());
             $shipping_lines  = array(
                 array(
                     'amount'   => 0,
                     'carrier'  => 'carrier',
                     'method'   => 'pickup'
                 )
+            );
+            $shipping_contact = array(
+                'phone'    => $order->get_billing_phone(),
+                'receiver' => sprintf('%s %s', $name, $last),
+                'address' => array(
+                    'street1'     => $address1,
+                    'street2'     => $address2,
+                    'city'        => $city,
+                    'state'       => $state,
+                    'country'     => $country,
+                    'postal_code' => $postal
+                ),
             );
         }
 
@@ -274,14 +292,7 @@ function ckpg_get_request_data($order)
             'phone' => $phone,
             'email' => $order->get_billing_email()
         );
-        //PARAMS VALIDATION
-        if (!empty($_POST['conekta_token'])) {
-            $token = sanitize_text_field($_POST['conekta_token']);
-        }
-
-        if (!empty($_POST['monthly_installments'])) {
-            $monthly_installments = (int) $_POST['monthly_installments'];
-        }
+       
 
         $amount               = validate_total($order->get_total());
         $currency             = get_woocommerce_currency();
@@ -289,8 +300,6 @@ function ckpg_get_request_data($order)
         $data = array(
             'order_id'             => $order->get_id(),
             'amount'               => $amount,
-            'token'                => $token,
-            'monthly_installments' => $monthly_installments,
             'currency'             => $currency,
             'description'          => sprintf('Charge for %s', $order->get_billing_email()),
             'customer_info'        => $customer_info,

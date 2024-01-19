@@ -22,7 +22,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $id;
     public $method_title;
     public $has_fields;
-    public $icon;
     public $title;
     public $description;
     public $api_key;
@@ -32,7 +31,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->id = 'conekta';
         $this->method_title = __('Conekta', 'Conekta');
         $this->has_fields = true;
-        $this->icon      =   WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__)) . '/images/credits.png';
         $this->ckpg_init_form_fields();
         $this->init_settings();
         $this->title       = $this->settings['title'];
@@ -87,6 +85,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     }
     private function handleOrderExpiredOrCanceled($event) {
         $conekta_order = $event['data']['object'];
+        if (!$this->validate_reference_id($conekta_order)) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Invalid order id']);
+            exit;
+        }
         $order_id      = $conekta_order['metadata']['reference_id'];
         if (!$this->check_order_status($conekta_order['id'], array('expired', 'cancelled'))){
             http_response_code(400);
@@ -103,6 +107,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
     private function handleOrderPaid($event) {
         $conekta_order = $event['data']['object'];
+        if (!$this->validate_reference_id($conekta_order)) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Invalid order id']);
+            exit;
+        }
         $order_id      = $conekta_order['metadata']['reference_id'];
 
         if (!$this->check_order_status($conekta_order['id'], array('paid'))){
@@ -125,13 +135,16 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         echo json_encode(['message' => 'OK']);
         exit;
     }
+    private function validate_reference_id(array $conekta_order): bool {
+        return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
+    }
     private function handleWebhookPing() {
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK']);
         exit;
     }
 
-    private function check_order_status(string $conekta_order_id ,array $statuses){
+    private function check_order_status(string $conekta_order_id ,array $statuses): bool{
         $conekta_order_api = self::$apiInstance->getorderbyid($conekta_order_id);
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
@@ -181,7 +194,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             'type'        => 'text',
             'title'       => __('Título', 'woothemes'),
             'description' => __('', 'woothemes'),
-            'default'     => __('Pago con Conekta', 'woothemes'),
+            'default'     => __('Paga con Conekta', 'woothemes'),
             'required'    => true
             ),
          'api_key' => array(
@@ -193,7 +206,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         ),
          'order_expiration' => array(
             'type'        => 'number',
-            'title'       => __('Vencimiento de las órdenes de pago', 'woothemes'),
+            'title'       => __('Vencimiento de las órdenes de pago (Días)', 'woothemes'),
             'description' => __('La cantidad de dīas configuradas en esta opción, corresponde al tiempo en el que la orden estará activa para ser pagada por el cliente desde el momento de su creación.', 'woothemes'),
             'default'     => __(1),
             'custom_attributes' => array(
@@ -253,7 +266,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     {
         $order->add_order_note(
          sprintf(
-             "%s Credit Card Payment Failed",
+             "%s conekta Payment Failed",
              $this->GATEWAY_NAME,
              )
          );
@@ -307,7 +320,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'success_url'=> $redirect_url,
                 'failure_url'=> $redirect_url,
                 'monthly_installments_enabled' => filter_var($this->settings['is_msi_enabled'], FILTER_VALIDATE_BOOLEAN),
-                'monthly_installments_options' =>  array_map('intval', $this->settings['months']),
+                'monthly_installments_options' =>  array_map('intval', is_array($this->settings['months']) ? $this->settings['months'] : array()),
                 'name' =>  sprintf('Compra de %s',  $customer_info['name']),
                 'type' =>  'HostedPayment',
                 'redirection_time' => 10,
@@ -361,11 +374,11 @@ add_filter('woocommerce_payment_gateways', 'ckpg_conekta_add_gateway');
 add_action( 'woocommerce_blocks_loaded',  'woocommerce_gateway_conekta_woocommerce_block_support' ) ;
 function woocommerce_gateway_conekta_woocommerce_block_support() {
     if ( class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
-        require_once 'includes/blocks/class-wc-card-payments-blocks.php';
+        require_once 'includes/blocks/class-wc-conekta-payments-blocks.php';
         add_action(
             'woocommerce_blocks_payment_method_type_registration',
             function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
-                $payment_method_registry->register( new WC_Gateway_Card_Blocks_Support() );
+                $payment_method_registry->register( new WC_Gateway_Conekta_Blocks_Support() );
             }
         );
     }
