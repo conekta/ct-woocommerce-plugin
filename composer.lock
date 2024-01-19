@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1d92b0ddbf418b310992551a518d7902",
+    "content-hash": "1d1f7b2ed94eb1752cd1c9b674d8358d",
     "packages": [
         {
             "name": "conekta/conekta-php",
-            "version": "dev-master",
+            "version": "6.0.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/conekta/conekta-php.git",
-                "reference": "41822c90efe4b2c55e32237634e8b55bd7d615cc"
+                "reference": "8679777ff2a3c721014a980e0386e5674bf05f27"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/41822c90efe4b2c55e32237634e8b55bd7d615cc",
-                "reference": "41822c90efe4b2c55e32237634e8b55bd7d615cc",
+                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/8679777ff2a3c721014a980e0386e5674bf05f27",
+                "reference": "8679777ff2a3c721014a980e0386e5674bf05f27",
                 "shasum": ""
             },
             "require": {
@@ -33,7 +33,6 @@
                 "phpstan/phpstan": "1.10.56",
                 "phpunit/phpunit": "^8.0 || ^9.0"
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "psr-4": {
@@ -61,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/conekta/conekta-php/issues",
-                "source": "https://github.com/conekta/conekta-php/tree/master"
+                "source": "https://github.com/conekta/conekta-php/tree/v6.0.5"
             },
-            "time": "2024-01-17T15:55:27+00:00"
+            "time": "2024-01-19T17:03:03+00:00"
         },
         {
             "name": "guzzlehttp/guzzle",
@@ -665,9 +664,7 @@
     "packages-dev": [],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "conekta/conekta-php": 20
-    },
+    "stability-flags": [],
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": [],

@@ -2,7 +2,7 @@
     "name": "conekta/conekta-payment-gateway",
     "autoload": {
         "psr-4": {
-            "Franklin\\ConektaPaymentGateway\\": "src/"
+            "ConektaPaymentGateway\\": "src/"
         }
     },
     "authors": [
@@ -12,6 +12,6 @@
         }
     ],
     "require": {
-        "conekta/conekta-php": "dev-master"
+        "conekta/conekta-php": "6.0.5"
     }
 }
