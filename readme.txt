@@ -1,12 +1,13 @@
 === Conekta Payment Gateway ===
-Contributors: gretelg
+Contributors: conekta, fcarrero
 Tags: free, cash, conekta, mexico, payment gateway
-Requires at least: 5.5
-Tested up to: 6.2
-Requires PHP: 7.4 or greater
+Requires at least: 6.1
+Tested up to: 6.4.2
+Requires PHP: 7.4
 Stable tag: 4.0.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
+
 
 WooCommerce Payment Gateway for Conekta.io
 
