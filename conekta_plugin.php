@@ -3,7 +3,7 @@
 /*
 * Title   : Conekta Payment extension for WooCommerce
 * Author  : Conekta.io
-* Url     : https://wordpress.org/plugins/conekta-woocommerce
+* Url     : https://wordpress.org/plugins/conekta-payment-gateway/
 */
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway

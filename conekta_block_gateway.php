@@ -2,7 +2,7 @@
 /*
  * Title   : Conekta Payment extension for WooCommerce
  * Author  : Franklin Carrero
- * Url     : https://wordpress.org/plugins/conekta-woocommerce
+ * Url     : https://wordpress.org/plugins/conekta-payment-gateway/
 */
 
 
