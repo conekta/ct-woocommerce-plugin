@@ -11,7 +11,7 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
 WooCommerce Payment Gateway for Conekta.io
 
-This bundles functionality to process credit cards and cash (OXXO) payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
 
 == Description ==
 
@@ -27,32 +27,35 @@ Current version features:
 == Installation ==
 Please note, v. 4.0.0 requires WooCommerce 3.x.
 You can download an older version [here.](https://wordpress.org/plugins/conekta-payment-gateway/advanced/)
-Make sure that you have at least PHP Version 5.6 since the Conekta PHP library requires this version.
+Make sure that you have at least PHP Version 7.4 since the Conekta PHP library requires this version.
 
 ###Automatic
-Log in to your  Wordpress Dashboard, navigate to the plugins menu and click Add New, in the search field type “Conekta Payment Gateway” and click Search Plugins. Once you’ve found our plugin you can view details about it, you can install it by simply clicking “Install Now”.
-
-###Manual
-* Upload the plugin zip file in Plugins > Add New and then click "Install Now"
+* Log in to your  WordPress Dashboard, navigate to the plugins menu and click Add New, in the search field type “Conekta Payment Gateway” and click Search Plugins. Once you’ve found our plugin you can view details about it, you can install it by simply clicking “Install Now”.
 * Once installed, activate the plugin.
-* Add your API keys in Woocommerce > Settings > Checkout from your Conekta account (admin.conekta.io) in https://admin.conekta.io#developers.keys
+* Add your API keys in Woocommerce > Settings > Checkout from your Conekta account (https://panel.conekta.com/) in https://panel.conekta.com/developers/api-keys
 * To manage orders for offline payments so that the status changes dynamically, you will need to add the following url as a webhook in your Conekta account:
-http://tusitio.com/wc-api/WC_Conekta_Cash_Gateway
+http://tusitio.com/?wc-api=wc_conekta
 
 Replace to tusitio.com with your domain name
 
 == Screenshots ==
-1. In your Woocommerce admin in Settings > Checkout, you will need to add the API Keys from your Conekta.io account
+1. Integrate Conekta to your Online store and start accepting all the payment methods with a single integration. We are a payments company with more than 10 years within the Mexican market.
 `/assets/screenshot-1.png`
-2. Also, you will need o configure webhooks correctly in your conekta account adding http://tusitio.com/wc-api/WC_Conekta_Cash_Gateway so that the order status changes dynamically
-`/assets/screenshot-3.png`
-3. Once the user pays with the reference the order status in your Woocommerce admin will automatically change
+2. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
 `/assets/screenshot-2.png`
-4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
+3. With a single API key, integrate and accept all payment methods.
+`/assets/screenshot-3.png`
 
 == Changelog ==
+
+= 4.0.0 =
+* Update conekta-php library
+* Update conekta-woocommerce library
+* Woocommerce block supports
+* Migrate to Redirect Flow Payments
+
 = 3.7.7 =
-* fix shiiping line amount
+* fix shipping line amount
 
 = 3.7.6 =
 * supports events listening (order.expired and order.cancelled) for OXXO and SPEI
@@ -68,7 +71,7 @@ Replace to tusitio.com with your domain name
 * Update conekta-php library
 
 = 3.7.0 =
-* Homologation with Wordpress standards
+* Homogenization with WordPress standards
 
 = 3.0.8 =
 * Fix problem whit amount in discount_lines
@@ -147,8 +150,8 @@ Fix shipping for card and spei
 * Added additional parameters required for more robust anti-fraude service for card payments
 
 = 0.2.0 =
-* Added option for difered payments for 3, 6, and 12 months
-* Enable or disable difered payments from the admin
+* Added option for differed payments for 3, 6, and 12 months
+* Enable or disable differed payments from the admin
 
 = 0.1.1 =
 * Offline payments
