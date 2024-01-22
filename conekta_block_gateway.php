@@ -92,7 +92,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             exit;
         }
         $order_id      = $conekta_order['metadata']['reference_id'];
-        if (!$this->check_order_status($conekta_order['id'], array('expired', 'cancelled'))){
+        if (!$this->check_order_status($conekta_order['id'], array('expired', 'canceled'))){
             http_response_code(400);
             header('Content-Type: application/json');
             echo json_encode(['error' => 'Invalid order status', 'conekta_order_id' => $order_id]);
