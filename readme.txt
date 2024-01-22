@@ -1,57 +1,61 @@
 === Conekta Payment Gateway ===
-Contributors: gretelg
-Tags: free, oxxo, conekta, mexico, payment gateway
-Requires at least: 5.5
-Tested up to: 6.2
-Requires PHP: 7.4 or greater
-Stable tag: 3.7.7
+Contributors: conekta, fcarrero, interfacesconekta
+Tags: free, cash, conekta, mexico, payment gateway
+Requires at least: 6.1
+Tested up to: 6.4.2
+Requires PHP: 7.4
+Stable tag: 4.0.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
+
 WooCommerce Payment Gateway for Conekta.io
 
-This bundles functionality to process credit cards and cash (OXXO) payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
 
 == Description ==
 
 Current version features:
 
-* Uses Conekta.js      - No PCI Compliance Issues ( Requires an SSL Certificate)
-* Credit and Debit Card implemented
-* Cash payments implemented
-* Sandbox testing capability.
+* Unified API Key Integration: Streamlines the integration procedure for all existing payment modalities under one cohesive set of API Keys.
+* Refined Checkout Workflow: Enhances the user experience by consolidating checkout stages. Incorporates a robust checkpoint system to streamline transactions
+* Enhanced Security with Conekta's PCI-Certified Component: Elevate transaction protection using our secure, PCI-certified Conekta Component, designed to ensure a safe checkout experience
+* 3D Secure Version 2 Support: Ensures compatibility with the latest 3DS v2 specification, aligning with current security norms and enhancing fraud prevention measures
 * Automatic order status management
 * Email notifications on successful purchase
 
 == Installation ==
-Please note, v. 3.7.7 requires WooCommerce 3.x.
-You can download an older version [here.](https://wordpress.org/plugins/conekta-payment-gateway/advanced/)
-Make sure that you have at least PHP Version 5.6 since the Conekta PHP library requires this version.
+Before initiating the installation process, please ensure that your WooCommerce version is 3.x, and if necessary, download an older version to match your requirements. Additionally, confirm that your server runs PHP Version 7.4 or above, as the Conekta PHP library mandates this version.
+Follow these steps for a seamless installation
 
-###Automatic
-Log in to your  Wordpress Dashboard, navigate to the plugins menu and click Add New, in the search field type “Conekta Payment Gateway” and click Search Plugins. Once you’ve found our plugin you can view details about it, you can install it by simply clicking “Install Now”.
+* WordPress Dashboard Login, Log in to your WordPress Dashboard.
+* Navigate to Plugins, Access the plugins menu from the dashboard.
+* Search and Locate, Click on "Add New" and enter "Conekta Payment Gateway" in the search field. Hit the "Search Plugins" button to find the desired plugin.
+* Plugin Details, Explore the Conekta plugin details to gather additional information before proceeding.
+* Installation, Install the plugin effortlessly by clicking on the "Install Now" button.
+* API Key Configuration, Head to Woocommerce > Settings > Checkout in your WordPress Dashboard. Create your API keys from your Conekta account at panel.conekta.com , Enter the API keys in the designated fields to link your Conekta account with WooCommerce.
+* Webhook Configuration, To dynamically manage order statuses for offline payments, set up a webhook in your Conekta account, Add the following URL as a webhook in your Conekta account: http://tusitio.com/?wc-api=wc_conekta, Replace to tusitio.com with your domain name
 
-###Manual
-* Upload the plugin zip file in Plugins > Add New and then click "Install Now"
-* Once installed, activate the plugin.
-* Add your API keys in Woocommerce > Settings > Checkout from your Conekta account (admin.conekta.io) in https://admin.conekta.io#developers.keys
-* To manage orders for offline payments so that the status changes dynamically, you will need to add the following url as a webhook in your Conekta account:
-http://tusitio.com/wc-api/WC_Conekta_Cash_Gateway
-
-Replace to tusitio.com with your domain name
+By following these steps, you'll successfully install and configure the Conekta Payment Gateway plugin, ensuring a smooth integration with your WooCommerce store.
 
 == Screenshots ==
-1. In your Woocommerce admin in Settings > Checkout, you will need to add the API Keys from your Conekta.io account
+1. Integrate Conekta to your Online store and start accepting all the payment methods with a single integration. We are a payments company with more than 10 years within the Mexican market.
 `/assets/screenshot-1.png`
-2. Also, you will need o configure webhooks correctly in your conekta account adding http://tusitio.com/wc-api/WC_Conekta_Cash_Gateway so that the order status changes dynamically
+2. With a single API key, integrate and accept all payment methods.
 `/assets/screenshot-3.png`
-3. Once the user pays with the reference the order status in your Woocommerce admin will automatically change
+3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
 `/assets/screenshot-2.png`
-4. You will need to configure SSL since the user will be entering their credit card information directly in the checkout. They will not be redirected to another page.
 
 == Changelog ==
+
+= 4.0.0 =
+* Update conekta-php library
+* Checkout Blocks compatibility.
+* Updated to the new redirected checkout process: Conekta Component.
+* Simplified integration process using one API key for all payment methods.
+
 = 3.7.7 =
-* fix shiiping line amount
+* fix shipping line amount
 
 = 3.7.6 =
 * supports events listening (order.expired and order.cancelled) for OXXO and SPEI
@@ -67,7 +71,7 @@ Replace to tusitio.com with your domain name
 * Update conekta-php library
 
 = 3.7.0 =
-* Homologation with Wordpress standards
+* Homogenization with WordPress standards
 
 = 3.0.8 =
 * Fix problem whit amount in discount_lines
@@ -146,8 +150,8 @@ Fix shipping for card and spei
 * Added additional parameters required for more robust anti-fraude service for card payments
 
 = 0.2.0 =
-* Added option for difered payments for 3, 6, and 12 months
-* Enable or disable difered payments from the admin
+* Added option for differed payments for 3, 6, and 12 months
+* Enable or disable differed payments from the admin
 
 = 0.1.1 =
 * Offline payments

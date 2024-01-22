@@ -11,6 +11,27 @@ jobs:
     - name: Checkout código fuente
       uses: actions/checkout@v2
 
+    - name: Configurar PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '7.4'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, soap, bcmath, gd, exif, opcache, zip
+        ini-values: post_max_size=256M, max_execution_time=180
+        coverage: none
+
+    - name: Instalar dependencias de Composer
+      run: composer install --no-interaction --no-progress
+
+    - name: Instalar Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '16'
+
+    - name: Instalar dependencias de NPM
+      run: | 
+        npm i
+        npm run build
+
     - name: Despliegue en WordPress.org
       env:
         SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
@@ -23,7 +44,7 @@ jobs:
         svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
 
         # Sincroniza los archivos
-        rsync -av --exclude=".git" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
+        rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
 
         # Cambia al directorio SVN
         cd svn-dir
