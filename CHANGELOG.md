@@ -1,3 +1,9 @@
+## [4.0.0]() - 2024-01-30
+- Update conekta-php library
+- Checkout Blocks compatibility.
+- Updated to the new redirected checkout process: Conekta Component.
+- Simplified integration process using one API key for all payment methods.
+
 ## [3.7.7]() - 2023-12-05
 - fix shipping lines amount
 
@@ -17,7 +23,7 @@
 - Update conekta-php library
 
 ## [3.7.0]() - 2022-02-15
-- Homologation with Wordpress standards
+- Homogenization with WordPress standards
 
 ## [3.0.8]() - 2020-06-19
 - Fix problem whit amount in discount_lines
@@ -57,7 +63,7 @@
 - Correction in access to order properties
 
 ## Notes
-If you have WooCommerce 2.x, you can view this branch with latest stable version [2.0.14](https://github.com/conekta/conekta-woocommerce/tree/feature/woocommerce-2)
+If you have WooCommerce 2.x, you can view this branch with the latest stable version [2.0.14](https://github.com/conekta/conekta-woocommerce/tree/feature/woocommerce-2)
 
 ## [2.0.14](https://github.com/conekta/conekta-woocommerce/releases/tag/v2.0.14) - 2017-08-03
 ### Fix
@@ -180,8 +186,8 @@ If you have WooCommerce 2.x, you can view this branch with latest stable version
 
 ## [0.2.0]() - 2015-05-11
 ### Feature
-- Added option for difered payments for 3, 6, and 12 months
-- Enable or disable difered payments from the admin
+- Added option for differed payments for 3, 6, and 12 months
+- Enable or disable differed payments from the admin
 
 ## [0.1.1]() - 2014-09-01
 ### Feature
@@ -194,5 +200,5 @@ If you have WooCommerce 2.x, you can view this branch with latest stable version
 - Online payments
 - Sandbox testing capability
 - Option to save customer profile
-- Card validation at Conekta's servers so you don't have to be PCI
+- Card validation at Conekta's servers, so you don't have to be PCI
 - Client side validation for credit cards

@@ -1,69 +1,52 @@
 <div align="center">
 
-# Conekta Woocommerce v.3.7.7
+# Conekta Woocommerce v.4.0.0
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
 [![By Conekta](https://img.shields.io/badge/by-conekta-red.svg?style=for-the-badge&colorA=ee6130&colorB=00a4ac)](https://conekta.com)
 </div>
 
 WooCommerce Payment Gateway for Conekta.io
 
-This is a Open Source and Free plugin. It bundles functionality to process credit cards and cash (OXXO) payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This is an Open Source and Free plugin. It bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
 
 
 Features
 --------
 Current version features:
 
-* Uses Conekta.js      - No PCI Compliance Issues ( Requires an SSL Certificate)
-* Credit and Debit Card implemented
-* Cash payments implemented
-* Custom description and instructions in offline payments (OXXO and SPEI)
-
-![alt tag](https://raw.github.com/conekta/conekta-woocommerce/master/readme_files/admin_card.png)
-
-* Sandbox testing capability.
+* Unified API Key Integration: Streamlines the integration procedure for all existing payment modalities under one cohesive set of API Keys.
+* Refined Checkout Workflow: Enhances the user experience by consolidating checkout stages. Incorporates a robust checkpoint system to streamline transactions.
+* Enhanced Security with Conekta's PCI-Certified Component: Elevate transaction protection using our secure, PCI-certified Conekta Component, designed to ensure a safe checkout experience.
+* 3D Secure Version 2 Support: Ensures compatibility with the latest 3DS v2 specification, aligning with current security norms and enhancing fraud prevention measures.
 * Automatic order status management
 * Email notifications on successful purchase
-* Email notifications on successful in cash payment
-
-![alt tag](https://raw.github.com/conekta/conekta-woocommerce/master/readme_files/email.png)
-
-Example for custom instructions:
-```
-<ol>
-	<li>Acude a la tienda OXXO más cercana.</li>
-	<li>Inidica en caja que quieres realizar un pago de <b>OXXOPay</b>.</li>
-	<li>Dicta al cajero el número de referencia en esta ficha para que la tecleé directamente en la pantalla de venta.</li>
-	<li>Realiza el pago correspondiente con dinero en efectivo.</li>
-	<li>Al confirmar tu pago, el cajero te entregará un comprobante impreso. <b>En él podrás verificar que se haya realizado correctamente</b>. Conserva este comprobante de pago.</li>
-</ol>
-```
+* Email notifications on successful in all payments
 
 Version Compatibility
 ---------------------
-This plugin has been tested on Wordpress 6.2  WooCommerce 7.6.0
+This plugin has been tested on WordPress 6.4.2  WooCommerce 8.5.0
 
 Installation
 -----------
-Method 1:
-* Clone the module using git clone --recursive git@github.com:conekta/conekta-woocommerce.git
-* Upload the plugin zip file in Plugins > Add New and then click "Install Now"
-* Once installed, activate the plugin.
-
-Method 2:
-* Search the plugin in Plugins > Add New
-* In the search bar type Conekta Payment and the click "Install Now"
-
-* Add your API keys in Woocommerce > Settings > Checkout from your Conekta account (admin.conekta.io) in https://admin.conekta.io#developers.keys
-
-![alt tag](https://raw.github.com/conekta/conekta-woocommerce/master/readme_files/form.png)
-
-* To manage orders for offline payments so that the status changes dynamically, you will need to add the following url as a webhook in your Conekta account:
-http://tusitio.com/wc-api/WC_Conekta_Cash_Gateway
-
-![alt tag](https://raw.github.com/conekta/conekta-woocommerce/master/readme_files/webhook.png)
-
-Replace to **tusitio.com** with your domain name
+Before initiating the installation process, please ensure that your WooCommerce version is 3.x, and if necessary, download an older version to match your requirements. Additionally, confirm that your server runs PHP Version 7.4 or above, as the Conekta PHP library mandates this version.
+Follow these steps for a seamless installation:
+* WordPress Dashboard Login:
+   * Log in to your WordPress Dashboard.
+* Navigate to Plugins:
+  * Access the plugins menu from the dashboard.
+* Search and Locate:
+  * Click on "Add New" and enter "Conekta Payment Gateway" in the search field. Hit the "Search Plugins" button to find the desired plugin.
+* Plugin Details:
+  * Explore the Conekta plugin details to gather additional information before proceeding.
+* Installation:
+  * Install the plugin effortlessly by clicking on the "Install Now" button.
+* API Key Configuration:
+  * Head to Woocommerce > Settings > Checkout in your WordPress Dashboard.
+  * Create your API keys from your Conekta account at panel.conekta.com
+  * Enter the API keys in the designated fields to link your Conekta account with WooCommerce.
+* Webhook Configuration:
+  * To dynamically manage order statuses for offline payments, set up a webhook in your Conekta account.
+  * Add the following URL as a webhook in your Conekta account: http://tusitio.com/?wc-api=wc_conekta, Replace to tusitio.com with your domain name
 
 ## License
 
@@ -77,7 +60,7 @@ Developed in Mexico by [Conekta](https://www.conekta.com) in. Available with [MI
  
 2. Clone the repository
 ```
-    git clone git@github.com:yourUserName/conekta-woocommerce.git
+    git clone git@github.com:yourUserName/ct-woocommerce-plugin.git
 ```
 3. Create a branch
 ```
