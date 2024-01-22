@@ -75,9 +75,9 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
 	public function get_payment_method_data() {
 		return [
 			'is_cash_enabled'       => filter_var($this->get_setting( 'is_cash_enabled' ),FILTER_VALIDATE_BOOLEAN),
-			'title'       				  => $this->get_setting( 'title' ),
-			'description' 				  => 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.',
-			'supports'    					=> array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
+			'title'       		    => $this->get_setting( 'title' ),
+			'description' 		    => 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.',
+			'supports'    			=> array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
 		];
 	}
 }
