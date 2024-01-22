@@ -301,7 +301,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $redirect_url     = $this->get_return_url($order);
         $items            = $order->get_items();
         $line_items       = ckpg_build_line_items($items, parent::ckpg_get_version());
-        $customer_info    = ckpg_build_customer_info($data);
         $discount_lines   = ckpg_build_discount_lines($data);
         $shipping_lines   = ckpg_build_shipping_lines($data);
         $shipping_contact = ckpg_build_shipping_contact($data);
@@ -338,11 +337,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $orderCreated = self::$apiInstance->createOrder($rq);
             update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
             $order->update_status('on-hold', __( 'Awaiting the conekta payment', 'woocommerce' ));
-            $result = array(
+            return array(
                 'result' => 'success',
                 'redirect' => $orderCreated->getCheckout()->getUrl()
                 );
-            return $result;
         }
         catch(Exception $e){
             $description = $e->getMessage();

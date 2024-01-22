@@ -1,4 +1,4 @@
-<div align="center">
+<div style="text-align:center;">
 
 # Conekta Woocommerce v.4.0.0
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
@@ -31,7 +31,7 @@ Current version features:
 
 Version Compatibility
 ---------------------
-This plugin has been tested on Wordpress 6.2  WooCommerce 7.6.0
+This plugin has been tested on WordPress 6.2  WooCommerce 7.6.0
 
 Installation
 -----------
@@ -67,7 +67,7 @@ Developed in Mexico by [Conekta](https://www.conekta.com) in. Available with [MI
  
 2. Clone the repository
 ```
-    git clone git@github.com:yourUserName/conekta-woocommerce.git
+    git clone git@github.com:yourUserName/ct-woocommerce-plugin.git
 ```
 3. Create a branch
 ```
