@@ -1,8 +1,8 @@
 ## [4.0.0]() - 2024-01-30
 - Update conekta-php library
-- Update conekta-woocommerce library
-- Woocommerce block supports
-- Migrate to Redirect Flow Payments
+- Checkout Blocks compatibility.
+- Updated to the new redirected checkout process: Conekta Component.
+- Simplified integration process using one API key for all payment methods.
 
 ## [3.7.7]() - 2023-12-05
 - fix shipping lines amount

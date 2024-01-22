@@ -1,4 +1,4 @@
-<div style="text-align:center;">
+<div align="center">
 
 # Conekta Woocommerce v.4.0.0
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 

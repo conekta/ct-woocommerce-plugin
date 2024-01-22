@@ -17,42 +17,42 @@ This bundles functionality to process credit cards and cash payments securely as
 
 Current version features:
 
-* Uses Conekta.js      - No PCI Compliance Issues ( Requires an SSL Certificate)
-* Credit and Debit Card implemented
-* Cash payments implemented
-* Sandbox testing capability.
+* Unified API Key Integration: Streamlines the integration procedure for all existing payment modalities under one cohesive set of API Keys.
+* Refined Checkout Workflow: Enhances the user experience by consolidating checkout stages. Incorporates a robust checkpoint system to streamline transactions
+* Enhanced Security with Conekta's PCI-Certified Component: Elevate transaction protection using our secure, PCI-certified Conekta Component, designed to ensure a safe checkout experience
+* 3D Secure Version 2 Support: Ensures compatibility with the latest 3DS v2 specification, aligning with current security norms and enhancing fraud prevention measures
 * Automatic order status management
 * Email notifications on successful purchase
 
 == Installation ==
-Please note, v. 4.0.0 requires WooCommerce 3.x.
-You can download an older version [here.](https://wordpress.org/plugins/conekta-payment-gateway/advanced/)
-Make sure that you have at least PHP Version 7.4 since the Conekta PHP library requires this version.
+Before initiating the installation process, please ensure that your WooCommerce version is 3.x, and if necessary, download an older version to match your requirements. Additionally, confirm that your server runs PHP Version 7.4 or above, as the Conekta PHP library mandates this version.
+Follow these steps for a seamless installation
 
-###Automatic
-* Log in to your  WordPress Dashboard, navigate to the plugins menu and click Add New, in the search field type “Conekta Payment Gateway” and click Search Plugins. Once you’ve found our plugin you can view details about it, you can install it by simply clicking “Install Now”.
-* Once installed, activate the plugin.
-* Add your API keys in Woocommerce > Settings > Checkout from your Conekta account (https://panel.conekta.com/) in https://panel.conekta.com/developers/api-keys
-* To manage orders for offline payments so that the status changes dynamically, you will need to add the following url as a webhook in your Conekta account:
-http://tusitio.com/?wc-api=wc_conekta
+* WordPress Dashboard Login, Log in to your WordPress Dashboard.
+* Navigate to Plugins, Access the plugins menu from the dashboard.
+* Search and Locate, Click on "Add New" and enter "Conekta Payment Gateway" in the search field. Hit the "Search Plugins" button to find the desired plugin.
+* Plugin Details, Explore the Conekta plugin details to gather additional information before proceeding.
+* Installation, Install the plugin effortlessly by clicking on the "Install Now" button.
+* API Key Configuration, Head to Woocommerce > Settings > Checkout in your WordPress Dashboard. Create your API keys from your Conekta account at panel.conekta.com , Enter the API keys in the designated fields to link your Conekta account with WooCommerce.
+* Webhook Configuration, To dynamically manage order statuses for offline payments, set up a webhook in your Conekta account, Add the following URL as a webhook in your Conekta account: http://tusitio.com/?wc-api=wc_conekta, Replace to tusitio.com with your domain name
 
-Replace to tusitio.com with your domain name
+By following these steps, you'll successfully install and configure the Conekta Payment Gateway plugin, ensuring a smooth integration with your WooCommerce store.
 
 == Screenshots ==
 1. Integrate Conekta to your Online store and start accepting all the payment methods with a single integration. We are a payments company with more than 10 years within the Mexican market.
 `/assets/screenshot-1.png`
-2. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
-`/assets/screenshot-2.png`
-3. With a single API key, integrate and accept all payment methods.
+2. With a single API key, integrate and accept all payment methods.
 `/assets/screenshot-3.png`
+3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
+`/assets/screenshot-2.png`
 
 == Changelog ==
 
 = 4.0.0 =
 * Update conekta-php library
-* Update conekta-woocommerce library
-* Woocommerce block supports
-* Migrate to Redirect Flow Payments
+* Checkout Blocks compatibility.
+* Updated to the new redirected checkout process: Conekta Component.
+* Simplified integration process using one API key for all payment methods.
 
 = 3.7.7 =
 * fix shipping line amount
