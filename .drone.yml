@@ -14,7 +14,7 @@ steps:
   - name: install dependencies php
     image:  php:7.4-cli-alpine
     commands:
-     - apk add --no-cache curl
+      - apk add --no-cache curl
       - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
       - composer install --no-interaction --no-progress
   - name: install dependencies node
