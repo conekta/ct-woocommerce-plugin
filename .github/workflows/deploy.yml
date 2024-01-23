@@ -8,62 +8,53 @@ jobs:
   tag-and-deploy:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout código fuente
-      uses: actions/checkout@v2
+      - name: Checkout código fuente
+        uses: actions/checkout@v2
 
-    - name: Configurar PHP
-      uses: shivammathur/setup-php@v2
-      with:
-        php-version: '7.4'
-        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, soap, bcmath, gd, exif, opcache, zip
-        ini-values: post_max_size=256M, max_execution_time=180
-        coverage: none
+      - name: Configurar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, soap, bcmath, gd, exif, opcache, zip
+          ini-values: post_max_size=256M, max_execution_time=180
+          coverage: none
 
-    - name: Instalar dependencias de Composer
-      run: composer install --no-interaction --no-progress
+      - name: Instalar dependencias de Composer
+        run: composer install --no-interaction --no-progress
 
-    - name: Instalar Node.js
-      uses: actions/setup-node@v2
-      with:
-        node-version: '16'
+      - name: Instalar Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
 
-    - name: Instalar dependencias de NPM
-      run: | 
-        npm i
-        npm run build
+      - name: Instalar dependencias de NPM
+        run: |
+          npm i
+          npm run build
 
-    - name: Despliegue en WordPress.org
-      env:
-        SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
-        SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
-      run: |
-        # Instalar SVN
-        sudo apt-get -y install subversion
-
-        # Checkout del repositorio SVN de WordPress.org
-        svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
-        
-        # Elimina el contenido actual de trunk
-        rm -rf svn-dir/trunk/*
-        
-        # Sincroniza los archivos
-        rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
-        
-        # Elimina la carpeta assets existente en SVN, si existe
-        svn delete svn-dir/assets --force
-
-        # Copia la carpeta assets al mismo nivel que trunk
-        cp -r trunk/assets svn-dir/assets
-
-        # Cambia al directorio SVN
-        cd svn-dir
-
-        # Agrega nuevos archivos y elimina los eliminados
-        svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add x
-        svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete x
-
-        # Crea una copia en la carpeta tags
-        svn cp trunk tags/${{ github.ref_name }}
-
-        # Commit a SVN
-        svn commit -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
+      - name: Despliegue en WordPress.org
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+        run: |
+          # Instalar SVN
+          sudo apt-get -y install subversion
+          
+          # Checkout del repositorio SVN de WordPress.org
+          svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+          
+          # Sincroniza los archivos
+          rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
+          
+          # Cambia al directorio SVN
+          cd svn-dir
+          
+          # Agrega nuevos archivos y elimina los eliminados
+          svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add x
+          svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete x
+          
+          # Crea una copia en la carpeta tags
+          svn cp trunk tags/${{ github.ref_name }}
+          
+          # Commit a SVN
+          svn commit -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
