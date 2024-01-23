@@ -42,9 +42,18 @@ jobs:
 
         # Checkout del repositorio SVN de WordPress.org
         svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
-
+        
+        # Elimina el contenido actual de trunk
+        rm -rf svn-dir/trunk/*
+        
         # Sincroniza los archivos
         rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude="svn-dir" . svn-dir/trunk/
+        
+        # Elimina la carpeta assets existente en SVN, si existe
+        svn delete svn-dir/assets --force
+
+        # Copia la carpeta assets al mismo nivel que trunk
+        cp -r trunk/assets svn-dir/assets
 
         # Cambia al directorio SVN
         cd svn-dir
