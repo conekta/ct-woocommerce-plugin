@@ -1,0 +1,24 @@
+---
+kind: pipeline
+type: kubernetes
+name: default
+
+trigger:
+  branch:
+    - main
+    - master
+  event:
+    - pull_request
+
+steps:
+  - name: install dependencies php
+    image:  php:7.4-cli-alpine
+    commands:
+      - apk add --no-cache curl
+      - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+      - composer install --no-interaction --no-progress
+  - name: install dependencies node
+    image: node:16
+    commands:
+      - npm i
+      - npm run build

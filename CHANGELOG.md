@@ -1,4 +1,7 @@
-## [4.0.0]() - 2024-01-30
+## [4.0.1]() - 2024-01-23
+- Fix error when create charge in php 7.4
+
+## [4.0.0]() - 2024-01-23
 - Update conekta-php library
 - Checkout Blocks compatibility.
 - Updated to the new redirected checkout process: Conekta Component.
