@@ -10,12 +10,9 @@ trigger:
   event:
     - pull_request
 
-workspace:
-  path: /go/src/github.com/${DRONE_REPO}
-
 steps:
   - name: install dependencies php
-    image:  php:7.4-cli-alpine
+    image:  php:7.4
     commands:
       - composer install --no-interaction --no-progress
   - name: install dependencies node
