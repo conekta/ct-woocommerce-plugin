@@ -1,0 +1,24 @@
+---
+kind: pipeline
+type: kubernetes
+name: default
+
+trigger:
+  branch:
+    - main
+  event:
+    - pull_request
+
+workspace:
+  path: /go/src/github.com/${DRONE_REPO}
+
+steps:
+  - name: install dependencies php
+    image:  php:7.4-cli-alpine
+    commands:
+      - composer install --no-interaction --no-progress
+  - name: install dependencies node
+    image: node:16
+    commands:
+      - npm i
+      - npm run build
