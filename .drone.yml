@@ -12,8 +12,9 @@ trigger:
 
 steps:
   - name: install dependencies php
-    image:  php:7.4
+    image:  php:7.4-cli-alpine
     commands:
+      - COPY --from=composer:2.5.1 /usr/bin/composer /usr/bin/composer
       - composer install --no-interaction --no-progress
   - name: install dependencies node
     image: node:16
