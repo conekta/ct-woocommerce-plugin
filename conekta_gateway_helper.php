@@ -172,7 +172,7 @@ function ckpg_build_discount_lines($data): array
     return $discount_lines;
 }
 
-function ckpg_build_shipping_contact($data)
+function ckpg_build_shipping_contact($data): array
 {
     $shipping_contact = array();
 
@@ -305,8 +305,7 @@ function ckpg_get_request_data($order)
             'customer_info'        => $customer_info,
             'shipping_lines'       => $shipping_lines
         );
-        $address_1 = $order->get_shipping_address_1();
-        if (!empty($address1)) {
+        if (!empty($address1) && !empty($postal)) {
             $data = array_merge($data, array('shipping_contact' => $shipping_contact));
         }
         $customer_note = $order->get_customer_note();
