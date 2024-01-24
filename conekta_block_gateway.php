@@ -12,6 +12,7 @@ use Conekta\Api\OrdersApi;
 use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
+use Conekta\Model\CustomerShippingContacts;
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
     protected $GATEWAY_NAME              = "WC_Conekta_Gateway";
@@ -286,13 +287,21 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         return $allowed_payment_methods;
     }
 
-    protected function get_expired_at(){
+    /**
+     * @throws Exception
+     */
+    protected function get_expired_at(): int
+    {
         $timeZone = new DateTimeZone(self::TIME_ZONE);
         $currentDate = new DateTime('now', $timeZone);
         $daysToAdd = $this->settings['order_expiration'];
         $currentDate->add(new DateInterval("P{$daysToAdd}D"));
         return $currentDate->getTimestamp();
     }
+
+    /**
+     * @throws Exception
+     */
     public function process_payment($order_id)
     {
         global $woocommerce;
@@ -327,12 +336,14 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             ],
             'shipping_lines'   => $shipping_lines,
             'discount_lines'   => $discount_lines,
-            'shipping_contact' => $shipping_contact,
             'tax_lines'        => $tax_lines,
             'customer_info'    => $customer_info,
             'line_items'       => $line_items,
             'metadata'         => $order_metadata
         ]);
+        if (!empty($shipping_contact)) {
+            $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
+        }
         try{
             $orderCreated = self::$apiInstance->createOrder($rq);
             update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());

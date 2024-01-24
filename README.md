@@ -1,6 +1,6 @@
 <div align="center">
 
-# Conekta Woocommerce v.4.0.1
+# Conekta Woocommerce v.4.0.2
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
 [![By Conekta](https://img.shields.io/badge/by-conekta-red.svg?style=for-the-badge&colorA=ee6130&colorB=00a4ac)](https://conekta.com)
 </div>

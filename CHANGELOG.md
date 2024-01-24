@@ -1,3 +1,6 @@
+## [4.0.2]() - 2024-01-24
+- Fix error when create order with empty shipping contact
+
 ## [4.0.1]() - 2024-01-23
 - Fix error when create charge in php 7.4
 
