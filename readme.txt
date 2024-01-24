@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 4.0.2 =
-* Fix error when create order with empty shipping contact
+* Fix error when creating order with empty shipping contact
 
 = 4.0.1 =
 * Fix installing plugin in php 7.4
