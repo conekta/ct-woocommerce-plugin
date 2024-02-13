@@ -83,7 +83,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             case EventTypes::ORDER_CANCELED:
                 $this->handleOrderExpiredOrCanceled($event);
                 break;
-            case "order.pending_payment":
+            case EventTypes::ORDER_PENDING_PAYMENT:
                 $this->handleOrderPendingPayment($event);
                 break;
             default:
@@ -163,14 +163,28 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         $order         = new WC_Order($order_id);
         $charge        = $conekta_order['charges']['data'][0];
+        $payment_method  = $this->get_conekta_payment_method($conekta_order);
         $paid_at       = date("Y-m-d", $charge['paid_at']);
         update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
+        update_post_meta( $order->get_id(), 'conekta-payment-method', $payment_method);
         $order->payment_complete();
         $order->add_order_note("Payment completed in Conekta and notification of payment received");
 
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK']);
         exit;
+    }
+    private function get_conekta_payment_method( array $conekta_order): string {
+        if($conekta_order['charges']['data'][0]['payment_method']['object'] == 'card_payment'){
+            return "Pago Con Tarjeta";
+        }
+        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'cash_payment') {
+            return "Pago En Efectivo";
+        }
+        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'bank_transfer_payment') {
+            return "Transferencia Bancaria";
+        }
+        return "";
     }
     private function validate_reference_id(array $conekta_order): bool {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
