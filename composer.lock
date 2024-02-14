@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1d1f7b2ed94eb1752cd1c9b674d8358d",
+    "content-hash": "9b745e67d89904d47b5cf25a7d6382f9",
     "packages": [
         {
             "name": "conekta/conekta-php",
-            "version": "6.0.5",
+            "version": "6.0.6",
             "source": {
                 "type": "git",
                 "url": "https://github.com/conekta/conekta-php.git",
-                "reference": "8679777ff2a3c721014a980e0386e5674bf05f27"
+                "reference": "edd677bf7fd6039db8c3cbb97b5ee38272046acd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/8679777ff2a3c721014a980e0386e5674bf05f27",
-                "reference": "8679777ff2a3c721014a980e0386e5674bf05f27",
+                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/edd677bf7fd6039db8c3cbb97b5ee38272046acd",
+                "reference": "edd677bf7fd6039db8c3cbb97b5ee38272046acd",
                 "shasum": ""
             },
             "require": {
@@ -30,8 +30,8 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.5",
-                "phpstan/phpstan": "1.10.56",
-                "phpunit/phpunit": "^8.0 || ^9.0"
+                "phpstan/phpstan": "1.10.57",
+                "phpunit/phpunit": "^9.0 || ^10.0"
             },
             "type": "library",
             "autoload": {
@@ -60,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/conekta/conekta-php/issues",
-                "source": "https://github.com/conekta/conekta-php/tree/v6.0.5"
+                "source": "https://github.com/conekta/conekta-php/tree/v6.0.6"
             },
-            "time": "2024-01-19T17:03:03+00:00"
+            "time": "2024-02-13T19:20:49+00:00"
         },
         {
             "name": "guzzlehttp/guzzle",

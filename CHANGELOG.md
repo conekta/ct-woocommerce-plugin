@@ -1,3 +1,6 @@
+## [4.0.3]() - 2024-02-13
+- Fix status orders, new orders are created with status "pending payment" and not "on-hold"
+
 ## [4.0.2]() - 2024-01-24
 - Fix error when creating order with empty shipping contact
 
