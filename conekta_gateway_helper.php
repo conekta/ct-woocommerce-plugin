@@ -41,11 +41,8 @@ function ckpg_check_balance($order, $total): array
 }
 
 
-/**
- * Build the line items hash
- * @param array $items
- */
-function ckpg_build_order_metadata($data)
+
+function ckpg_build_order_metadata($data): array
 {
     $metadata = array(
         'reference_id' => $data['order_id'],

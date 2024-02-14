@@ -9,6 +9,7 @@
 require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\Api\OrdersApi;
+use Conekta\ApiException;
 use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
@@ -54,6 +55,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         self::$apiInstance = new OrdersApi(null, $config);
     }
 
+    /**
+     * @throws ApiException
+     */
     public function check_for_webhook() {
 		if ( ! isset( $_SERVER['REQUEST_METHOD'] )
 			|| ( 'POST' !== $_SERVER['REQUEST_METHOD'] )
@@ -79,11 +83,42 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             case EventTypes::ORDER_CANCELED:
                 $this->handleOrderExpiredOrCanceled($event);
                 break;
-
+            case EventTypes::ORDER_PENDING_PAYMENT:
+                $this->handleOrderPendingPayment($event);
+                break;
             default:
                 break;
         }
     }
+
+    /**
+     * @throws ApiException
+     */
+    private function handleOrderPendingPayment($event) {
+        $conekta_order = $event['data']['object'];
+        if (!$this->validate_reference_id($conekta_order)) {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Invalid order id']);
+            exit;
+        }
+        $order_id      = $conekta_order['metadata']['reference_id'];
+        if (!$this->check_order_status($conekta_order['id'], array('pending_payment'))){
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Invalid order status', 'conekta_order_id' => $order_id]);
+            exit;
+        }
+        $order         = new WC_Order($order_id);
+        $order->update_status('on-hold', 'Order pending payment in Conekta.');
+        header('Content-Type: application/json');
+        echo json_encode(['on-hold' => 'OK' , 'conekta_order_id' => $order_id]);
+        exit;
+    }
+
+    /**
+     * @throws ApiException
+     */
     private function handleOrderExpiredOrCanceled($event) {
         $conekta_order = $event['data']['object'];
         if (!$this->validate_reference_id($conekta_order)) {
@@ -106,6 +141,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         exit;
     }
 
+    /**
+     * @throws ApiException
+     */
     private function handleOrderPaid($event) {
         $conekta_order = $event['data']['object'];
         if (!$this->validate_reference_id($conekta_order)) {
@@ -125,16 +163,28 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         $order         = new WC_Order($order_id);
         $charge        = $conekta_order['charges']['data'][0];
+        $payment_method  = $this->get_conekta_payment_method($conekta_order);
         $paid_at       = date("Y-m-d", $charge['paid_at']);
         update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
+        update_post_meta( $order->get_id(), 'conekta-payment-method', $payment_method);
         $order->payment_complete();
         $order->add_order_note("Payment completed in Conekta and notification of payment received");
-
-        parent::ckpg_offline_payment_notification($order_id, $conekta_order['customer_info']['name']);
 
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK']);
         exit;
+    }
+    private function get_conekta_payment_method( array $conekta_order): string {
+        if($conekta_order['charges']['data'][0]['payment_method']['object'] == 'card_payment'){
+            return "Pago Con Tarjeta";
+        }
+        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'cash_payment') {
+            return "Pago En Efectivo";
+        }
+        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'bank_transfer_payment') {
+            return "Transferencia Bancaria";
+        }
+        return "";
     }
     private function validate_reference_id(array $conekta_order): bool {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
@@ -145,15 +195,19 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         exit;
     }
 
-    private function check_order_status(string $conekta_order_id ,array $statuses): bool{
+    /**
+     * @throws ApiException
+     */
+    private function check_order_status(string $conekta_order_id , array $statuses): bool{
         $conekta_order_api = self::$apiInstance->getorderbyid($conekta_order_id);
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
- 
-      /**
+
+    /**
      * Output for the order received page.
      * @param string $order_id
+     * @throws ApiException
      */
     function ckpg_thankyou_page($order_id) {
         $order = new WC_Order( $order_id );
@@ -276,13 +330,13 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     protected function get_allowed_payment_methods(){
         $allowed_payment_methods = array();
         if (strcmp($this->settings['is_cash_enabled'], 'yes') == 0) {
-            array_push($allowed_payment_methods, 'cash');
+            $allowed_payment_methods[] = 'cash';
         }
         if (strcmp($this->settings['is_bank_transfer_enabled'], 'yes') == 0) {
-            array_push($allowed_payment_methods, 'bank_transfer');
+            $allowed_payment_methods[] = 'bank_transfer';
         }
         if (strcmp($this->settings['is_card_enabled'], 'yes') == 0) {
-            array_push($allowed_payment_methods, 'card');
+            $allowed_payment_methods[] = 'card';
         }
         return $allowed_payment_methods;
     }
@@ -347,7 +401,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         try{
             $orderCreated = self::$apiInstance->createOrder($rq);
             update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
-            $order->update_status('on-hold', __( 'Awaiting the conekta payment', 'woocommerce' ));
+            $order->update_status('pending', __( 'Awaiting the conekta payment', 'woocommerce' ));
             return array(
                 'result' => 'success',
                 'redirect' => $orderCreated->getCheckout()->getUrl()
@@ -374,7 +428,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 }
 
 function ckpg_conekta_add_gateway($methods) {
-    array_push($methods, 'WC_Conekta_Gateway');
+    $methods[] = 'WC_Conekta_Gateway';
     return $methods;
 }
 
