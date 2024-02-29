@@ -266,7 +266,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             'default'     => __(1),
             'custom_attributes' => array(
                 'min' => 1,
-                'max' => 365,
+                'max' => 30,
                 'step' => 1
             ),
         ),

@@ -206,7 +206,7 @@ function ckpg_get_request_data($order)
                     array(
                         'code'   => $coupon['name'],
                         'type'   => $coupon['type'],
-                        'amount' => $coupon['discount_amount'] * 100
+                        'amount' => round($coupon['discount_amount'] * 100)
                     )
                 )
             );

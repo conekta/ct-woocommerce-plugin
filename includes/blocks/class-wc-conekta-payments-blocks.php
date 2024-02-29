@@ -67,17 +67,53 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
 		return [ 'wc-conekta-payments-blocks' ];
 	}
 
-	/**
-	 * Returns an array of key=>value pairs of data made available to the payment methods script.
-	 *
-	 * @return array
-	 */
-	public function get_payment_method_data() {
-		return [
-			'is_cash_enabled'       => filter_var($this->get_setting( 'is_cash_enabled' ),FILTER_VALIDATE_BOOLEAN),
-			'title'       		    => $this->get_setting( 'title' ),
-			'description' 		    => 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.',
-			'supports'    			=> array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
-		];
-	}
+    /**
+     * Returns an array of key=>value pairs of data made available to the payment methods script.
+     *
+     * @return array
+     */
+    public function get_payment_method_data(): array
+    {
+        return [
+            'is_cash_enabled'                => filter_var($this->get_setting( 'is_cash_enabled' ),FILTER_VALIDATE_BOOLEAN),
+            'is_card_enabled'                => filter_var($this->get_setting( 'is_card_enabled' ),FILTER_VALIDATE_BOOLEAN),
+            'is_bank_transfer_enabled'       => filter_var($this->get_setting( 'is_bank_transfer_enabled' ),FILTER_VALIDATE_BOOLEAN),
+            'title'       		             => $this->get_setting( 'title' ),
+            'description' 		             => $this->get_description(),
+            'supports'    			         => array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] )
+        ];
+    }
+    /**
+     * Returns the payment method description.
+     *
+     * @return string
+     */
+    public function get_description(): string
+    {
+        $paymentMethods = "Paga con";
+
+        $enabledMethods = [];
+
+        if (filter_var($this->get_setting('is_cash_enabled'), FILTER_VALIDATE_BOOLEAN)) {
+            $enabledMethods[] = 'efectivo';
+        }
+
+        if (filter_var($this->get_setting('is_card_enabled'), FILTER_VALIDATE_BOOLEAN)) {
+            $enabledMethods[] = 'tarjeta de crédito, débito';
+        }
+
+        if (filter_var($this->get_setting('is_bank_transfer_enabled'), FILTER_VALIDATE_BOOLEAN)) {
+            $enabledMethods[] = 'transferencia bancaria';
+        }
+
+        if (!empty($enabledMethods)) {
+            $lastMethod = array_pop($enabledMethods);
+            $paymentMethods .= ' ' . implode(', ', $enabledMethods);
+            if (!empty($enabledMethods)) {
+                $paymentMethods .= ' o ';
+            }
+            $paymentMethods .= $lastMethod;
+        }
+        return $paymentMethods;
+    }
 }
