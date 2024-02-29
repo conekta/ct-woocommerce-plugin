@@ -10,7 +10,7 @@ const labelConekta = decodeEntities( settings.title ) ||  'Pago con Conekta';
  */
 
 const ContentConekta = () => {
-	return decodeEntities(  '' );
+	return decodeEntities( settings.description) ;
 };
 
 
