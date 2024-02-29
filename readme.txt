@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.4.2
 Requires PHP: 7.4
-Stable tag: 4.0.3
+Stable tag: 4.0.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,11 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 4.0.4 =
+* Fix error in coupon amount when coupon type is percentage
+* Render icons in the checkout page depending on the plugin settings
+* Set logic for canMakePayment in the checkout page
+
 = 4.0.3 =
 * Fix status orders, new orders are created with status "pending payment" and not "on-hold"
 
