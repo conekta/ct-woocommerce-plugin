@@ -365,3 +365,16 @@ function validate_total($total='')
 
     return $total;
 }
+
+/**
+ * @param int $daysToAdd
+ * @return int
+ * @throws Exception
+ */
+function get_expired_at(int $daysToAdd): int
+{
+    $timeZone = new DateTimeZone('America/Mexico_City');
+    $currentDate = new DateTime('now', $timeZone);
+    $currentDate->add(new DateInterval("P{$daysToAdd}D"));
+    return $currentDate->getTimestamp();
+}

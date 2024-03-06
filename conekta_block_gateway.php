@@ -19,7 +19,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     protected $GATEWAY_NAME              = "WC_Conekta_Gateway";
     protected $order                     = null;
     protected $currencies                = array('MXN', 'USD');
-    private const TIME_ZONE              = 'America/Mexico_City';
 
     public $id;
     public $method_title;
@@ -36,11 +35,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->ckpg_init_form_fields();
         $this->init_settings();
         $this->title       = $this->settings['title'];
-        $this->description = 'Paga con tarjeta de crédito, débito, efectivo o transferencia bancaria.';
+        $this->description = $this->settings['description'];
         $this->api_key     = $this->settings['api_key'];
      
         add_action( 'woocommerce_update_options_payment_gateways_'.$this->id,array($this, 'process_admin_options'));
-        add_action( 'woocommerce_thankyou_' . $this->id, array( $this, 'ckpg_thankyou_page'));
         add_action( 'woocommerce_api_wc_conekta', [ $this, 'check_for_webhook' ] );
         if (!$this->ckpg_validate_currency()) {
             $this->enabled = false;
@@ -83,37 +81,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             case EventTypes::ORDER_CANCELED:
                 $this->handleOrderExpiredOrCanceled($event);
                 break;
-            case EventTypes::ORDER_PENDING_PAYMENT:
-                $this->handleOrderPendingPayment($event);
-                break;
             default:
                 break;
         }
-    }
-
-    /**
-     * @throws ApiException
-     */
-    private function handleOrderPendingPayment($event) {
-        $conekta_order = $event['data']['object'];
-        if (!$this->validate_reference_id($conekta_order)) {
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
-            exit;
-        }
-        $order_id      = $conekta_order['metadata']['reference_id'];
-        if (!$this->check_order_status($conekta_order['id'], array('pending_payment'))){
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status', 'conekta_order_id' => $order_id]);
-            exit;
-        }
-        $order         = new WC_Order($order_id);
-        $order->update_status('on-hold', 'Order pending payment in Conekta.');
-        header('Content-Type: application/json');
-        echo json_encode(['on-hold' => 'OK' , 'conekta_order_id' => $order_id]);
-        exit;
     }
 
     /**
@@ -163,28 +133,14 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         $order         = new WC_Order($order_id);
         $charge        = $conekta_order['charges']['data'][0];
-        $payment_method  = $this->get_conekta_payment_method($conekta_order);
         $paid_at       = date("Y-m-d", $charge['paid_at']);
         update_post_meta( $order->get_id(), 'conekta-paid-at', $paid_at);
-        update_post_meta( $order->get_id(), 'conekta-payment-method', $payment_method);
         $order->payment_complete();
         $order->add_order_note("Payment completed in Conekta and notification of payment received");
 
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK']);
         exit;
-    }
-    private function get_conekta_payment_method( array $conekta_order): string {
-        if($conekta_order['charges']['data'][0]['payment_method']['object'] == 'card_payment'){
-            return "Pago Con Tarjeta";
-        }
-        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'cash_payment') {
-            return "Pago En Efectivo";
-        }
-        if ($conekta_order['charges']['data'][0]['payment_method']['object'] == 'bank_transfer_payment') {
-            return "Transferencia Bancaria";
-        }
-        return "";
     }
     private function validate_reference_id(array $conekta_order): bool {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
@@ -204,38 +160,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
 
-    /**
-     * Output for the order received page.
-     * @param string $order_id
-     * @throws ApiException
-     */
-    function ckpg_thankyou_page($order_id) {
-        $order = new WC_Order( $order_id );
-        $conekta_order_id = get_post_meta( $order->get_id(), 'conekta-order-id', true );
-
-        if (empty($conekta_order_id)) {
-            return;
-        }
-        $conekta_order = self::$apiInstance->getorderbyid($conekta_order_id);
-
-        foreach($conekta_order->getCharges()->getData() as $charge) {
-            $payment_method = $charge->getPaymentMethod()->getObject();
-            if ($payment_method == 'bank_transfer_payment') {
-                $clabe = $charge->getPaymentMethod()->getClabe();
-                $account_owner = $charge->getPaymentMethod()->getReceivingAccountNumber();
-                echo '<p><h4><strong>'.__('Clabe').':</strong> ' .$clabe. '</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($account_owner).'</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
-            }else if ($payment_method == 'cash_payment') {
-                $reference = $charge->getPaymentMethod()->getReference();
-                $barcode_url = $charge->getPaymentMethod()->getBarcodeUrl();
-                echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . $reference. '</p>';
-                echo '<p><img src="'. esc_url($barcode_url) .'" alt="Código QR" style="border: 2px solid #000; margin: 10px; box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);"></p>';
-                echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
-            }
-        }
-    }
-
     public function ckpg_init_form_fields()
     {
         $this->form_fields = array(
@@ -252,6 +176,13 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             'default'     => __('Paga con Conekta', 'woothemes'),
             'required'    => true
             ),
+        'description' => array(
+            'type'        => 'text',
+            'title'       => __('Descripción', 'woothemes'),
+            'description' => __('', 'woothemes'),
+            'default'     => __('Paga con tarjeta de crédito, débito', 'woothemes'),
+            'required'    => true
+        ),
          'api_key' => array(
              'type'        => 'password',
              'title'       => __('Conekta API key', 'woothemes'),
@@ -269,24 +200,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'max' => 30,
                 'step' => 1
             ),
-        ),
-        'is_cash_enabled' => array(
-            'type'        => 'checkbox',
-            'title'       => __('Efectivo', 'woothemes'),
-            'label'       => __(' '),
-            'default'     => 'no'
-        ),
-        'is_bank_transfer_enabled' => array(
-            'type'        => 'checkbox',
-            'title'       => __('Transferencia interbancaria', 'woothemes'),
-            'label'       => __(' '),
-            'default'     => 'no'
-        ),
-        'is_card_enabled' => array(
-            'type'        => 'checkbox',
-            'title'       => __('Tarjetas de crédito y débito', 'woothemes'),
-            'label'       => __(' '),
-            'default'     => 'no'
         ),
          'is_msi_enabled' => array(
             'type'        => 'checkbox',
@@ -327,32 +240,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
          );
     }
 
-    protected function get_allowed_payment_methods(){
-        $allowed_payment_methods = array();
-        if (strcmp($this->settings['is_cash_enabled'], 'yes') == 0) {
-            $allowed_payment_methods[] = 'cash';
-        }
-        if (strcmp($this->settings['is_bank_transfer_enabled'], 'yes') == 0) {
-            $allowed_payment_methods[] = 'bank_transfer';
-        }
-        if (strcmp($this->settings['is_card_enabled'], 'yes') == 0) {
-            $allowed_payment_methods[] = 'card';
-        }
-        return $allowed_payment_methods;
-    }
-
-    /**
-     * @throws Exception
-     */
-    protected function get_expired_at(): int
-    {
-        $timeZone = new DateTimeZone(self::TIME_ZONE);
-        $currentDate = new DateTime('now', $timeZone);
-        $daysToAdd = $this->settings['order_expiration'];
-        $currentDate->add(new DateInterval("P{$daysToAdd}D"));
-        return $currentDate->getTimestamp();
-    }
-
     /**
      * @throws Exception
      */
@@ -378,7 +265,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $rq = new OrderRequest([
             'currency' =>$data['currency'],
             'checkout' => [
-                'allowed_payment_methods'=> $this->get_allowed_payment_methods(),
+                'allowed_payment_methods'=> ['card'],
                 'success_url'=> $redirect_url,
                 'failure_url'=> $redirect_url,
                 'monthly_installments_enabled' => filter_var($this->settings['is_msi_enabled'], FILTER_VALIDATE_BOOLEAN),
@@ -386,7 +273,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'name' =>  sprintf('Compra de %s',  $customer_info['name']),
                 'type' =>  'HostedPayment',
                 'redirection_time' => 10,
-                'expires_at' =>  $this->get_expired_at(),
+                'expires_at' =>  get_expired_at($this->settings['order_expiration']),
             ],
             'shipping_lines'   => $shipping_lines,
             'discount_lines'   => $discount_lines,
@@ -409,7 +296,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
         catch(Exception $e){
             $description = $e->getMessage();
-            wc_add_notice(__('Error: ', 'woothemes') . $description , $notice_type = 'error');
+            wc_add_notice(__('Error: ', 'woothemes') . $description );
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
         }
@@ -422,7 +309,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      * @access public
      * @return bool
      */
-    public function ckpg_validate_currency() {
+    public function ckpg_validate_currency(): bool
+    {
         return in_array(get_woocommerce_currency(), $this->currencies);
     }
 }
