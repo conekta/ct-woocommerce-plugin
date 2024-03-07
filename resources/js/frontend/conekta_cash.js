@@ -4,7 +4,7 @@ import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 
 const settings = getSetting( 'conekta_cash_data', {} );
-const labelConekta = decodeEntities( settings.title ) ||  'Pago con Conekta';
+const labelConekta = decodeEntities( settings.title );
 /**
  * Content component
  */

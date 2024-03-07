@@ -14,9 +14,9 @@ use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\CustomerShippingContacts;
 
-class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
+class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
 {
-    protected $GATEWAY_NAME = "WC_Conekta_Cash_Gateway";
+    protected $GATEWAY_NAME = "WC_Conekta_Bank_Transfer_Gateway";
     protected $order = null;
     protected $currencies = array('MXN', 'USD');
 
@@ -30,8 +30,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
     public function __construct()
     {
-        $this->id = 'conekta_cash';
-        $this->method_title = __('Conekta Efectivo', 'Conekta Cash');
+        $this->id = 'conekta_bank_transfer';
+        $this->method_title = __('Conekta Transferencia', 'Conekta bank transfer');
         $this->has_fields = true;
         $this->ckpg_init_form_fields();
         $this->init_settings();
@@ -72,15 +72,16 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
         foreach ($conekta_order->getCharges()->getData() as $charge) {
             $payment_method = $charge->getPaymentMethod()->getObject();
-            if ($payment_method == 'cash_payment') {
-                $reference = $charge->getPaymentMethod()->getReference();
-                $barcode_url = $charge->getPaymentMethod()->getBarcodeUrl();
-                echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $reference . '</p>';
-                echo '<p><img src="' . esc_url($barcode_url) . '" alt="Código QR" style="border: 2px solid #000; margin: 10px; box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);"></p>';
-                echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
+            if ($payment_method == 'bank_transfer_payment') {
+                $clabe = $charge->getPaymentMethod()->getClabe();
+                $account_owner = $charge->getPaymentMethod()->getReceivingAccountNumber();
+                echo '<p><h4><strong>' . __('Clabe') . ':</strong> ' . $clabe . '</h4></p>';
+                echo '<p><h4><strong>' . esc_html(__('Beneficiario')) . ':</strong> ' . esc_html($account_owner) . '</h4></p>';
+                echo '<p><h4><strong>' . esc_html(__('Banco Receptor')) . ':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
             }
         }
     }
+
 
     public function ckpg_init_form_fields()
     {
@@ -95,14 +96,14 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con Efectivo', 'woothemes'),
+                'default' => __('Paga con Transferencia', 'woothemes'),
                 'required' => true
             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga en efectivo', 'woothemes'),
+                'default' => __('Paga con Transferencia', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(
@@ -164,7 +165,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             'charges' => [
                 [
                     'payment_method' => [
-                        'type' => 'cash',
+                        'type' => 'spei',
                         'expires_at' => get_expired_at($this->settings['order_expiration']),
                     ],
                     'reference_id' => strval($order->get_id()),
@@ -183,7 +184,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         try {
             $orderCreated = self::$apiInstance->createOrder($rq);
             update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
-            $order->update_status('on-hold', __('Awaiting the conekta cash payment', 'woocommerce'));
+            $order->update_status('on-hold', __('Awaiting the conekta bank transfer payment', 'woocommerce'));
             return array(
                 'result' => 'success',
                 'redirect' => $this->get_return_url($order)
@@ -209,23 +210,23 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     }
 }
 
-function ckpg_conekta_cash_add_gateway($methods)
+function ckpg_conekta_bank_transfer_add_gateway($methods)
 {
-    $methods[] = 'WC_Conekta_Cash_Gateway';
+    $methods[] = 'WC_Conekta_Bank_Transfer_Gateway';
     return $methods;
 }
 
-add_filter('woocommerce_payment_gateways', 'ckpg_conekta_cash_add_gateway');
+add_filter('woocommerce_payment_gateways', 'ckpg_conekta_bank_transfer_add_gateway');
 
-add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_cash_woocommerce_block_support');
-function woocommerce_gateway_conekta_cash_woocommerce_block_support()
+add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support');
+function woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support()
 {
     if (class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
-        require_once 'includes/blocks/class-wc-conekta-cash-payments-blocks.php';
+        require_once 'includes/blocks/class-wc-conekta-bank_transfer-payments-blocks.php';
         add_action(
             'woocommerce_blocks_payment_method_type_registration',
             function (Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry) {
-                $payment_method_registry->register(new WC_Gateway_Conekta_Cash_Blocks_Support());
+                $payment_method_registry->register(new WC_Gateway_Conekta_Bank_Transfer_Blocks_Support());
             }
         );
     }

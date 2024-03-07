@@ -26,6 +26,7 @@ function ckpg_conekta_checkout_init_your_gateway()
         include_once('conekta_plugin.php');
         include_once('conekta_block_gateway.php');
         include_once('conekta_cash_block_gateway.php');
+        include_once('conekta_bank_transfer_block_gateway.php');
 
     }
 }

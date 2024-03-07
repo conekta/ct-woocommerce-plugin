@@ -30,6 +30,7 @@ module.exports = {
 	entry: {
 		'frontend/blocks': '/resources/js/frontend/index.js',
 		'frontend/conekta_cash': '/resources/js/frontend/conekta_cash.js',
+		'frontend/conekta_bank_transfer': '/resources/js/frontend/conekta_bank_transfer.js',
 	},
 	output: {
 		path: path.resolve( __dirname, 'build/js' ),
