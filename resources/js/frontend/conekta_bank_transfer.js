@@ -18,7 +18,7 @@ const LabelConekta = (props) => {
 
     const Icons = () => (
         <div style={{display: 'flex', alignItems: 'center'}}>
-            <img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/spei-24px.svg`} alt="bank"
+            <img src={`https://assets.conekta.com/cpanel/statics/assets/img/spei.svg`} alt="bank"
                  style={{marginLeft: '8px', width: '32px', height: 'auto'}}/>
         </div>
     );

@@ -95,14 +95,14 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con Efectivo', 'woothemes'),
+                'default' => __('Efectivo', 'woothemes'),
                 'required' => true
             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga en efectivo', 'woothemes'),
+                'default' => __('Paga con efectivo en más de 10 mil puntos de venta', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(

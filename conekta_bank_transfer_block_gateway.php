@@ -96,14 +96,14 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con Transferencia', 'woothemes'),
+                'default' => __('Transferencias', 'woothemes'),
                 'required' => true
             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con Transferencia', 'woothemes'),
+                'default' => __('Paga desde tu banca digital con SPEI', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(

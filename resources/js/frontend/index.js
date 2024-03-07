@@ -20,9 +20,9 @@ const LabelConekta = ( props ) => {
 	const Icons = () => (
 		<div style={{ display: 'flex',  alignItems: 'center' }}>
 			<>
-				<img src={`https://assets.conekta.com/checkout/img/logos/visa.svg`} alt="Visa" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
-				<img src={`https://assets.conekta.com/checkout/img/logos/amex.svg`} alt="amex" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
-				<img src={`https://assets.conekta.com/checkout/img/logos/master-card.svg`} alt="master" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/visa.svg`} alt="Visa" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/amex.svg`} alt="amex" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/mastercard.svg`} alt="master" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 			</>
 		</div>
 	);

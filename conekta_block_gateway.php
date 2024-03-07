@@ -183,14 +183,14 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con Tarjetas', 'woothemes'),
+                'default' => __('Tarjeta', 'woothemes'),
                 'required' => true
             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga con tarjeta de crédito, débito', 'woothemes'),
+                'default' => __('Paga con tarjetas de débito, crédito y vales', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(
