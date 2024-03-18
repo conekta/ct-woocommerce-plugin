@@ -3,7 +3,7 @@ import { registerPaymentMethod } from '@woocommerce/blocks-registry';
 import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 
-const settings = getSetting( 'conekta_data', {} );
+const settings = getSetting( 'conekta_cash_data', {} );
 const labelConekta = decodeEntities( settings.title );
 /**
  * Content component
@@ -19,11 +19,7 @@ const LabelConekta = ( props ) => {
 
 	const Icons = () => (
 		<div style={{ display: 'flex',  alignItems: 'center' }}>
-			<>
-				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/visa.svg`} alt="Visa" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
-				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/amex.svg`} alt="amex" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
-				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/mastercard.svg`} alt="master" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
-			</>
+			 <img src={`https://assets.conekta.com/checkout/img/icons/cash.svg`} alt="cash" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 		</div>
 	);
 
@@ -39,7 +35,7 @@ const LabelConekta = ( props ) => {
 /**
  * conekta payment method config object.
  */
-const conekta = {
+const conekta_cash = {
 	name:  settings.name,
 	label: <LabelConekta />,
 	content: <ContentConekta />,
@@ -53,5 +49,4 @@ const conekta = {
 };
 
 
-registerPaymentMethod( conekta );
-
+registerPaymentMethod( conekta_cash );
