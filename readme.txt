@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.4.2
 Requires PHP: 7.4
-Stable tag: 4.0.4
+Stable tag: 5.0.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -43,10 +43,13 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-1.png`
 2. With a single API key, integrate and accept all payment methods.
 `/assets/screenshot-3.png`
-3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
+3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all cards transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.0.0 =
+* Revert all payment methods in one, Now you can choose which methods you want to use separately
+
 = 4.0.4 =
 * Fix error in coupon amount when coupon type is percentage
 * Render icons in the checkout page depending on the plugin settings
