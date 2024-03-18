@@ -43,10 +43,13 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-1.png`
 2. With a single API key, integrate and accept all payment methods.
 `/assets/screenshot-3.png`
-3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
+3. There is no need to worry about PCI certifications. Starting from version 4.0.0, all cards transactions are redirected to Conekta’s checkout. Accept online payments in a secure and friendly way.
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.0.0 =
+* Revert all payment methods in one
+
 = 4.0.4 =
 * Fix error in coupon amount when coupon type is percentage
 * Render icons in the checkout page depending on the plugin settings
