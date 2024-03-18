@@ -22,7 +22,7 @@
     "i18n:json": "$(which wp) i18n make-json languages --no-purge",
     "packages-update": "wp-scripts packages-update",
     "check-engines": "wp-scripts check-engines",
-    "zip" : "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*'"
+    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*'"
   },
   "dependencies": {
     "@woocommerce/settings": "^1.0.0",
