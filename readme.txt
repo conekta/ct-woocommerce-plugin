@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 5.0.0 =
-* Revert all payment methods in one
+* Revert all payment methods in one, Now you can choose which methods you want to use separately
 
 = 4.0.4 =
 * Fix error in coupon amount when coupon type is percentage
