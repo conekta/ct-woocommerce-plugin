@@ -27,7 +27,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
-    protected static OrdersApi $apiInstance;
 
     public function __construct()
     {
@@ -38,7 +37,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->init_settings();
         $this->title = $this->settings['title'];
         $this->description = $this->settings['description'];
-        $this->api_key = $this->settings['api_key'];
+        $this->api_key = $this->settings['cards_api_key'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);
@@ -49,10 +48,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
-
-        // Configure Bearer authorization: bearerAuth
-        $config = Configuration::getDefaultConfiguration()->setAccessToken($this->api_key);
-        self::$apiInstance = new OrdersApi(null, $config);
     }
 
     /**
@@ -165,7 +160,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      */
     private function check_order_status(string $conekta_order_id, array $statuses): bool
     {
-        $conekta_order_api = self::$apiInstance->getorderbyid($conekta_order_id);
+        $conekta_order_api = $this->get_api_instance()->getorderbyid($conekta_order_id);
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
@@ -193,10 +188,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'default' => __('Paga con tarjetas de débito, crédito y vales', 'woothemes'),
                 'required' => true
             ),
-            'api_key' => array(
+            'cards_api_key' => array(
                 'type' => 'password',
                 'title' => __('Conekta API key', 'woothemes'),
-                'description' => __('API Key Producción (Tokens/Llaves Privadas)', 'woothemes'),
+                'description' => __('API Key Producción (Tokens/Llave Privada)', 'woothemes'),
                 'default' => __('', 'woothemes'),
                 'required' => true
             ),
@@ -250,6 +245,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         );
     }
 
+    public function get_api_instance(): OrdersApi
+    {
+       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['cards_api_key']));
+    }
     /**
      * @throws Exception
      */
@@ -296,7 +295,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
         try {
-            $orderCreated = self::$apiInstance->createOrder($rq);
+            $orderCreated = $this->get_api_instance()->createOrder($rq);
             update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
             return array(
@@ -305,9 +304,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             );
         } catch (Exception $e) {
             $description = $e->getMessage();
-            wc_add_notice(__('Error: ', 'woothemes') . $description);
-            $this->ckpg_mark_as_failed_payment($order);
-            WC()->session->reload_checkout = true;
+            throw new Exception( $description );
         }
 
     }
