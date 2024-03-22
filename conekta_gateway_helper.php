@@ -49,6 +49,7 @@ function ckpg_build_order_metadata($data): array
         'plugin_conekta_version' => $data['plugin_conekta_version'],
         'plugin' => 'woocommerce',
         'woocommerce_version' => $data['woocommerce_version'],
+        'payment_method' => $data['payment_method'],
     );
 
     if (!empty($data['customer_message'])) {
