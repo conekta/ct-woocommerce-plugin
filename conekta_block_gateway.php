@@ -27,10 +27,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
-    public string $webhook_url;
+    public $webhook_url;
 
     /**
-     * @throws ApiException
+     * @throws ApiException|Exception
      */
     public function __construct()
     {

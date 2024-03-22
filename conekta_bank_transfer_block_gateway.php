@@ -27,10 +27,11 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
-    public string $webhook_url;
+    public $webhook_url;
 
     /**
      * @throws ApiException
+     * @throws Exception
      */
     public function __construct()
     {

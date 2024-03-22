@@ -46,11 +46,13 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     }
 
     /**
-     * @throws \Conekta\ApiException
      * @throws Exception
      */
-    public static function create_webhook(string $apikey, string $webhook_url): bool
+    public static function create_webhook(?string $apikey, ?string $webhook_url): bool
     {
+        if (is_null($webhook_url)){
+            return false;
+        }
         try {
             $api = new WebhooksApi(null, Configuration::getDefaultConfiguration()->setAccessToken($apikey));
             $webhooks = $api->getWebhooks("es", null,3,null, $webhook_url);
