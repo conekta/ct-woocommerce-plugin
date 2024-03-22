@@ -54,7 +54,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $this->enabled = false;
         }
         if ($this->enabled) {
-            $this->enabled= self::create_webhook( $this->api_key, $this->webhook_url);
+             self::create_webhook( $this->api_key, $this->webhook_url);
         }
     }
 
