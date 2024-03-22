@@ -27,7 +27,11 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
+    public $webhook_url;
 
+    /**
+     * @throws ApiException|Exception
+     */
     public function __construct()
     {
         $this->id = 'conekta';
@@ -38,6 +42,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->title = $this->settings['title'];
         $this->description = $this->settings['description'];
         $this->api_key = $this->settings['cards_api_key'];
+        $this->webhook_url = $this->settings['webhook_url'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);
@@ -47,6 +52,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         if (empty($this->api_key)) {
             $this->enabled = false;
+        }
+        if ($this->enabled) {
+             self::create_webhook( $this->api_key, $this->webhook_url);
         }
     }
 
@@ -68,102 +76,24 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         switch ($event['type']) {
             case EventTypes::WEBHOOK_PING:
-                $this->handleWebhookPing();
+                self::handleWebhookPing();
                 break;
 
             case EventTypes::ORDER_PAID:
-                $this->handleOrderPaid($event);
+                self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
+                self::handleOrderPaid($this->get_api_instance(), $event);
                 break;
 
             case EventTypes::ORDER_EXPIRED:
             case EventTypes::ORDER_CANCELED:
-                $this->handleOrderExpiredOrCanceled($event);
+                self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance(),$event);
                 break;
             default:
                 break;
         }
     }
 
-    /**
-     * @throws ApiException
-     */
-    private function handleOrderExpiredOrCanceled($event)
-    {
-        $conekta_order = $event['data']['object'];
-        if (!$this->validate_reference_id($conekta_order)) {
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
-            exit;
-        }
-        $order_id = $conekta_order['metadata']['reference_id'];
-        if (!$this->check_order_status($conekta_order['id'], array('expired', 'canceled'))) {
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status', 'conekta_order_id' => $order_id]);
-            exit;
-        }
-        $order = new WC_Order($order_id);
-        $order->update_status('cancelled', 'Order expired in Conekta.');
-        header('Content-Type: application/json');
-        echo json_encode(['cancelled' => 'OK', 'conekta_order_id' => $order_id]);
-        exit;
-    }
-
-    /**
-     * @throws ApiException
-     */
-    private function handleOrderPaid($event)
-    {
-        $conekta_order = $event['data']['object'];
-        if (!$this->validate_reference_id($conekta_order)) {
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
-            exit;
-        }
-        $order_id = $conekta_order['metadata']['reference_id'];
-
-        if (!$this->check_order_status($conekta_order['id'], array('paid'))) {
-            http_response_code(400);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status', 'conekta_order_id' => $order_id]);
-            exit;
-        }
-
-        $order = new WC_Order($order_id);
-        $charge = $conekta_order['charges']['data'][0];
-        $paid_at = date("Y-m-d", $charge['paid_at']);
-        update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
-        $order->payment_complete();
-        $order->add_order_note("Payment completed in Conekta and notification of payment received");
-
-        header('Content-Type: application/json');
-        echo json_encode(['message' => 'OK']);
-        exit;
-    }
-
-    private function validate_reference_id(array $conekta_order): bool
-    {
-        return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
-    }
-
-    private function handleWebhookPing()
-    {
-        header('Content-Type: application/json');
-        echo json_encode(['message' => 'OK']);
-        exit;
-    }
-
-    /**
-     * @throws ApiException
-     */
-    private function check_order_status(string $conekta_order_id, array $statuses): bool
-    {
-        $conekta_order_api = $this->get_api_instance()->getorderbyid($conekta_order_id);
-
-        return in_array($conekta_order_api->getPaymentStatus(), $statuses);
-    }
 
     public function ckpg_init_form_fields()
     {
@@ -229,11 +159,17 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     'data-placeholder' => __('Seleccione opciones', 'woothemes'),
                     'multiple' => 'multiple'
                 ),
+            ),
+            'webhook_url' => array(
+                'type' => 'text',
+                'title' => __('URL webhook', 'woothemes'),
+                'description' => __('URL webhook)', 'woothemes'),
+                'default' => __(get_site_url() . '/?wc-api=wc_conekta'),
+                'required' => true
             )
         );
 
     }
-
 
     protected function ckpg_mark_as_failed_payment($order)
     {
@@ -268,7 +204,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $customer_info = ckpg_build_customer_info($data);
         $order_metadata = ckpg_build_order_metadata($data + array(
                 'plugin_conekta_version' => $this->version,
-                'woocommerce_version' => $woocommerce->version
+                'woocommerce_version' => $woocommerce->version,
+                'payment_method' => $this->GATEWAY_NAME,
             )
         );
         $rq = new OrderRequest([
@@ -304,7 +241,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             );
         } catch (Exception $e) {
             $description = $e->getMessage();
-            throw new Exception( $description );
+            wc_add_notice(__('Error: ', 'woothemes') . $description);
+            $this->ckpg_mark_as_failed_payment($order);
+            WC()->session->reload_checkout = true;
         }
 
     }

@@ -13,6 +13,7 @@ use Conekta\ApiException;
 use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\CustomerShippingContacts;
+use Conekta\Model\EventTypes;
 
 class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
 {
@@ -26,7 +27,12 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
+    public $webhook_url;
 
+    /**
+     * @throws ApiException
+     * @throws Exception
+     */
     public function __construct()
     {
         $this->id = 'conekta_bank_transfer';
@@ -37,15 +43,56 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         $this->title = $this->settings['title'];
         $this->description = $this->settings['description'];
         $this->api_key = $this->settings['api_key'];
+        $this->webhook_url = $this->settings['webhook_url'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
+        add_action('woocommerce_api_wc_conekta_bank_transfer', [$this, 'check_for_webhook']);
+
         if (!$this->ckpg_validate_currency()) {
             $this->enabled = false;
         }
 
         if (empty($this->api_key)) {
             $this->enabled = false;
+        }
+        if ($this->enabled) {
+            self::create_webhook( $this->api_key, $this->webhook_url);
+        }
+    }
+    /**
+     * @throws ApiException
+     */
+    public function check_for_webhook()
+    {
+        if (!isset($_SERVER['REQUEST_METHOD'])
+            || ('POST' !== $_SERVER['REQUEST_METHOD'])
+            || !isset($_GET['wc-api'])
+            || ('wc_conekta_bank_transfer' !== $_GET['wc-api'])
+        ) {
+            return;
+        }
+
+        $body = @file_get_contents('php://input');
+        $event = json_decode($body, true);
+
+        switch ($event['type']) {
+            case EventTypes::WEBHOOK_PING:
+                self::handleWebhookPing();
+                break;
+
+            case EventTypes::ORDER_PAID:
+                self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
+                self::handleOrderPaid($this->get_api_instance(), $event);
+                break;
+
+            case EventTypes::ORDER_EXPIRED:
+            case EventTypes::ORDER_CANCELED:
+                self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance(),$event);
+                break;
+            default:
+                break;
         }
     }
 
@@ -121,6 +168,13 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                     'max' => 30,
                     'step' => 1
                 ),
+            ),
+            'webhook_url' => array(
+                'type' => 'text',
+                'title' => __('URL webhook', 'woothemes'),
+                'description' => __('URL webhook)', 'woothemes'),
+                'default' => __(get_site_url() . '/?wc-api=wc_conekta_bank_transfer'),
+                'required' => true
             )
         );
 
@@ -155,7 +209,8 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         $customer_info = ckpg_build_customer_info($data);
         $order_metadata = ckpg_build_order_metadata($data + array(
                 'plugin_conekta_version' => $this->version,
-                'woocommerce_version' => $woocommerce->version
+                'woocommerce_version' => $woocommerce->version,
+                'payment_method' => $this->GATEWAY_NAME,
             )
         );
         $rq = new OrderRequest([
