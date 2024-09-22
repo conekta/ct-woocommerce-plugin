@@ -10,7 +10,7 @@
   "license": "ISC",
   "devDependencies": {
     "@woocommerce/dependency-extraction-webpack-plugin": "^2.2.0",
-    "@wordpress/scripts": "^26.10.0",
+    "@wordpress/scripts": "^30.0.2",
     "cross-env": "7.0.3"
   },
   "scripts": {
