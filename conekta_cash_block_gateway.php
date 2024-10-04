@@ -108,7 +108,13 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
      */
     function ckpg_thankyou_page($order_id)
     {
+
+        echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $order_id . '</p>';
+
+
         $order = new WC_Order($order_id);
+                echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $order_id . '</p>';
+
         $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
 
         if (empty($conekta_order_id)) {
@@ -235,8 +241,9 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         }
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
-            update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
             $order->update_status('on-hold', __('Awaiting the conekta cash payment', 'woocommerce'));
+            $this->update_conekta_order_meta($order->get_id(), $order, $orderCreated->getId());
+
             return array(
                 'result' => 'success',
                 'redirect' => $this->get_return_url($order)

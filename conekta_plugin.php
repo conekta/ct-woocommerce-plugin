@@ -152,4 +152,13 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
     }
+
+    /**
+     * @throws ApiException
+     */
+    public function update_conekta_order_meta($order_id, $order, $conekta_order_id) {
+        update_post_meta($order_id, 'conekta-order-id', $conekta_order_id);
+        $order->update_meta_data('conekta-order-id', $conekta_order_id);
+        $order->save();
+    }
 }

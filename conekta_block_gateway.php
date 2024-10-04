@@ -233,8 +233,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
-            update_post_meta($order->get_id(), 'conekta-order-id', $orderCreated->getId());
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
+            $this->update_conekta_order_meta($order->get_id(), $order, $orderCreated->getId());
             return array(
                 'result' => 'success',
                 'redirect' => $orderCreated->getCheckout()->getUrl()
