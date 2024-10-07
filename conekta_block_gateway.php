@@ -53,9 +53,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
-        if ($this->enabled) {
-             self::create_webhook( $this->api_key, $this->webhook_url);
-        }
     }
 
     /**
@@ -234,14 +231,22 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
-            $this->update_conekta_order_meta($order->get_id(), $order, $orderCreated->getId());
+            self::update_conekta_order_meta($order->get_id(), $order, $orderCreated->getId());
             return array(
                 'result' => 'success',
                 'redirect' => $orderCreated->getCheckout()->getUrl()
             );
         } catch (Exception $e) {
             $description = $e->getMessage();
-            wc_add_notice(__('Error: ', 'woothemes') . $description);
+            global $wp_version;
+            if (version_compare($wp_version, '4.1', '>=')) {
+                wc_add_notice(__('Error: ', 'woothemes') . $description , $notice_type = 'error');
+            } else {
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG === true ) {
+                    error_log('Gateway Error:' . $description . "\n");
+                }
+                $woocommerce->add_error(__('Error: ', 'woothemes') . $description);
+            }
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
         }
