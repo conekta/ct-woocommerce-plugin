@@ -109,11 +109,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     function ckpg_thankyou_page($order_id)
     {
 
-        echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $order_id . '</p>';
-
-
         $order = new WC_Order($order_id);
-                echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $order_id . '</p>';
 
         $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
 
