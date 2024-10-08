@@ -14,7 +14,7 @@ use Conekta\ApiException;
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.0.2";
+	public $version  = "5.0.3";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -152,4 +152,14 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
     }
+
+    /**
+     * @throws ApiException
+     */
+    public static function update_conekta_order_meta( $order, $order_value, string $order_key) {
+        update_post_meta($order->get_id(), $order_key, $order_value);
+        $order->update_meta_data($order_key, $order_value);
+        $order->save();
+    }
+
 }
