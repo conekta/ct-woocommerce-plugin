@@ -50,7 +50,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 = 5.0.4 =
 * Fix change version releaseß
 = 5.0.3 =
-* Fix Available compatibility mode, dont show clabe para SPEI/cash
+* Fix Available compatibility mode, dont show clabe for SPEI/cash
 = 5.0.2 =
 * Fix webhook for paid orders
 * Automatically config webhook in the plugin settings
