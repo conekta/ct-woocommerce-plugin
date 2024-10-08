@@ -238,7 +238,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('on-hold', __('Awaiting the conekta cash payment', 'woocommerce'));
-            $this->update_conekta_order_meta($order->get_id(), $order, $orderCreated->getId());
+            $this->update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
 
             return array(
                 'result' => 'success',

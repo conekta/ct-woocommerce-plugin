@@ -156,9 +156,10 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     /**
      * @throws ApiException
      */
-    public static function update_conekta_order_meta($order_id, $order, $conekta_order_id) {
-        update_post_meta($order_id, 'conekta-order-id', $conekta_order_id);
-        $order->update_meta_data('conekta-order-id', $conekta_order_id);
+    public static function update_conekta_order_meta( $order, $conekta_order_id, string $order_key,) {
+        update_post_meta($order->get_id(), $order_key, $conekta_order_id);
+        $order->update_meta_data($order_key, $conekta_order_id);
         $order->save();
     }
+
 }
