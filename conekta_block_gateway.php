@@ -53,9 +53,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
-        if ($this->enabled) {
-             self::create_webhook( $this->api_key, $this->webhook_url);
-        }
     }
 
     /**
@@ -234,7 +231,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
-            $this->update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
+            self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             return array(
                 'result' => 'success',
                 'redirect' => $orderCreated->getCheckout()->getUrl()

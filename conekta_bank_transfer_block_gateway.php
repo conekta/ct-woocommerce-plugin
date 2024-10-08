@@ -56,9 +56,6 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
-        if ($this->enabled) {
-            self::create_webhook( $this->api_key, $this->webhook_url);
-        }
     }
     /**
      * @throws ApiException
@@ -237,7 +234,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('on-hold', __('Awaiting the conekta bank transfer payment', 'woocommerce'));
-            $this->update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
+            self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             return array(
                 'result' => 'success',
                 'redirect' => $this->get_return_url($order)
