@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.4.2
 Requires PHP: 7.4
-Stable tag: 5.0.4
+Stable tag: 5.0.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,8 +47,10 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.0.5 =
+* Fix webhook functionality
 = 5.0.4 =
-* Fix change version releaseß
+* Fix change version release
 = 5.0.3 =
 * Fix Available compatibility mode, dont show clabe for SPEI/cash
 = 5.0.2 =

@@ -56,6 +56,14 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
+        if (!empty($this->api_key)) {
+            add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
+        }
+    }
+
+    public function configure_webhook()
+    {
+        $this->create_webhook($this->settings['api_key'], $this->settings['webhook_url']);
     }
     /**
      * @throws ApiException
