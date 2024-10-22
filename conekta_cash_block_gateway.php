@@ -28,6 +28,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     public $description;
     public $api_key;
     public $webhook_url;
+    public $instructions;
 
     /**
      * @throws ApiException|Exception
@@ -41,13 +42,19 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $this->init_settings();
         $this->title = $this->settings['title'];
         $this->description = $this->settings['description'];
+        $this->icon        = $this->settings['alternate_imageurl'] ?
+                                                $this->settings['alternate_imageurl'] :
+                                                WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
+                                                . '/images/cash.png';
         $this->api_key = $this->settings['api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
+        $this->$instructions = $this->settings['instructions'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
         add_action('woocommerce_api_wc_conekta_cash', [$this, 'check_for_webhook']);
-
+        add_action('woocommerce_email_before_order_table',array($this, 'ckpg_email_instructions'));
+        add_action('woocommerce_email_before_order_table',array($this, 'ckpg_email_reference'));
         if (!$this->ckpg_validate_currency()) {
             $this->enabled = false;
         }
@@ -129,6 +136,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $reference . '</p>';
                 echo '<p><img src="' . esc_url($barcode_url) . '" alt="Código QR" style="border: 2px solid #000; margin: 10px; box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);"></p>';
                 echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
+                echo '<p>INSTRUCCIONES: '. esc_html($this->$instructions) .'</p>';
+               
             }
         }
     }
@@ -179,11 +188,63 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 'description' => __('URL webhook)', 'woothemes'),
                 'default' => __(get_site_url() . '/?wc-api=wc_conekta_cash'),
                 'required' => true
+            ),
+            'alternate_imageurl' => array(
+                'type'        => 'text',
+                'title'       => __('Imagen alternativa para mostrar en el momento del pago, utilice una URL completa y envíela a través de https', 'woothemes'),
+                'default'     => __('', 'woothemes')
+            ),
+            'instructions' => array(
+                'title' => __( 'Instructions', 'woocommerce' ),
+                'type' => 'textarea',
+                'description' => __('Instructions that will be added to the thank you page and emails.', 'woocommerce'),
+                'default' =>__('Por favor realiza el pago en la tienda más cercano utilizando la referencia que se encuentra a continuación.', 'woocommerce'),
+                'desc_tip' => true,
             )
         );
 
     }
 
+   /**
+     * Add content to the WC emails.
+     *
+     * @access public
+     * @param WC_Order $order
+     * @param bool $sent_to_admin
+     * @param bool $plain_text
+     */
+    public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
+        if (get_post_meta( $order->get_id(), '_payment_method', true ) === $this->id){
+            $instructions = $this->settings['instructions'];
+            if ( $instructions && 'on-hold' === $order->get_status() ) {
+                echo wpautop( wptexturize( esc_html($instructions ) ) ). PHP_EOL;
+            }
+        }
+    }
+     /**
+     * Add content to the WC emails.
+     *
+     * @access public
+     * @param WC_Order $order
+     */
+
+     function ckpg_email_reference($order) {
+        if (get_post_meta( $order->get_id(), 'conekta-referencia', true ) != null)
+            {
+                echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . esc_html(get_post_meta( $order->get_id(), 'conekta-referencia', true )). '</p>';
+                echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
+                echo '<p>INSTRUCCIONES:'. esc_html($this->settings['instructions']) .'</p>';
+            }
+    }
+    public function ckpg_admin_options()
+    {
+        include_once('templates/cash_admin.php');
+    }
+
+    public function payment_fields()
+    {
+        include_once('templates/cash.php');
+    }
 
     protected function ckpg_mark_as_failed_payment($order)
     {
@@ -242,6 +303,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('on-hold', __('Awaiting the conekta cash payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
+            self::update_conekta_order_meta( $order, $orderCreated->getCharges()->getData()[0]->getPaymentMethod()->getReference(), 'conekta-referencia');
 
             return array(
                 'result' => 'success',

@@ -49,6 +49,8 @@ By following these steps, you'll successfully install and configure the Conekta 
 == Changelog ==
 = 5.0.5 =
 * Fix webhook functionality
+* add missing fields such as instructions,icons 
+* add field account_owner
 = 5.0.4 =
 * Fix change version release
 = 5.0.3 =
