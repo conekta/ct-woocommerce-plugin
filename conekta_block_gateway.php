@@ -41,6 +41,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->init_settings();
         $this->title = $this->settings['title'];
         $this->description = $this->settings['description'];
+        $this->icon        = $this->settings['alternate_imageurl'] ?
+                                                $this->settings['alternate_imageurl'] :
+                                                WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
+                                                . '/images/credits.png';
         $this->api_key = $this->settings['cards_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
 
@@ -53,8 +57,15 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (empty($this->api_key)) {
             $this->enabled = false;
         }
+        if (!empty($this->api_key)) {
+            add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
+        }
     }
 
+    public function configure_webhook()
+    {
+        $this->create_webhook($this->settings['cards_api_key'], $this->settings['webhook_url']);
+    }
     /**
      * @throws ApiException
      */
@@ -163,6 +174,11 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'description' => __('URL webhook)', 'woothemes'),
                 'default' => __(get_site_url() . '/?wc-api=wc_conekta'),
                 'required' => true
+            ),
+            'alternate_imageurl' => array(
+                'type'        => 'text',
+                'title'       => __('Imagen alternativa para mostrar en el momento del pago, utilice una URL completa y envíela a través de https', 'woothemes'),
+                'default'     => __('', 'woothemes')
             )
         );
 
