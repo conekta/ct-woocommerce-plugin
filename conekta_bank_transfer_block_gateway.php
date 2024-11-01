@@ -10,7 +10,7 @@ require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
-use \Conekta\Configuration;
+use Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\CustomerShippingContacts;
 use Conekta\Model\EventTypes;

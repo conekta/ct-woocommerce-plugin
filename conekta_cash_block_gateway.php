@@ -48,7 +48,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                                                 . '/images/cash.png';
         $this->api_key = $this->settings['api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
-        $this->$instructions = $this->settings['instructions'];
+        $this->instructions = $this->settings['instructions'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
@@ -66,6 +66,10 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
         }
     }
+
+    /**
+     * @throws Exception
+     */
     public function configure_webhook()
     {
         $this->create_webhook($this->settings['api_key'], $this->settings['webhook_url']);
@@ -136,7 +140,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $reference . '</p>';
                 echo '<p><img src="' . esc_url($barcode_url) . '" alt="Código QR" style="border: 2px solid #000; margin: 10px; box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);"></p>';
                 echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES: '. esc_html($this->$instructions) .'</p>';
+                echo '<p>INSTRUCCIONES: '. esc_html($this->instructions) .'</p>';
                
             }
         }
