@@ -1,6 +1,6 @@
 <div align="center">
 
-# Conekta Woocommerce v.5.0.6
+# Conekta Woocommerce v.5.0.7
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
 [![By Conekta](https://img.shields.io/badge/by-conekta-red.svg?style=for-the-badge&colorA=ee6130&colorB=00a4ac)](https://conekta.com)
 </div>
@@ -24,7 +24,7 @@ Current version features:
 
 Version Compatibility
 ---------------------
-This plugin has been tested on WordPress 6.4.2  WooCommerce 8.5.0
+This plugin has been tested on WordPress 6.7.1 WooCommerce 9.4.2
 
 Installation
 -----------
