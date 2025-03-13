@@ -202,9 +202,15 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      * @throws Exception
      */
     public function process_payment($order_id)
-    {
+    { 
         global $woocommerce;
         $order = new WC_Order($order_id);
+        return;
+        return array(
+            'result' => 'success',
+            'redirect' => $this->get_return_url($order)
+        );
+       
         $data = ckpg_get_request_data($order);
         $redirect_url = $this->get_return_url($order);
         $items = $order->get_items();
