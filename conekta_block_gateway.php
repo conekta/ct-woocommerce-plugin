@@ -27,6 +27,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $title;
     public $description;
     public $api_key;
+    public $public_api_key;
     public $webhook_url;
 
     /**
@@ -46,6 +47,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                                                 WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
                                                 . '/images/credits.png';
         $this->api_key = $this->settings['cards_api_key'];
+        $this->public_api_key = $this->settings['cards_public_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
@@ -131,6 +133,13 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'type' => 'password',
                 'title' => __('Conekta API key', 'woothemes'),
                 'description' => __('API Key Producción (Tokens/Llave Privada)', 'woothemes'),
+                'default' => __('', 'woothemes'),
+                'required' => true
+            ),
+            'cards_public_api_key' => array(
+                'type' => 'password',
+                'title' => __('Conekta public API key', 'woothemes'),
+                'description' => __(' Public API Key Producción (Tokens/Llave Public)', 'woothemes'),
                 'default' => __('', 'woothemes'),
                 'required' => true
             ),
@@ -238,6 +247,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     'reference_id' => strval($order->get_id()),
                 ]
             ],
+            //"three_ds_mode"=> "strict",    // todo if you want to use 3DS
+            //"return_url"=> $this->get_return_url( $order ), // todo if you want to use 3DS
             'shipping_lines' => $shipping_lines,
             'discount_lines' => $discount_lines,
             'tax_lines' => $tax_lines,
@@ -255,6 +266,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             $result->set_status( 'success' );
             $result->set_redirect_url($this->get_return_url( $order ));
+            //$result->set_redirect_url($orderCreated->getNextAction()->getRedirectToUrl()->getUrl()); // todo if you want to use 3DS
         } catch (ApiException $e) {
             $description = $e->getMessage();
             wc_add_notice(__('Error: ', 'woothemes') . $description);
