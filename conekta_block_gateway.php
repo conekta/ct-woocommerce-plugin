@@ -205,6 +205,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     { 
         global $woocommerce;
         $order = new WC_Order($order_id);
+        print_r($order, true);
         return;
         return array(
             'result' => 'success',

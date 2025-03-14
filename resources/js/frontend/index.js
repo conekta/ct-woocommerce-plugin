@@ -9,23 +9,52 @@ const labelConekta = decodeEntities(settings.title);
 /**
  * Content component
  */
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const ContentConekta = (props) => {
 	
+	const { eventRegistration, emitResponse } = props;
 	console.log(props)
 	const conektaSubmitFunction = useRef(null);
 	
-	const { onCheckoutValidationBeforeProcessing	} = props.eventRegistration
+	const { onPaymentProcessing	} = eventRegistration;
 
     useEffect(() => {
-        const unsubscribe = onCheckoutValidationBeforeProcessing(() => {
+		const waitAndReturnMessage = async () => {
+			await delay(10000);
+			return "Frank 10 segundos";
+		  };
+		console.error('epale 1');
+        const unsubscribe = onPaymentProcessing(async () => {
+		console.error('epale 2');
+
             if (conektaSubmitFunction.current) {
-                conektaSubmitFunction.current();
+				console.error('epale 3');
+                //await conektaSubmitFunction.current();
+				const message = await waitAndReturnMessage();
+				console.error('epale 4', message);
+                
+                return {
+					type: emitResponse.responseTypes.SUCCESS,
+					meta: {
+						paymentMethodData: {
+							token: 'tok_test_visa_4242',
+						},
+					}
+				};
             } else {
                 console.error('Conekta submit function not available.');
+                return {
+                    type: emitResponse.responseTypes.ERROR,
+                    message: 'There was an error',
+                };
             }
         });
-        return unsubscribe;
-    }, [onCheckoutValidationBeforeProcessing]);
+		return () => {
+			unsubscribe();
+		};
+    }, [emitResponse.responseTypes.ERROR,
+		emitResponse.responseTypes.SUCCESS,
+		onPaymentProcessing]);
 
     useEffect(() => {
         const script = document.createElement('script');
@@ -48,8 +77,18 @@ const ContentConekta = (props) => {
                 onGetInfoSuccess: function (loadingTime) {
                     console.log("loadingTime");
                 },
-                onUpdateSubmitTrigger: function (submitFunction) {
-                    conektaSubmitFunction.current = submitFunction;
+                onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
+                    conektaSubmitFunction.current = async () => {
+                        console.log("Conekta submit function called");
+                        try {
+                            const result = await triggerSubmitFromExternalFunction();
+                            console.log("Conekta submit function result:", result);
+                            return result;
+                        } catch (error) {
+                            console.error("Error in submit function:", error);
+                            throw error;
+                        }
+                    };
                 },
             };
             if (window.ConektaCheckoutComponents) {
@@ -93,29 +132,21 @@ const LabelConekta = (props) => {
         </div>
     );
 };
-const SavedTokenComponent = (props) => {
-	console.log(props)
-	return (
-        <>
-           
-        </>
-    );
-}
+
 /**
  * conekta payment method config object.
  */
 const conekta = {
     name: settings.name,
     label: <LabelConekta />,
+	edit:<ContentConekta />,
     content: <ContentConekta />,
-    edit: <ContentConekta />,
     canMakePayment: () => settings.is_enabled || false,
     ariaLabel: labelConekta,
     supports: {
 		showSavedCards:true,
 	},
-    icons: [],
-	savedTokenComponent: <SavedTokenComponent />,
+    icons: []
 };
 
 registerPaymentMethod(conekta);
