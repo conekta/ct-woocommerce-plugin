@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@woocommerce/settings": "^1.0.0",
-    "@wordpress/hooks": "^4.20.0",
     "@wordpress/html-entities": "^3.48.0"
   }
 }

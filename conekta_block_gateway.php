@@ -60,6 +60,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($this->api_key)) {
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
         }
+        add_action('woocommerce_rest_checkout_process_payment_with_context', [$this, 'process_payment_api'], 10, 2);
     }
 
     public function configure_webhook()
@@ -196,24 +197,21 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
     public function get_api_instance(): OrdersApi
     {
-       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['cards_api_key']));
+       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['cards_api_key'])->setHost("https://api.stg.conekta.io"));
     }
-    /**
-     * @throws Exception
-     */
-    public function process_payment($order_id)
-    { 
+    
+    public function process_payment_api($context, $result) {
         global $woocommerce;
-        $order = new WC_Order($order_id);
-        print_r($order, true);
-        return;
-        return array(
-            'result' => 'success',
-            'redirect' => $this->get_return_url($order)
-        );
-       
+        $order = $context->order;
+        if ($context->payment_method !== $this->id) {
+            return;
+        }
+
+        $token_id = $context->payment_data['conekta_token'];
+        if (empty($token_id)) {
+            throw new \Exception('Token de pago no recibido.');
+        }
         $data = ckpg_get_request_data($order);
-        $redirect_url = $this->get_return_url($order);
         $items = $order->get_items();
         $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
         $discount_lines = ckpg_build_discount_lines($data);
@@ -230,16 +228,15 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         );
         $rq = new OrderRequest([
             'currency' => $data['currency'],
-            'checkout' => [
-                'allowed_payment_methods' => ['card'],
-                'success_url' => $redirect_url,
-                'failure_url' => $redirect_url,
-                'monthly_installments_enabled' => filter_var($this->settings['is_msi_enabled'], FILTER_VALIDATE_BOOLEAN),
-                'monthly_installments_options' => array_map('intval', is_array($this->settings['months']) ? $this->settings['months'] : array()),
-                'name' => sprintf('Compra de %s', $customer_info['name']),
-                'type' => 'HostedPayment',
-                'redirection_time' => 10,
-                'expires_at' => get_expired_at($this->settings['order_expiration']),
+            'charges' => [
+                [
+                    'payment_method' => [
+                        'type' => 'card',
+                        'token_id' => $token_id,
+                        'expires_at' => get_expired_at($this->settings['order_expiration']),
+                    ],
+                    'reference_id' => strval($order->get_id()),
+                ]
             ],
             'shipping_lines' => $shipping_lines,
             'discount_lines' => $discount_lines,
@@ -251,21 +248,20 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($shipping_contact)) {
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
+
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
-            return array(
-                'result' => 'success',
-                'redirect' => $orderCreated->getCheckout()->getUrl()
-            );
-        } catch (Exception $e) {
+            $result->set_status( 'success' );
+            $result->set_redirect_url($this->get_return_url( $order ));
+        } catch (ApiException $e) {
             $description = $e->getMessage();
             wc_add_notice(__('Error: ', 'woothemes') . $description);
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
+            $result->set_status( 'fail' );
         }
-
     }
 
     /**

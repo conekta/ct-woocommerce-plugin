@@ -32,13 +32,11 @@ const ContentConekta = (props) => {
             if (conektaSubmitFunction.current) {
                 conektaSubmitFunction.current();
 				const token = await waitAndReturnMessage();
-				console.log('epale 4', token);
-                
                 return {
 					type: emitResponse.responseTypes.SUCCESS,
 					meta: {
 						paymentMethodData: {
-							token
+							"conekta_token" : token
 						},
 					}
 				};
