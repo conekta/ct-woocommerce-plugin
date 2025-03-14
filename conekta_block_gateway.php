@@ -130,18 +130,18 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'required' => true
             ),
             'cards_api_key' => array(
-                'type' => 'password',
-                'title' => __('Conekta API key', 'woothemes'),
-                'description' => __('API Key Producción (Tokens/Llave Privada)', 'woothemes'),
-                'default' => __('', 'woothemes'),
-                'required' => true
+                'type'        => 'password',
+                'title'       => __('Conekta API key', 'woothemes'),
+                'description' => __('API Key Producción (Tokens/Llave Privada). Consulta más información en <a href="https://developers.conekta.com/docs/api-keys-producci%C3%B3n" target="_blank">la documentación oficial</a>.', 'woothemes'),
+                'default'     => __('', 'woothemes'),
+                'required'    => true
             ),
             'cards_public_api_key' => array(
-                'type' => 'password',
-                'title' => __('Conekta public API key', 'woothemes'),
-                'description' => __(' Public API Key Producción (Tokens/Llave Public)', 'woothemes'),
-                'default' => __('', 'woothemes'),
-                'required' => true
+                'type'        => 'password',
+                'title'       => __('Conekta public API key', 'woothemes'),
+                'description' => __('Public API Key Producción (Tokens/Llave Pública). Consulta más información en <a href="https://developers.conekta.com/docs/api-keys-pruebas" target="_blank">la documentación oficial</a>.', 'woothemes'),
+                'default'     => __('', 'woothemes'),
+                'required'    => true
             ),
             'order_expiration' => array(
                 'type' => 'number',
