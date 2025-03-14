@@ -15,20 +15,19 @@ const ContentConekta = (props) => {
 	
 	const { eventRegistration, emitResponse } = props;
 	const conektaSubmitFunction = useRef(null);
-	const { onPaymentProcessing	} = eventRegistration;
+	const { onPaymentSetup	} = eventRegistration;
     const {loadScript} = useComponentScript();
 
     useEffect(() => {
 		const waitAndReturnMessage =() =>{
             return new Promise((resolve) => {
                 tokenEmitter.onToken((token) => {
-                    console.log("token recibido:", token);
                     resolve(token);
                   });
             });
           }
           
-        const unsubscribe = onPaymentProcessing(async () => {
+        const unsubscribe = onPaymentSetup(async () => {
             if (conektaSubmitFunction.current) {
                 conektaSubmitFunction.current();
 				const token = await waitAndReturnMessage();
@@ -53,7 +52,7 @@ const ContentConekta = (props) => {
 		};
     }, [emitResponse.responseTypes.ERROR,
 		emitResponse.responseTypes.SUCCESS,
-		onPaymentProcessing]);
+		onPaymentSetup]);
 
     useEffect(() => {
         const script = loadScript(settings.api_key, conektaSubmitFunction, tokenEmitter);

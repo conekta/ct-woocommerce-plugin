@@ -260,7 +260,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             wc_add_notice(__('Error: ', 'woothemes') . $description);
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
-            $result->set_status( 'fail' );
+            $result->set_status( 'failure' );
         }
     }
 

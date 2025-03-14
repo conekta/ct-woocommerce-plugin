@@ -20,7 +20,6 @@ export const useComponentScript = () => {
                 },
                 onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
                     conektaSubmitFunction.current = async () => {
-                        console.log("Conekta submit function called");
                         try {
                             const result = await triggerSubmitFromExternalFunction();
                             return result;
