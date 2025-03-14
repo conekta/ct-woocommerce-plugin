@@ -2,42 +2,43 @@ import { registerPaymentMethod } from '@woocommerce/blocks-registry';
 import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef } from '@wordpress/element';
+import { TokenEmitter } from './TokenEmitter';
+import { useComponentScript } from './useComponentScript';
+
 const settings = getSetting('conekta_data', {});
 const labelConekta = decodeEntities(settings.title);
-
-
+const tokenEmitter = new TokenEmitter();
 /**
  * Content component
  */
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const ContentConekta = (props) => {
 	
 	const { eventRegistration, emitResponse } = props;
-	console.log(props)
 	const conektaSubmitFunction = useRef(null);
-	
 	const { onPaymentProcessing	} = eventRegistration;
+    const {loadScript} = useComponentScript();
 
     useEffect(() => {
-		const waitAndReturnMessage = async () => {
-			await delay(10000);
-			return "Frank 10 segundos";
-		  };
-		console.error('epale 1');
+		const waitAndReturnMessage =() =>{
+            return new Promise((resolve) => {
+                tokenEmitter.onToken((token) => {
+                    console.log("token recibido:", token);
+                    resolve(token);
+                  });
+            });
+          }
+          
         const unsubscribe = onPaymentProcessing(async () => {
-		console.error('epale 2');
-
             if (conektaSubmitFunction.current) {
-				console.error('epale 3');
-                //await conektaSubmitFunction.current();
-				const message = await waitAndReturnMessage();
-				console.error('epale 4', message);
+                conektaSubmitFunction.current();
+				const token = await waitAndReturnMessage();
+				console.log('epale 4', token);
                 
                 return {
 					type: emitResponse.responseTypes.SUCCESS,
 					meta: {
 						paymentMethodData: {
-							token: 'tok_test_visa_4242',
+							token
 						},
 					}
 				};
@@ -57,48 +58,7 @@ const ContentConekta = (props) => {
 		onPaymentProcessing]);
 
     useEffect(() => {
-        const script = document.createElement('script');
-        script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
-        script.async = true;
-        script.onload = () => {
-            const config = {
-                targetIFrame: "#conektaIframeContainer",
-                publicKey: settings.api_key,
-                locale: 'es',
-                useExternalSubmit: true,
-            };
-            const callbacks = {
-                onCreateTokenSucceeded: function (token) {
-                    console.log(token);
-                },
-                onCreateTokenError: function (error) {
-                    console.log(error);
-                },
-                onGetInfoSuccess: function (loadingTime) {
-                    console.log("loadingTime");
-                },
-                onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
-                    conektaSubmitFunction.current = async () => {
-                        console.log("Conekta submit function called");
-                        try {
-                            const result = await triggerSubmitFromExternalFunction();
-                            console.log("Conekta submit function result:", result);
-                            return result;
-                        } catch (error) {
-                            console.error("Error in submit function:", error);
-                            throw error;
-                        }
-                    };
-                },
-            };
-            if (window.ConektaCheckoutComponents) {
-                window.ConektaCheckoutComponents.Card({
-                    config,
-                    callbacks,
-                    allowTokenization: true,
-                });
-            }
-        };
+        const script = loadScript(settings.api_key, conektaSubmitFunction, tokenEmitter);
         document.body.appendChild(script);
 
         return () => {
@@ -109,6 +69,7 @@ const ContentConekta = (props) => {
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
+            <input type="hidden" id="conekta-token"/>
             <div id="conektaIframeContainer" style={{ height: '500px' }}></div>
         </div>
     );
