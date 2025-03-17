@@ -17,6 +17,7 @@ steps:
       - apk add --no-cache curl
       - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
       - composer install --no-interaction --no-progress
+      - vendor/bin/phpcs --standard=PSR2 .
   - name: install dependencies node
     image: node:16
     commands:
