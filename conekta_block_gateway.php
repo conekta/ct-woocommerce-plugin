@@ -70,6 +70,17 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     {
         $this->create_webhook($this->settings['cards_api_key'], $this->settings['webhook_url']);
     }
+    public function process_admin_options()
+    {
+        parent::process_admin_options();
+
+        if (empty($this->get_option('cards_public_api_key'))) {
+            WC_Admin_Settings::add_error(__('Error: La clave pública de Conekta es obligatoria.', 'woothemes'));
+        }
+        if (empty($this->get_option('cards_api_key'))) {
+            WC_Admin_Settings::add_error(__('Error: La clave privada de Conekta es obligatoria.', 'woothemes'));
+        }
+    }
     /**
      * @throws ApiException
      */
@@ -141,7 +152,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'type'        => 'password',
                 'title'       => __('Conekta public API key', 'woothemes'),
                 'description' => __('Public API Key Producción (Tokens/Llave Pública). Consulta más información en <a href="https://developers.conekta.com/docs/api-keys-pruebas" target="_blank">la documentación oficial</a>.', 'woothemes'),
-                'default'     => __('', 'woothemes'),
                 'required'    => true
             ),
             'order_expiration' => array(
