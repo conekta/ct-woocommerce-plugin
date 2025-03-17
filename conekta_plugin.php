@@ -11,6 +11,10 @@ use \Conekta\Configuration;
 use \Conekta\Model\WebhookRequest;
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Client;
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
@@ -177,22 +181,46 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     
         return in_array($site_locale, ['es', 'en']) ? $site_locale : 'es';
     }
-    function get_user_ip() {
+    public static function get_user_ip(): string {
         $ip_keys = [
-            'HTTP_CF_CONNECTING_IP', // Cloudflare
-            'HTTP_X_REAL_IP',         // Nginx/LiteSpeed
-            'HTTP_X_FORWARDED_FOR',   // Proxy, balanceadores
+            'HTTP_X_FORWARDED_FOR',   // Load Balancer / Proxies
+            'HTTP_CF_CONNECTING_IP',  // Cloudflare
+            'HTTP_X_REAL_IP',         // Nginx
             'HTTP_CLIENT_IP',         // Proxy
-            'REMOTE_ADDR'             // Fallback (última opción)
+            'REMOTE_ADDR'             // Último recurso
         ];
     
         foreach ($ip_keys as $key) {
             if (!empty($_SERVER[$key])) {
-                $ip_list = explode(',', $_SERVER[$key]); 
-                return trim($ip_list[0]);
+                $ip_list = explode(',', $_SERVER[$key]);
+                $ip_list = array_map('trim', $ip_list);
+
+                foreach (array_reverse($ip_list) as $ip) {
+                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                        return $ip;
+                    }
+                }
             }
         }
     
         return '0.0.0.0';
+    }
+
+    public static function get_api_instance(string  $api_key, string $version): OrdersApi
+    {
+        $stack = HandlerStack::create();
+        $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
+            return $request->withHeader(
+                'X-Conekta-Client-User-Agent',
+                json_encode([
+                    'plugin_name' => 'woocommerce',
+                    'plugin_version' => $version,
+                ])
+            );
+        }));
+        $client = new Client([
+            'handler' => $stack,
+        ]);
+        return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key)->setHost("https://api.stg.conekta.io"));
     }
 }
