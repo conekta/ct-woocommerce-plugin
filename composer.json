@@ -13,5 +13,8 @@
     ],
     "require": {
         "conekta/conekta-php": "6.0.7"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.11"
     }
 }
