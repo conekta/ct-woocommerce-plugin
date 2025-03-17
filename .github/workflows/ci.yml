@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18' # Cambia a la versión que necesites
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run ESLint
+        run: npm run lint # Asegúrate de tener un script de lint en tu package.json
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0' # Cambia a la versión que necesites
+          tools: composer
+
+      - name: Install Composer dependencies
+        run: composer install
+
+      - name: Run PHP CodeSniffer
+        run: vendor/bin/phpcs --standard=PSR2 src/ # Cambia 'src/' a la ruta de tu código PHP
