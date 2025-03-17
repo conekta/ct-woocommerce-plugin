@@ -12,7 +12,7 @@ const tokenEmitter = new TokenEmitter();
  * Content component
  */
 const ContentConekta = (props) => {
-	
+	const locale = settings.locale;
 	const { eventRegistration, emitResponse } = props;
 	const conektaSubmitFunction = useRef(null);
 	const { onPaymentSetup	} = eventRegistration;
@@ -55,7 +55,7 @@ const ContentConekta = (props) => {
 		onPaymentSetup]);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key, conektaSubmitFunction, tokenEmitter);
+        const script = loadScript(settings.api_key,locale, conektaSubmitFunction, tokenEmitter);
         document.body.appendChild(script);
 
         return () => {

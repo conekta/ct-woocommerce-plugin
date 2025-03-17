@@ -162,4 +162,37 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         $order->save();
     }
 
+    public static function get_user_locale() {
+        $current_user_id = get_current_user_id();
+
+        if ($current_user_id) {
+            $user_locale = get_user_meta($current_user_id, 'locale', true);
+    
+            if (!empty($user_locale)) {
+                return in_array(substr($user_locale, 0, 2), ['es', 'en']) ? substr($user_locale, 0, 2) : 'es';
+            }
+        }
+    
+        $site_locale = substr(get_locale(), 0, 2);
+    
+        return in_array($site_locale, ['es', 'en']) ? $site_locale : 'es';
+    }
+    function get_user_ip() {
+        $ip_keys = [
+            'HTTP_CF_CONNECTING_IP', // Cloudflare
+            'HTTP_X_REAL_IP',         // Nginx/LiteSpeed
+            'HTTP_X_FORWARDED_FOR',   // Proxy, balanceadores
+            'HTTP_CLIENT_IP',         // Proxy
+            'REMOTE_ADDR'             // Fallback (última opción)
+        ];
+    
+        foreach ($ip_keys as $key) {
+            if (!empty($_SERVER[$key])) {
+                $ip_list = explode(',', $_SERVER[$key]); 
+                return trim($ip_list[0]);
+            }
+        }
+    
+        return '0.0.0.0';
+    }
 }

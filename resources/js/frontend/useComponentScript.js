@@ -1,6 +1,6 @@
 
 export const useComponentScript = () => {
-  const loadScript = (publicKey, conektaSubmitFunction, tokenEmitter)=>{
+  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter)=>{
     const script = document.createElement('script');
         script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
         script.async = true;
@@ -8,7 +8,7 @@ export const useComponentScript = () => {
             const config = {
                 targetIFrame: "#conektaIframeContainer",
                 publicKey,
-                locale: 'es',
+                locale: locale,
                 useExternalSubmit: true,
             };
             const callbacks = {

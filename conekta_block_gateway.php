@@ -243,6 +243,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                         'type' => 'card',
                         'token_id' => $token_id,
                         'expires_at' => get_expired_at($this->settings['order_expiration']),
+                        'customer_ip_address' => $this->get_user_ip(),
                     ],
                     'reference_id' => strval($order->get_id()),
                 ]
@@ -261,7 +262,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
 
         try {
-            $orderCreated = $this->get_api_instance()->createOrder($rq);
+            $orderCreated = $this->get_api_instance()->createOrder($rq, $this->get_user_locale());
             $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             $result->set_status( 'success' );
