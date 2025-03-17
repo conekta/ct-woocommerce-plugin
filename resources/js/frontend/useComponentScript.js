@@ -2,13 +2,13 @@
 export const useComponentScript = () => {
   const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter)=>{
     const script = document.createElement('script');
-        script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
+        script.src = "https://localhost:9092/v1.0/js/conekta-checkout.min.js";
         script.async = true;
         script.onload = () => {
             const config = {
                 targetIFrame: "#conektaIframeContainer",
                 publicKey,
-                locale: locale,
+                locale,
                 useExternalSubmit: true,
             };
             const callbacks = {
@@ -16,13 +16,15 @@ export const useComponentScript = () => {
                     tokenEmitter.setToken(token.id);
                 },
                 onCreateTokenError: function (error) {
-                    console.log(error);
+                    tokenEmitter.setError(error);
+                },
+                onFormError: function (error) {
+                    tokenEmitter.setError({...error, isFormError: true});
                 },
                 onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
                     conektaSubmitFunction.current = async () => {
                         try {
-                            const result = await triggerSubmitFromExternalFunction();
-                            return result;
+                            await triggerSubmitFromExternalFunction();
                         } catch (error) {
                             console.error("Error in submit function:", error);
                             throw error;

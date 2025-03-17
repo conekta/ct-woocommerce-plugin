@@ -4,58 +4,77 @@ import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef } from '@wordpress/element';
 import { TokenEmitter } from './TokenEmitter';
 import { useComponentScript } from './useComponentScript';
+import { TRANSLATIONS_FILES } from './translations';
 
 const settings = getSetting('conekta_data', {});
 const labelConekta = decodeEntities(settings.title);
 const tokenEmitter = new TokenEmitter();
-/**
- * Content component
- */
+
+const waitGetToken = () => {
+    return new Promise((resolve, reject) => {
+        tokenEmitter.resetStates();
+
+        let timeout = setTimeout(() => {
+            reject(new Error("Timeout esperando token"));
+        }, 30000);
+
+        tokenEmitter.onToken((token) => {
+            clearTimeout(timeout);
+            resolve(token);
+        });
+
+        tokenEmitter.onError((error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
+    });
+};
+
 const ContentConekta = (props) => {
-	const locale = settings.locale;
-	const { eventRegistration, emitResponse } = props;
-	const conektaSubmitFunction = useRef(null);
-	const { onPaymentSetup	} = eventRegistration;
-    const {loadScript} = useComponentScript();
+    const locale = settings.locale ?? 'es';
+    const { eventRegistration, emitResponse } = props;
+    const conektaSubmitFunction = useRef(null);
+    const { onPaymentSetup } = eventRegistration;
+    const { loadScript } = useComponentScript();
 
     useEffect(() => {
-		const waitAndReturnMessage =() =>{
-            return new Promise((resolve) => {
-                tokenEmitter.onToken((token) => {
-                    resolve(token);
-                  });
-            });
-          }
-          
         const unsubscribe = onPaymentSetup(async () => {
-            if (conektaSubmitFunction.current) {
-                conektaSubmitFunction.current();
-				const token = await waitAndReturnMessage();
-                return {
-					type: emitResponse.responseTypes.SUCCESS,
-					meta: {
-						paymentMethodData: {
-							"conekta_token" : token
-						},
-					}
-				};
-            } else {
-                console.error('Conekta submit function not available.');
+            if (!conektaSubmitFunction.current) {
+                console.error("Conekta submit function no disponible.");
                 return {
                     type: emitResponse.responseTypes.ERROR,
-                    message: 'There was an error',
+                    message: "There was an error",
+                };
+            }
+
+            try {
+                conektaSubmitFunction.current();
+
+                const token = await waitGetToken();
+                console.log("Pago exitoso con token:", token);
+
+                return {
+                    type: emitResponse.responseTypes.SUCCESS,
+                    meta: {
+                        paymentMethodData: {
+                            conekta_token: token
+                        },
+                    }
+                };
+            } catch (error) {
+                console.error("Error en el pago:", error);
+                return {
+                    type: emitResponse.responseTypes.ERROR,
+                    message: error.isFormError ? TRANSLATIONS_FILES[locale].form_error : "There was an error",
                 };
             }
         });
-		return () => {
-			unsubscribe();
-		};
-    }, [emitResponse.responseTypes.ERROR,
-		emitResponse.responseTypes.SUCCESS,
-		onPaymentSetup]);
+
+        return () => unsubscribe();
+    }, []);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key,locale, conektaSubmitFunction, tokenEmitter);
+        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter);
         document.body.appendChild(script);
 
         return () => {
@@ -66,7 +85,6 @@ const ContentConekta = (props) => {
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            <input type="hidden" id="conekta-token"/>
             <div id="conektaIframeContainer" style={{ height: '500px' }}></div>
         </div>
     );
@@ -92,18 +110,18 @@ const LabelConekta = (props) => {
 };
 
 /**
- * conekta payment method config object.
+  * conekta payment method config object.
  */
 const conekta = {
     name: settings.name,
     label: <LabelConekta />,
-	edit:<ContentConekta />,
+    edit: <ContentConekta />,
     content: <ContentConekta />,
     canMakePayment: () => settings.is_enabled || false,
     ariaLabel: labelConekta,
     supports: {
-		showSavedCards:true,
-	},
+        showSavedCards: true,
+    },
     icons: []
 };
 
