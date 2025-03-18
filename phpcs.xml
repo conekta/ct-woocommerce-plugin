@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<ruleset name="MyProject">
+    <description>Custom rules for my project</description>
+
+    <!-- Incluir el estándar PSR2 -->
+    <rule ref="PSR2"/>
+
+    <!-- Desactivar la regla de indentación con espacios -->
+    <rule ref="Generic.WhiteSpace.DisallowTabIndent">
+        <severity>0</severity>
+    </rule>
+
+     <!-- Desactivar la regla de longitud de línea -->
+    <rule ref="Generic.Files.LineLength">
+        <severity>0</severity>
+    </rule>
+
+    <rule ref="Squiz.ControlStructures.ControlSignature.SpaceAfterCloseParenthesis">
+        <severity>0</severity>
+    </rule>
+
+    <rule ref="Squiz.ControlStructures.ControlSignature.SpaceBeforeCloseParenthesis">
+        <severity>0</severity>
+    </rule>
+
+  <!-- Or disable it completely: -->
+<exclude name="WordPress.WhiteSpace.ControlStructureSpacing.NoSpaceAfterOpenParenthesis"/>
+
+</ruleset>
