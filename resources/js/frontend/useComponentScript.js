@@ -2,7 +2,7 @@
 export const useComponentScript = () => {
   const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter)=>{
     const script = document.createElement('script');
-        script.src = "https://localhost:9092/v1.0/js/conekta-checkout.min.js";
+        script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
         script.async = true;
         script.onload = () => {
             const config = {
