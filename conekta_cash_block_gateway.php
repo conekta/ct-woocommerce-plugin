@@ -274,7 +274,9 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $shipping_lines = ckpg_build_shipping_lines($data);
         $shipping_contact = ckpg_build_shipping_contact($data);
         $taxes = $order->get_taxes();
+        $fees = $order->get_fees();
         $tax_lines = ckpg_build_tax_lines($taxes);
+        $tax_lines = array_merge($tax_lines, ckpg_build_fee_lines($fees));
         $customer_info = ckpg_build_customer_info($data);
         $order_metadata = ckpg_build_order_metadata($data + array(
                 'plugin_conekta_version' => $this->version,
