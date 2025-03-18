@@ -50,14 +50,14 @@ const ContentConekta = (props) => {
             try {
                 conektaSubmitFunction.current();
 
-                const token = await waitGetToken();
-                console.log("Pago exitoso con token:", token);
+                const orderId = await waitGetToken();
+                console.log("Pago exitoso con orderId:", orderId);
 
                 return {
                     type: emitResponse.responseTypes.SUCCESS,
                     meta: {
                         paymentMethodData: {
-                            conekta_token: token
+                            conekta_order_id: orderId
                         },
                     }
                 };
@@ -85,7 +85,7 @@ const ContentConekta = (props) => {
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            <div id="conektaIframeContainer" style={{ height: '500px' }}></div>
+            <div id="conektaIframeContainer" style={{ height: '560px' }}></div>
         </div>
     );
 };

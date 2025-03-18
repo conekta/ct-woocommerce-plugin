@@ -10,17 +10,22 @@ export const useComponentScript = () => {
                 publicKey,
                 locale,
                 useExternalSubmit: true,
+                checkoutRequestId: '3786c62f-c0e7-453a-8a57-f2d095d13528'
             };
             const callbacks = {
-                onCreateTokenSucceeded: function (token) {
-                    tokenEmitter.setToken(token.id);
-                },
                 onCreateTokenError: function (error) {
                     tokenEmitter.setError(error);
                 },
                 onFormError: function (error) {
                     tokenEmitter.setError({...error, isFormError: true});
                 },
+                onFinalizePayment: function (order) {
+                    console.log('success: ', order);
+                    tokenEmitter.setToken(order.id);
+                  },
+                  onErrorPayment: function (error) {
+                    tokenEmitter.setError(error);
+                  },
                 onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
                     conektaSubmitFunction.current = async () => {
                         try {
@@ -33,7 +38,7 @@ export const useComponentScript = () => {
                 },
             };
             if (window.ConektaCheckoutComponents) {
-                window.ConektaCheckoutComponents.Card({
+                window.ConektaCheckoutComponents.Integration({
                     config,
                     callbacks,
                     allowTokenization: true,
