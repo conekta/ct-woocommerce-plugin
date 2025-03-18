@@ -189,6 +189,25 @@ function ckpg_build_customer_info($data)
     return $customer_info;
 }
 
+function ckpg_build_fee_lines($fees): array 
+{
+	$fee_lines = array();
+
+    foreach ($fees as $fee) {
+        $fee_amount = floatval($fee->get_total()) * 1000;
+        $fee_name   = (string)$fee->get_name();
+        $fee_name   = esc_html($fee_name);
+        $fee_lines  = array_merge($fee_lines, array(
+            array(
+                'description' => $fee_name,
+                'amount'      => intval(round(floatval($fee_amount) / 10), 2)
+            )
+        ));
+	}
+	
+	return $fee_lines;
+}
+
 /**
 * Bundle and format the order information
 * Send as much information about the order as possible to Conekta
