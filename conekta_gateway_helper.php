@@ -89,7 +89,7 @@ function ckpg_build_line_items($items, $version)
                                     'soft_validations' => true,
                                     'images' =>  $productmeta->get_gallery_image_ids(),
                                   ),
-            'description' => !empty($productmeta->get_description()) ? $productmeta->get_description() : null
+            'description' => $productmeta->get_description() || 'no description',
         );
 
         if (!empty($sku)) {
