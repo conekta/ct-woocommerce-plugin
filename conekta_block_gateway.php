@@ -276,10 +276,15 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             //$result->set_redirect_url($orderCreated->getNextAction()->getRedirectToUrl()->getUrl()); // todo if you want to use 3DS
         } catch (ApiException $e) {
             $description = $e->getMessage();
-            wc_add_notice(__('Error: ', 'woothemes') . $description);
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
             $result->set_status( 'failure' );
+            $result->set_payment_details( array_merge(
+                $result->payment_details,
+                [
+                    'error' => $e->getResponseObject(),
+                ]
+            ));
         }
     }
 
