@@ -80,6 +80,7 @@ final class WC_Gateway_Conekta_Bank_Transfer_Blocks_Support extends AbstractPaym
             'description' 		        => $this->get_setting( 'description' ),
             'supports'    			    => array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] ),
             'name'                      => $this->name,
+			'api_key'                   => $this->get_setting( 'api_key' ),
         ];
     }
 }
