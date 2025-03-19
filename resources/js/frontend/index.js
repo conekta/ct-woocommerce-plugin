@@ -31,6 +31,7 @@ const waitGetToken = () => {
 };
 
 const ContentConekta = (props) => {
+    console.log("settings", settings);
     const locale = settings.locale ?? 'es';
     const { eventRegistration, emitResponse } = props;
     const conektaSubmitFunction = useRef(null);
@@ -51,7 +52,6 @@ const ContentConekta = (props) => {
                 conektaSubmitFunction.current();
 
                 const orderId = await waitGetToken();
-                console.log("Pago exitoso con orderId:", orderId);
 
                 return {
                     type: emitResponse.responseTypes.SUCCESS,
@@ -74,7 +74,7 @@ const ContentConekta = (props) => {
     }, []);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter);
+        const script = loadScript(settings.api_key, locale,settings.conekta_checkout_request_id, conektaSubmitFunction, tokenEmitter);
         document.body.appendChild(script);
 
         return () => {

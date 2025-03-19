@@ -1,16 +1,16 @@
 
 export const useComponentScript = () => {
-  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter)=>{
+  const loadScript = (publicKey, locale, conekta_checkout_request_id, conektaSubmitFunction, tokenEmitter)=>{
     const script = document.createElement('script');
         script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
         script.async = true;
         script.onload = () => {
             const config = {
                 targetIFrame: "#conektaIframeContainer",
-                publicKey,
                 locale,
+                publicKey,
                 useExternalSubmit: true,
-                checkoutRequestId: '3786c62f-c0e7-453a-8a57-f2d095d13528'
+                checkoutRequestId: conekta_checkout_request_id
             };
             const callbacks = {
                 onCreateTokenError: function (error) {
@@ -20,7 +20,6 @@ export const useComponentScript = () => {
                     tokenEmitter.setError({...error, isFormError: true});
                 },
                 onFinalizePayment: function (order) {
-                    console.log('success: ', order);
                     tokenEmitter.setToken(order.id);
                   },
                   onErrorPayment: function (error) {

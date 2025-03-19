@@ -83,7 +83,7 @@ function ckpg_build_line_items($items, $version)
             'name'        => $item_name,
             'unit_price'  => $unit_price,
             'quantity'    => $quantity,
-            'brand'       => !empty($brands) ? $brands[0] : null,
+            'brand'       => !empty($brands) ? $brands[0] : "No Brand",
             'tags'        => array_merge(['WooCommerce', "Conekta ".$version], $tags),
             'metadata'    => array(
                                     'soft_validations' => true,
@@ -316,6 +316,138 @@ function ckpg_get_request_data($order)
         if (!empty($customer_note)) {
             $data = array_merge($data, array('customer_message' => $order->get_customer_note()));
         }
+
+        if(!empty($discount_lines)) {
+            $data = array_merge($data, array('discount_lines' => $discount_lines));
+        }
+
+        return $data;
+    }
+
+    return false;
+}
+function ckpg_get_request_data_from_cart($cart)
+{
+    if ($cart)
+    {
+        // Discount Lines
+        $order_coupons  = $cart->get_coupons();
+        $discount_lines = array();
+
+        foreach($order_coupons as $index => $coupon) {
+            $discount_lines = array_merge($discount_lines,
+                array(
+                    array(
+                        'code'   => $coupon['name'],
+                        'type'   => $coupon['type'],
+                        'amount' => round($coupon['discount_amount'] * 100)
+                    )
+                )
+            );
+        }
+
+        //PARAMS VALIDATION
+        // Shipping Lines
+        $customer =$cart->get_customer();
+
+        if (!empty($cart->get_shipping_methods())) {
+            $shipping_lines = array();
+            foreach ($cart->get_shipping_methods() as $method) {
+                $shipping_lines = array_merge($shipping_lines,
+                    array(
+                        array(
+                            'amount'  => amount_validation((float) $method->get_cost()),
+                            'carrier' =>  $method->get_method_id(),
+                            'method'  => $method->get_label()
+                        )
+                    )
+                );
+            }
+
+            //PARAM VALIDATION
+            $name      = string_validation($customer->get_shipping_first_name());
+            $last      = string_validation($customer->get_shipping_last_name());
+            $address1  = string_validation($customer->get_shipping_address_1());
+            $address2  = string_validation($customer->get_shipping_address_2());
+            $city      = string_validation($customer->get_shipping_city());
+            $state     = string_validation($customer->get_shipping_state());
+            $country   = string_validation($customer->get_shipping_country());
+            $postal    = post_code_validation($customer->get_shipping_postcode());
+
+
+            $shipping_contact = array(
+                'phone'    => $customer->get_billing_phone(),
+                'receiver' => sprintf('%s %s', $name, $last),
+                'address' => array(
+                    'street1'     => $address1,
+                    'street2'     => $address2,
+                    'city'        => $city,
+                    'state'       => $state,
+                    'country'     => $country,
+                    'postal_code' => $postal
+                ),
+            );
+        } else {
+            $name      = string_validation($customer->get_billing_first_name());
+            $last      = string_validation($customer->get_billing_last_name());
+            $address1  = string_validation($customer->get_billing_address_1());
+            $address2  = string_validation($customer->get_billing_address_2());
+            $city      = string_validation($customer->get_billing_city());
+            $state     = string_validation($customer->get_billing_state());
+            $country   = string_validation($customer->get_billing_country());
+            $postal    = post_code_validation($customer->get_billing_postcode());
+            $shipping_lines  = array(
+                array(
+                    'amount'   => 0,
+                    'carrier'  => 'carrier',
+                    'method'   => 'pickup'
+                )
+            );
+            $shipping_contact = array(
+                'phone'    => $customer->get_billing_phone(),
+                'receiver' => sprintf('%s %s', $name, $last),
+                'address' => array(
+                    'street1'     => $address1,
+                    'street2'     => $address2,
+                    'city'        => $city,
+                    'state'       => $state,
+                    'country'     => $country,
+                    'postal_code' => $postal
+                ),
+            );
+        }
+
+        //PARAM VALIDATION
+        $customer_name = sprintf('%s %s', $customer->get_billing_first_name(), $customer->get_billing_last_name());
+        $phone         = sanitize_text_field($customer->get_billing_phone());
+
+        // Customer Info
+        $customer_info = array(
+            'name'  => $customer_name,
+            'phone' => $phone,
+            'email' => $customer->get_billing_email()
+        );
+
+
+        $amount               = validate_total($cart->get_total());
+        $currency             = get_woocommerce_currency();
+
+        $data = array(
+            'order_id'             => 'n/a',
+            'amount'               => $amount,
+            'currency'             => $currency,
+            'description'          => sprintf('Charge for %s', $customer->get_billing_email()),
+            'customer_info'        => $customer_info,
+            'shipping_lines'       => $shipping_lines
+        );
+        if (!empty($address1) && !empty($postal)) {
+            $data = array_merge($data, array('shipping_contact' => $shipping_contact));
+        }
+        /*
+        $customer_note =  $order->get_customer_note();
+        if (!empty($customer_note)) {
+            $data = array_merge($data, array('customer_message' => $order->get_customer_note()));
+        }*/
 
         if(!empty($discount_lines)) {
             $data = array_merge($data, array('discount_lines' => $discount_lines));
