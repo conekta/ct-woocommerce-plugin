@@ -106,6 +106,29 @@ function ckpg_build_line_items($items, $version)
 
     return $line_items;
 }
+function ckpg_build_tax_lines_cart($cart): array {
+    $tax_lines = [];
+
+    foreach ($cart->get_taxes() as $rate_id => $tax_amount) {
+        $tax_name = WC_Tax::get_rate_label($rate_id);
+
+        $tax_lines[] = [
+            'description' => $tax_name,
+            'amount'      => amount_validation(floatval($tax_amount))
+        ];
+    }
+
+    foreach ($cart->get_shipping_taxes() as $rate_id => $shipping_tax_amount) {
+        $shipping_tax_name = WC_Tax::get_rate_label($rate_id);
+
+        $tax_lines[] = [
+            'description' => "Shipping - " . $shipping_tax_name,
+            'amount'      => amount_validation(floatval($shipping_tax_amount))
+        ];
+    }
+
+    return $tax_lines;
+}
 
 function ckpg_build_tax_lines($taxes): array
 {
@@ -340,7 +363,7 @@ function ckpg_get_request_data_from_cart($cart)
             $discount_lines[] = array(
                 'code'   => $coupon->get_code(),
                 'type'   => $coupon->get_discount_type(),
-                'amount' => round($cart->get_coupon_discount_amount($coupon_code) * 100)
+                'amount' => $cart->get_coupon_discount_amount($coupon_code) * 100
             );
         }
 

@@ -272,8 +272,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $discount_lines = ckpg_build_discount_lines($data);
         $shipping_lines = ckpg_build_shipping_lines($data);
         $shipping_contact = ckpg_build_shipping_contact($data);
-        $taxes = $cart->get_taxes();
-        $tax_lines = ckpg_build_tax_lines($taxes);
+        $tax_lines = ckpg_build_tax_lines_cart($cart);
         $customer_info = ckpg_build_customer_info($data);
         $order_metadata = ckpg_build_order_metadata($data + array(
                 'plugin_conekta_version' => $this->version,
