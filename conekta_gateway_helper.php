@@ -331,18 +331,16 @@ function ckpg_get_request_data_from_cart($cart)
     if ($cart)
     {
         // Discount Lines
-        $order_coupons  = $cart->get_coupons();
-        $discount_lines = array();
+        $cart_coupons = $cart->get_applied_coupons();
+        $discount_lines = [];
 
-        foreach($order_coupons as $index => $coupon) {
-            $discount_lines = array_merge($discount_lines,
-                array(
-                    array(
-                        'code'   => $coupon['name'],
-                        'type'   => $coupon['type'],
-                        'amount' => round($coupon['discount_amount'] * 100)
-                    )
-                )
+        foreach ($cart_coupons as $coupon_code) {
+            $coupon = new WC_Coupon($coupon_code);
+
+            $discount_lines[] = array(
+                'code'   => $coupon->get_code(),
+                'type'   => $coupon->get_discount_type(),
+                'amount' => round($cart->get_coupon_discount_amount($coupon_code) * 100)
             );
         }
 
