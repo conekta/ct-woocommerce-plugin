@@ -213,8 +213,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 return;
             }
             self::update_conekta_order_meta( $order, $conekta_order->getId(), 'conekta-order-id');
-            $charge = $conekta_order->getCharges()->getData()[0] ; // ['charges']['data'][0];
-            $paid_at = date("Y-m-d", $charge->getPaidAt());
+            $paid_at = date("Y-m-d");
             update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
             $order->payment_complete();
             $order->add_order_note("Payment completed in Conekta and notification of payment received");

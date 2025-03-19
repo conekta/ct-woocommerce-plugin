@@ -50,7 +50,6 @@ const ContentConekta = (props) => {
 
             try {
                 conektaSubmitFunction.current();
-
                 const orderId = await waitGetToken();
 
                 return {
@@ -119,10 +118,6 @@ const conekta = {
     content: <ContentConekta />,
     canMakePayment: () => settings.is_enabled || false,
     ariaLabel: labelConekta,
-    supports: {
-        showSavedCards: true,
-    },
     icons: []
 };
-
 registerPaymentMethod(conekta);
