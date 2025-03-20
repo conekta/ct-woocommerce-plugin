@@ -22,7 +22,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	public $author = "Conekta.io";
 	public $author_URI = "https://www.conekta.io";
 
-    	public function ckpg_get_version()
+    public function ckpg_get_version()
 	{
 		return $this->version;
 	}
