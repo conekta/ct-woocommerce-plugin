@@ -22,7 +22,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	public $author = "Conekta.io";
 	public $author_URI = "https://www.conekta.io";
 
-	public function ckpg_get_version()
+    	public function ckpg_get_version()
 	{
 		return $this->version;
 	}
@@ -108,7 +108,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         $paid_at = date("Y-m-d", $charge['paid_at']);
         update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
         $order->payment_complete();
-        $order->add_order_note("Payment completed in Conekta and notification of payment received");
+        $order->update_status('completed', __('Payment completed in Conekta and notification of payment received', 'woothemes'));
 
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK', 'order_id' => $order_id]);
