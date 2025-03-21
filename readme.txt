@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 5.0.9 =
-* Added support for displaying custom rates and discounts
+* Added support for custom rates and discounts
 = 5.0.8 =
 * Upgrade Wordpress version
 = 5.0.7 =
