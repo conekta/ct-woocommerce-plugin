@@ -14,7 +14,7 @@ use Conekta\ApiException;
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.0.8";
+	public $version  = "5.1.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -54,7 +54,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             return false;
         }
         try {
-            $api = new WebhooksApi(null, Configuration::getDefaultConfiguration()->setAccessToken($apikey));
+            $api = new WebhooksApi(null, Configuration::getDefaultConfiguration()->setAccessToken($apikey)->setHost("https://api.stg.conekta.io"));
             $webhooks = $api->getWebhooks("es", null,3,null, $webhook_url);
             if (empty($webhooks->getData())) {
                 $webhook = new WebhookRequest();
