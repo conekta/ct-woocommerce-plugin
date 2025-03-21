@@ -123,7 +123,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga a Plazos con Conekta', 'woothemes'),
+                'default' => __('Paga en Plazos con Conekta', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(
