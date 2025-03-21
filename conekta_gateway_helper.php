@@ -209,7 +209,7 @@ function ckpg_build_get_fees($fees): array
         } else {
             $negative_fees[] = array(
                 'code'   => $fee_name,
-                'amount' => $fee_amount_formatted,
+                'amount' => $fee_amount_formatted * -1,
                 'type'   => 'coupon'
             );
         }
