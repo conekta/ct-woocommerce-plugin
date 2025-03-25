@@ -54,7 +54,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             return false;
         }
         try {
-            $api = new WebhooksApi(null, Configuration::getDefaultConfiguration()->setAccessToken($apikey)->setHost("https://api.stg.conekta.io"));
+            $api = new WebhooksApi(null, Configuration::getDefaultConfiguration()->setAccessToken($apikey));
             $webhooks = $api->getWebhooks("es", null,3,null, $webhook_url);
             if (empty($webhooks->getData())) {
                 $webhook = new WebhookRequest();

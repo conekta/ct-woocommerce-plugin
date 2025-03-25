@@ -172,7 +172,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
 
     public function get_api_instance(): OrdersApi
     {
-       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key'])->setHost("https://api.stg.conekta.io"));
+       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
     }
     /**
      * @throws Exception
