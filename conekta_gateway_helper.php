@@ -189,6 +189,40 @@ function ckpg_build_customer_info($data)
     return $customer_info;
 }
 
+function ckpg_build_get_fees($fees): array
+{
+    $negative_fees = array();
+    $positive_fees = array();
+
+    foreach ($fees as $fee) {
+        $price      = $fee->get_total();
+        $fee_amount = floatval($price) * 1000;
+        $fee_name   = (string)$fee->get_name();
+        $fee_name   = esc_html($fee_name);
+        $fee_amount_formatted = intval(round(floatval($fee_amount) / 10), 2);
+
+        if ($price >= 0) {
+            $positive_fees[] = array(
+                'description' => $fee_name,
+                'amount'      => $fee_amount_formatted
+            );
+        } else {
+            $negative_fees[] = array(
+                'code'   => $fee_name,
+                'amount' => $fee_amount_formatted * -1,
+                'type'   => 'coupon'
+            );
+        }
+    } 
+
+    $data = array(
+        'discounts' => $negative_fees,
+        'fees' => $positive_fees,
+    );
+
+    return $data;
+}
+
 /**
 * Bundle and format the order information
 * Send as much information about the order as possible to Conekta
