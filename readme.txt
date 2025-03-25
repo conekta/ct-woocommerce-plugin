@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 5.1.0 =
-* Added bnp payment method
+* Added bnpl payment method
 = 5.0.9 =
 * Added support for custom rates and discounts
 = 5.0.8 =
