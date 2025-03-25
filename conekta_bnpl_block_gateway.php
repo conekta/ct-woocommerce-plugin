@@ -19,7 +19,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
 {
     protected $GATEWAY_NAME = "WC_Conekta_Bnpl_Gateway";
     protected $order = null;
-    protected $currencies = array('MXN', 'USD');
+    protected $currencies = array('MXN');
 
     public $id;
     public $method_title;
@@ -137,7 +137,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
                 'type' => 'number',
                 'title' => __('Vencimiento de las órdenes de pago (Días)', 'woothemes'),
                 'description' => __('La cantidad de dīas configuradas en esta opción, corresponde al tiempo en el que la orden estará activa para ser pagada por el cliente desde el momento de su creación.', 'woothemes'),
-                'default' => __(1),
+                'default' => __(2),
                 'custom_attributes' => array(
                     'min' => 1,
                     'max' => 30,
@@ -184,12 +184,18 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
         $data = ckpg_get_request_data($order);
         $redirect_url = $this->get_return_url($order);
         $items = $order->get_items();
-        $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
+        $taxes = $order->get_taxes();
+        $fees = $order->get_fees();
+        $fees_formatted = ckpg_build_get_fees($fees);
+        $discounts_data = $fees_formatted['discounts'];
+        $fees_data = $fees_formatted['fees'];
+        $tax_lines = ckpg_build_tax_lines($taxes);
+        $tax_lines = array_merge($tax_lines, $fees_data);
         $discount_lines = ckpg_build_discount_lines($data);
+        $discount_lines = array_merge($discount_lines, $discounts_data);
+        $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
         $shipping_lines = ckpg_build_shipping_lines($data);
         $shipping_contact = ckpg_build_shipping_contact($data);
-        $taxes = $order->get_taxes();
-        $tax_lines = ckpg_build_tax_lines($taxes);
         $customer_info = ckpg_build_customer_info($data);
         $order_metadata = ckpg_build_order_metadata($data + array(
                 'plugin_conekta_version' => $this->version,
@@ -220,7 +226,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
         }
         try {
             $orderCreated = $this->get_api_instance()->createOrder($rq);
-            $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
+            $order->update_status('pending', __('Awaiting the conekta bnpl payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             return array(
                 'result' => 'success',
