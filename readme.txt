@@ -1,5 +1,5 @@
 === Conekta Payment Gateway ===
-Contributors: conekta, fcarrero, interfacesconekta
+Contributors: conekta, interfacesconekta
 Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
