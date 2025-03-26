@@ -1,10 +1,10 @@
 === Conekta Payment Gateway ===
-Contributors: conekta, fcarrero, interfacesconekta
+Contributors: conekta, interfacesconekta
 Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.0.8
+Stable tag: 5.0.9
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
