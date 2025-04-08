@@ -29,6 +29,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     public $api_key;
     public $webhook_url;
     public $instructions;
+    public $locale = 'es';
+    public $i18n = [];
 
     /**
      * @throws ApiException|Exception
@@ -49,6 +51,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $this->api_key = $this->settings['api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
         $this->instructions = $this->settings['instructions'];
+        $this->i18n = include plugin_dir_path(__FILE__) . "includes/i18n/{$this->locale}.php";
+
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
@@ -115,36 +119,98 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     {
         return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
     }
+    function render_ckpg_header($product_type) {
+        $text = $this->i18n['header'][$product_type] ?? $this->i18n['header']['default'];
+        echo "<div class=\"conekta-reference-title\">$text</div>";
+    }
+    
+    function render_ckpg_instructions($instructions, $product_type, $reference, $agreement) {
+        echo '<div class="ckpg-instructions"><ol>';
+        foreach ($instructions as $line) {
+            echo "<li>$line</li>";
+        }
+        echo '</ol>';
+        echo '</div>';
+    }
+    
+    function render_ckpg_logos($logos, $product_type) {
+        echo '<div class="ckpg-logo-row">';
+        foreach ($logos as $logo) {
+            echo '<img src="' . esc_url($logo) . '" alt="Logo" class="provider-logo ' . $product_type .'-logo">';
+        }
+        echo '</div>';
+    }
+    
+    function render_ckpg_barcode($barcode_url) {
+        if (!empty($barcode_url)) {
+            echo '<div class="ckpg-barcode"><img src="' . esc_url($barcode_url) . '" alt="Código de barras"></div>';
+        }
+    }
+    
+    function render_ckpg_reference($reference) {
+        echo '<div class="agreement-text">' . esc_html($reference) . '</div>';
+    }
+    
     /**
      * Output for the order received page.
      * @param string $order_id
      * @throws ApiException
      */
     function ckpg_thankyou_page($order_id)
-    {
+{
+    $order = new WC_Order($order_id);
+    $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
+    if (empty($conekta_order_id)) return;
 
-        $order = new WC_Order($order_id);
+    $conekta_order = $this->get_api_instance()->getorderbyid($conekta_order_id);
+    $assets = include plugin_dir_path(__FILE__) . 'includes/blocks/payment-instructions.php';
+    $logos_map = $assets['logos'];
 
-        $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
+    echo '<div class="charges-container">';
+    foreach ($conekta_order->getCharges()->getData() as $charge) {
+        $payment_method = $charge->getPaymentMethod();
+        $method_type = $payment_method->getObject();
+        $product_type = method_exists($payment_method, 'getProductType') ? $payment_method->getProductType() : '';
 
-        if (empty($conekta_order_id)) {
-            return;
-        }
-        $conekta_order = $this->get_api_instance()->getorderbyid($conekta_order_id);
+        if ($method_type === 'cash_payment' && !empty($product_type)) {
+            $reference = $payment_method->getReference();
+            $barcode_url = $payment_method->getBarcodeUrl();
+            $agreement = method_exists($payment_method, 'getAgreement') ? $payment_method->getAgreement() : null;
+            $logos = $logos_map[$product_type] ?? [];
+            $instructions = $this->i18n['instructions'][$product_type] ?? [];
 
-        foreach ($conekta_order->getCharges()->getData() as $charge) {
-            $payment_method = $charge->getPaymentMethod()->getObject();
-            if ($payment_method == 'cash_payment') {
-                $reference = $charge->getPaymentMethod()->getReference();
-                $barcode_url = $charge->getPaymentMethod()->getBarcodeUrl();
-                echo '<p style="font-size: 30px"><strong>' . __('Referencia') . ':</strong> ' . $reference . '</p>';
-                echo '<p><img src="' . esc_url($barcode_url) . '" alt="Código QR" style="border: 2px solid #000; margin: 10px; box-shadow: 3px 3px 10px rgba(0, 0, 0, 0.2);"></p>';
-                echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES: '. esc_html($this->instructions) .'</p>';
-               
+            echo '<div class="ckpg-box">';
+            $this->render_ckpg_header($product_type);
+            $this->render_ckpg_logos($logos, $product_type);
+
+            if ($product_type === 'cash_in') {
+                echo '<p class="conekta-link">' . $this->i18n['extra_note_cash_in'] . '</p>';
             }
+
+            if ($product_type === 'bbva_cash_in') {
+                echo '<p class="commission">' . $this->i18n['commission_note'][$product_type] . '</p>';
+            }
+
+            if (!in_array($product_type, ['bbva_cash_in', 'oxxo'])) {
+                echo '<p class="commission">' . $this->i18n['commission_note']['others'] . '</p>';
+            }
+
+            if ($product_type === 'bbva_cash_in' && $agreement) {
+                echo '<p class="agreement-text small-text">Convenio:' . esc_html($agreement) . '</p>';
+                echo '<p class="agreement-text small-text">Referencia:' . esc_html($reference) . '</p>';
+            }
+
+            if ($product_type !== 'bbva_cash_in') {
+                $this->render_ckpg_barcode($barcode_url);
+                $this->render_ckpg_reference($reference);
+            }
+            echo '<button class="copy-button" onclick="navigator.clipboard.writeText(\'' . esc_js($reference) . '\')">' . $this->i18n['button_copy'] . '</button>';
+            $this->render_ckpg_instructions($instructions, $product_type, $reference, $agreement);
+            echo '</div>';
         }
     }
+    echo '</div>';
+}
 
     public function ckpg_init_form_fields()
     {
@@ -347,6 +413,15 @@ function ckpg_conekta_cash_add_gateway($methods)
 }
 
 add_filter('woocommerce_payment_gateways', 'ckpg_conekta_cash_add_gateway');
+
+add_action('wp_enqueue_scripts', function () {
+    wp_enqueue_style(
+        'ckpg-checkout-style',
+        plugin_dir_url(__FILE__) . 'assets/styles.css',
+        [],
+        '1.0'
+    );
+});
 
 add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_cash_woocommerce_block_support');
 function woocommerce_gateway_conekta_cash_woocommerce_block_support()

@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "687c20c337a318840bad1146d995d2db",
+    "content-hash": "8fd5f528984e9a96ca19d5fb3b1fe4d6",
     "packages": [
         {
             "name": "conekta/conekta-php",
-            "version": "6.0.7",
+            "version": "6.0.11",
             "source": {
                 "type": "git",
                 "url": "https://github.com/conekta/conekta-php.git",
-                "reference": "ed28e0e080c5f9751fd27cf1d08f8012a80e2e09"
+                "reference": "795f9e72e56e456b0204da6821f3d449821b3e68"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/ed28e0e080c5f9751fd27cf1d08f8012a80e2e09",
-                "reference": "ed28e0e080c5f9751fd27cf1d08f8012a80e2e09",
+                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/795f9e72e56e456b0204da6821f3d449821b3e68",
+                "reference": "795f9e72e56e456b0204da6821f3d449821b3e68",
                 "shasum": ""
             },
             "require": {
@@ -30,7 +30,7 @@
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.5",
-                "phpstan/phpstan": "1.10.63",
+                "phpstan/phpstan": "2.0.1",
                 "phpunit/phpunit": "^9.0 || ^10.0"
             },
             "type": "library",
@@ -60,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/conekta/conekta-php/issues",
-                "source": "https://github.com/conekta/conekta-php/tree/v6.0.7"
+                "source": "https://github.com/conekta/conekta-php/tree/v6.0.11"
             },
-            "time": "2024-03-21T23:52:14+00:00"
+            "time": "2024-11-13T14:06:24+00:00"
         },
         {
             "name": "guzzlehttp/guzzle",
@@ -669,5 +669,5 @@
     "prefer-lowest": false,
     "platform": [],
     "platform-dev": [],
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.3.0"
 }
