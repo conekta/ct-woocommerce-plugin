@@ -10,6 +10,8 @@ return [
     ],
     'extra_note_cash_in' => 'y 20+...',
     'button_copy' => 'Copiar número',
+    'agreement' => 'Convenio:',
+    'reference' => 'Referencia:',
     'instructions' => [
         'cash_in' => [
             'Dirígete a uno de nuestros Puntos de Pago en efectivo.',

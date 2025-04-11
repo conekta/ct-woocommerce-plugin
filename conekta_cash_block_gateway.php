@@ -196,8 +196,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             }
 
             if ($product_type === 'bbva_cash_in' && $agreement) {
-                echo '<p class="agreement-text small-text">Convenio:' . esc_html($agreement) . '</p>';
-                echo '<p class="agreement-text small-text">Referencia:' . esc_html($reference) . '</p>';
+                echo '<p class="agreement-text small-text">' . $this->i18n['agreement'] . esc_html($agreement) . '</p>';
+                echo '<p class="agreement-text small-text">' . $this->i18n['reference'] . esc_html($reference) . '</p>';
             }
 
             if ($product_type !== 'bbva_cash_in') {
