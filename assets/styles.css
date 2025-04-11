@@ -15,7 +15,7 @@
     font-family: var(--conekta-font-body);
 }
 
-.conekta-link {
+.conekta-conekta-link {
     font-weight: 400;
     color: var(--conekta-color-primary-500);
     text-decoration: underline;
@@ -25,7 +25,7 @@
     margin: 0;
 }
 
-.agreement-text {
+.conekta-agreement-text {
     font-weight: 700;
     font-size: 1.5rem;
     text-align: center;
@@ -34,11 +34,11 @@
     margin: 0;
 }
 
-.small-text {
+.conekta-small-text {
     font-size: 1rem;
 }
 
-.copy-button {
+.conekta-copy-button {
     all: unset;
     display: inline-flex;
     align-items: center;
@@ -67,7 +67,7 @@
     cursor: pointer;
 }
 
-.charges-container {
+.conekta-charges-container {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -75,7 +75,7 @@
     width: 100%;
 }
 
-.ckpg-box {
+.conekta-box {
     border: 1px solid #e0e0e0;
     border-radius: 8px;
     padding: 20px;
@@ -89,29 +89,29 @@
     align-items: center;
 }
 
-.ckpg-barcode {
+.conekta-barcode {
     text-align: center;
     margin: 12px 0;
 }
 
-.ckpg-ref {
+.conekta-ref {
     font-size: 20px;
     font-weight: bold;
     text-align: center;
     word-break: break-word;
 }
 
-.ckpg-instructions {
+.conekta-instructions {
     font-size: 14px;
     line-height: 1.6;
 }
 
-.ckpg-instructions ol {
+.conekta-instructions ol {
     padding: 0;
     margin-inline: 12px;
 }
 
-.ckpg-logo-row {
+.conekta-logo-row {
     text-align: center;
     margin-bottom: 15px;
     margin-top: 20px;
@@ -120,18 +120,18 @@
     justify-content: center;
 }
 
-.ckpg-logo-row img {
+.conekta-logo-row img {
     margin: 0 5px;
     max-width: 100%;
     height: auto;
 }
 
-.ckpg-logo-row img.bbva_cash_in-logo {
+.conekta-logo-row img.bbva_cash_in-logo {
     max-width: 142px;
     margin-block: 12px;
 }
 
-.commission {
+.conekta-commission {
     font-size: 0.875rem;
     text-align: center;
     font-weight: 600;

@@ -135,7 +135,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     }
     
     function render_ckpg_instructions($instructions, $product_type, $reference, $agreement) {
-        echo '<div class="ckpg-instructions"><ol>';
+        echo '<div class="conekta-instructions"><ol>';
         foreach ($instructions as $line) {
             echo "<li>$line</li>";
         }
@@ -144,21 +144,21 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     }
     
     function render_ckpg_logos($logos, $product_type) {
-        echo '<div class="ckpg-logo-row">';
+        echo '<div class="conekta-logo-row">';
         foreach ($logos as $logo) {
-            echo '<img src="' . esc_url($logo) . '" alt="Logo" class="provider-logo ' . $product_type .'-logo">';
+            echo '<img src="' . esc_url($logo) . '" alt="Logo" class="' . $product_type .'-logo">';
         }
         echo '</div>';
     }
     
     function render_ckpg_barcode($barcode_url) {
         if (!empty($barcode_url)) {
-            echo '<div class="ckpg-barcode"><img src="' . esc_url($barcode_url) . '" alt="Código de barras"></div>';
+            echo '<div class="conekta-barcode"><img src="' . esc_url($barcode_url) . '" alt="Código de barras"></div>';
         }
     }
     
     function render_ckpg_reference($reference) {
-        echo '<div class="agreement-text">' . esc_html($reference) . '</div>';
+        echo '<div class="conekta-agreement-text">' . esc_html($reference) . '</div>';
     }
     
     /**
@@ -177,7 +177,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     $logos_map = $assets['logos'];
     $renderers = $this->get_product_type_renderers();
 
-    echo '<div class="charges-container">';
+    echo '<div class="conekta-charges-container">';
     foreach ($conekta_order->getCharges()->getData() as $charge) {
         $payment_method = $charge->getPaymentMethod();
         $method_type = $payment_method->getObject();
@@ -190,7 +190,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             $logos = $logos_map[$product_type] ?? [];
             $instructions = $this->i18n['instructions'][$product_type] ?? [];
 
-            echo '<div class="ckpg-box">';
+            echo '<div class="conekta-box">';
             $this->render_ckpg_header($product_type);
             $this->render_ckpg_logos($logos, $product_type);
             $render_function = $renderers[$product_type] ?? $renderers["cash_in"];
@@ -206,7 +206,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
                 ]);
             }
 
-            echo '<button class="copy-button" onclick="navigator.clipboard.writeText(\'' . esc_js($reference) . '\')">' . $this->i18n['button_copy'] . '</button>';
+            echo '<button class="conekta-copy-button" onclick="navigator.clipboard.writeText(\'' . esc_js($reference) . '\')">' . $this->i18n['button_copy'] . '</button>';
             $this->render_ckpg_instructions($instructions, $product_type, $reference, $agreement);
             echo '</div>';
         }
@@ -215,14 +215,14 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 }
 
     function render_bbva($data) {
-        echo '<p class="commission">' . $this->i18n['commission_note']['bbva_cash_in'] . '</p>';
-        echo '<p class="agreement-text small-text">' . $this->i18n['agreement'] . ' ' . esc_html($data['agreement']) . '</p>';
-        echo '<p class="agreement-text small-text">' . $this->i18n['reference'] . ' ' . esc_html($data['reference']) . '</p>';
+        echo '<p class="conekta-commission">' . $this->i18n['commission_note']['bbva_cash_in'] . '</p>';
+        echo '<p class="conekta-agreement-text conekta-small-text">' . $this->i18n['agreement'] . ' ' . esc_html($data['agreement']) . '</p>';
+        echo '<p class="conekta-agreement-text conekta-small-text">' . $this->i18n['reference'] . ' ' . esc_html($data['reference']) . '</p>';
     }
 
     function render_cash_in($data) {
-        echo '<p class="conekta-link">' . $this->i18n['extra_note_cash_in'] . '</p>';
-        echo '<p class="commission">' . $this->i18n['commission_note']['others'] . '</p>';
+        echo '<p class="conekta-conekta-link">' . $this->i18n['extra_note_cash_in'] . '</p>';
+        echo '<p class="conekta-commission">' . $this->i18n['commission_note']['others'] . '</p>';
         $this->render_ckpg_barcode($data['barcode_url']);
         $this->render_ckpg_reference($data['reference']);
     }
