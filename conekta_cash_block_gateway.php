@@ -119,6 +119,16 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     {
         return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
     }
+
+    private function get_product_type_renderers(): array {
+        return [
+            'cash_in' => [$this, 'render_cash_in'],
+            'pespay_cash_in' => [$this, 'render_cash_in'],
+            'oxxo' => [$this, 'render_oxxo'],
+            'bbva_cash_in' => [$this, 'render_bbva'],
+        ];
+    }
+
     function render_ckpg_header($product_type) {
         $text = $this->i18n['header'][$product_type] ?? $this->i18n['header']['default'];
         echo "<div class=\"conekta-reference-title\">$text</div>";
@@ -165,7 +175,8 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     $conekta_order = $this->get_api_instance()->getorderbyid($conekta_order_id);
     $assets = include plugin_dir_path(__FILE__) . 'includes/blocks/payment-instructions.php';
     $logos_map = $assets['logos'];
-
+    $renderers = $this->get_product_type_renderers();
+    
     echo '<div class="charges-container">';
     foreach ($conekta_order->getCharges()->getData() as $charge) {
         $payment_method = $charge->getPaymentMethod();
@@ -183,27 +194,17 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             $this->render_ckpg_header($product_type);
             $this->render_ckpg_logos($logos, $product_type);
 
-            if ($product_type === 'cash_in') {
-                echo '<p class="conekta-link">' . $this->i18n['extra_note_cash_in'] . '</p>';
+            if (isset($renderers[$product_type]) && is_callable($renderers[$product_type])) {
+                call_user_func($renderers[$product_type], [
+                    'product_type' => $product_type,
+                    'reference' => $reference,
+                    'barcode_url' => $barcode_url,
+                    'agreement' => $agreement,
+                    'logos' => $logos,
+                    'instructions' => $instructions,
+                ]);
             }
 
-            if ($product_type === 'bbva_cash_in') {
-                echo '<p class="commission">' . $this->i18n['commission_note'][$product_type] . '</p>';
-            }
-
-            if (!in_array($product_type, ['bbva_cash_in', 'oxxo'])) {
-                echo '<p class="commission">' . $this->i18n['commission_note']['others'] . '</p>';
-            }
-
-            if ($product_type === 'bbva_cash_in' && $agreement) {
-                echo '<p class="agreement-text small-text">' . $this->i18n['agreement'] . esc_html($agreement) . '</p>';
-                echo '<p class="agreement-text small-text">' . $this->i18n['reference'] . esc_html($reference) . '</p>';
-            }
-
-            if ($product_type !== 'bbva_cash_in') {
-                $this->render_ckpg_barcode($barcode_url);
-                $this->render_ckpg_reference($reference);
-            }
             echo '<button class="copy-button" onclick="navigator.clipboard.writeText(\'' . esc_js($reference) . '\')">' . $this->i18n['button_copy'] . '</button>';
             $this->render_ckpg_instructions($instructions, $product_type, $reference, $agreement);
             echo '</div>';
@@ -211,6 +212,24 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     }
     echo '</div>';
 }
+
+    function render_bbva($data) {
+        echo '<p class="commission">' . $this->i18n['commission_note']['bbva_cash_in'] . '</p>';
+        echo '<p class="agreement-text small-text">' . $this->i18n['agreement'] . ' ' . esc_html($data['agreement']) . '</p>';
+        echo '<p class="agreement-text small-text">' . $this->i18n['reference'] . ' ' . esc_html($data['reference']) . '</p>';
+    }
+
+    function render_cash_in($data) {
+        echo '<p class="conekta-link">' . $this->i18n['extra_note_cash_in'] . '</p>';
+        echo '<p class="commission">' . $this->i18n['commission_note']['others'] . '</p>';
+        $this->render_ckpg_barcode($data['barcode_url']);
+        $this->render_ckpg_reference($data['reference']);
+    }
+
+    function render_oxxo($data) {
+        $this->render_ckpg_barcode($data['barcode_url']);
+        $this->render_ckpg_reference($data['reference']);
+    }
 
     public function ckpg_init_form_fields()
     {
