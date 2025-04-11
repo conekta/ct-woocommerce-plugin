@@ -176,7 +176,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     $assets = include plugin_dir_path(__FILE__) . 'includes/blocks/payment-instructions.php';
     $logos_map = $assets['logos'];
     $renderers = $this->get_product_type_renderers();
-    
+
     echo '<div class="charges-container">';
     foreach ($conekta_order->getCharges()->getData() as $charge) {
         $payment_method = $charge->getPaymentMethod();
@@ -193,9 +193,10 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             echo '<div class="ckpg-box">';
             $this->render_ckpg_header($product_type);
             $this->render_ckpg_logos($logos, $product_type);
+            $render_function = $renderers[$product_type] ?? $renderers["cash_in"];
 
-            if (isset($renderers[$product_type]) && is_callable($renderers[$product_type])) {
-                call_user_func($renderers[$product_type], [
+            if (isset($render_function) && is_callable($render_function)) {
+                call_user_func($render_function, [
                     'product_type' => $product_type,
                     'reference' => $reference,
                     'barcode_url' => $barcode_url,
