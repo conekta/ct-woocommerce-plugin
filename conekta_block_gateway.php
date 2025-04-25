@@ -14,7 +14,6 @@ use Conekta\Model\ChargeRequestPaymentMethod;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
 use Conekta\Model\CustomerShippingContacts;
-use Conekta\ObjectSerializer;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
