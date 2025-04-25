@@ -74,7 +74,7 @@ const ContentConekta = (props) => {
 
     useEffect(() => {
         const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, 
-            settings.msi_enabled, settings.available_msi_options, props.billing.cartTotal.value / 100);
+            settings.msi_enabled, settings.available_msi_options, props.billing.cartTotal.value);
         document.body.appendChild(script);
 
         return () => {
