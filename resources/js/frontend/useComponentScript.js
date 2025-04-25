@@ -1,5 +1,5 @@
 
-export const DEFAULT_MSI_OPTION = 1;
+export const DEFAULT_MSI_OPTION = "1";
 export const CONEKTA_MSI_OPTION_KEY = "conekta_msi_option";
 
 export const useComponentScript = () => {

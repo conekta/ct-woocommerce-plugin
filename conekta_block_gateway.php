@@ -265,7 +265,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             ]
         );
         if ($this->settings['is_msi_enabled']=='yes'){
-            $payment_method->setMonthlyInstallments(3);
+            $payment_method->setMonthlyInstallments((int)$conekta_msi);
         }
         $charge = new ChargeRequest ([
                 'payment_method' => $payment_method,

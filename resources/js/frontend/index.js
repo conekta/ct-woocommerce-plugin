@@ -51,8 +51,6 @@ const ContentConekta = (props) => {
                 conektaSubmitFunction.current();
 
                 const token = await waitGetToken();
-                console.log("Pago exitoso con token:", token);
-
                 return {
                     type: emitResponse.responseTypes.SUCCESS,
                     meta: {
@@ -75,9 +73,8 @@ const ContentConekta = (props) => {
     }, []);
 
     useEffect(() => {
-        console.log("setting",settings);
         const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, 
-            settings.msi_enabled, settings.available_msi_options, 5000);
+            settings.msi_enabled, settings.available_msi_options, props.billing.cartTotal.value / 100);
         document.body.appendChild(script);
 
         return () => {
