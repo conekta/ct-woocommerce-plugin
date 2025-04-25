@@ -1,6 +1,6 @@
 
 export const useComponentScript = () => {
-  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter)=>{
+  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter, enableMsi, amount)=>{
     const script = document.createElement('script');
         script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
         script.async = true;
@@ -11,6 +11,10 @@ export const useComponentScript = () => {
                 locale,
                 useExternalSubmit: true,
             };
+            const options = {
+                amount,
+                enableMsi,
+            }
             const callbacks = {
                 onCreateTokenSucceeded: function (token) {
                     tokenEmitter.setToken(token.id);
@@ -35,6 +39,7 @@ export const useComponentScript = () => {
             if (window.ConektaCheckoutComponents) {
                 window.ConektaCheckoutComponents.Card({
                     config,
+                    options,
                     callbacks,
                     allowTokenization: true,
                 });

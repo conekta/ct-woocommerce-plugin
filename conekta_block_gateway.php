@@ -224,6 +224,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
 
         $token_id = $context->payment_data['conekta_token'];
+        $conekta_msi = $context->payment_data['conekta_msi_option'];
         if (empty($token_id)) {
             throw new \Exception('Token de pago no recibido.');
         }
@@ -250,6 +251,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                         'token_id' => $token_id,
                         'expires_at' => get_expired_at($this->settings['order_expiration']),
                         'customer_ip_address' => $this->get_user_ip(),
+                        'monthly_installments'=> $conekta_msi,
                     ],
                     'reference_id' => strval($order->get_id()),
                 ]

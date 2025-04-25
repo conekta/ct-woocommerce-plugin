@@ -57,7 +57,8 @@ const ContentConekta = (props) => {
                     type: emitResponse.responseTypes.SUCCESS,
                     meta: {
                         paymentMethodData: {
-                            conekta_token: token
+                            conekta_token: token,
+                            conekta_msi_option: 3,
                         },
                     }
                 };
@@ -74,7 +75,7 @@ const ContentConekta = (props) => {
     }, []);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter);
+        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, true, 5000);
         document.body.appendChild(script);
 
         return () => {
