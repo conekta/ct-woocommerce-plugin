@@ -3,7 +3,7 @@ import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef } from '@wordpress/element';
 import { TokenEmitter } from './TokenEmitter';
-import { useComponentScript } from './useComponentScript';
+import { CONEKTA_MSI_OPTION_KEY, DEFAULT_MSI_OPTION, useComponentScript } from './useComponentScript';
 import { TRANSLATIONS_FILES } from './translations';
 
 const settings = getSetting('conekta_data', {});
@@ -58,7 +58,7 @@ const ContentConekta = (props) => {
                     meta: {
                         paymentMethodData: {
                             conekta_token: token,
-                            conekta_msi_option: "1",
+                            conekta_msi_option: sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION,
                         },
                     }
                 };
@@ -88,7 +88,7 @@ const ContentConekta = (props) => {
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            <div id="conektaIframeContainer" style={{ height: '500px' }}></div>
+            <div id="conektaIframeContainer"></div>
         </div>
     );
 };
