@@ -14,6 +14,7 @@ use Conekta\Model\ChargeRequestPaymentMethod;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
 use Conekta\Model\CustomerShippingContacts;
+use Conekta\ObjectSerializer;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
@@ -218,6 +219,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     }
 
 
+    /**
+     * @throws Exception
+     */
     public function process_payment_api($context, $result) {
         global $woocommerce;
         $order = $context->order;
@@ -228,7 +232,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $token_id = $context->payment_data['conekta_token'];
         $conekta_msi = $context->payment_data['conekta_msi_option'];
         if (empty($token_id)) {
-            throw new \Exception('Token de pago no recibido.');
+            throw new Exception('Token de pago no recibido.');
         }
         $data = ckpg_get_request_data($order);
         $items = $order->get_items();
