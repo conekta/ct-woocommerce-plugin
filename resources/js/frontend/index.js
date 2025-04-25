@@ -58,7 +58,7 @@ const ContentConekta = (props) => {
                     meta: {
                         paymentMethodData: {
                             conekta_token: token,
-                            conekta_msi_option: 3,
+                            conekta_msi_option: "1",
                         },
                     }
                 };
@@ -75,7 +75,9 @@ const ContentConekta = (props) => {
     }, []);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, true, 5000);
+        console.log("setting",settings);
+        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, 
+            settings.msi_enabled, settings.available_msi_options, 5000);
         document.body.appendChild(script);
 
         return () => {

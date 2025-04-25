@@ -1,6 +1,6 @@
 
 export const useComponentScript = () => {
-  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter, enableMsi, amount)=>{
+  const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter, enableMsi, availableMsiOptions, amount)=>{
     const script = document.createElement('script');
         script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
         script.async = true;
@@ -14,6 +14,7 @@ export const useComponentScript = () => {
             const options = {
                 amount,
                 enableMsi,
+                availableMsiOptions,
             }
             const callbacks = {
                 onCreateTokenSucceeded: function (token) {

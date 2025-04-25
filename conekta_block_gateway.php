@@ -9,6 +9,8 @@
 require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\ApiException;
+use Conekta\Model\ChargeRequest;
+use Conekta\Model\ChargeRequestPaymentMethod;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
 use Conekta\Model\CustomerShippingContacts;
@@ -244,20 +246,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             ));
         $rq = new OrderRequest([
             'currency' => $data['currency'],
-            'charges' => [
-                [
-                    'payment_method' => [
-                        'type' => 'card',
-                        'token_id' => $token_id,
-                        'expires_at' => get_expired_at($this->settings['order_expiration']),
-                        'customer_ip_address' => $this->get_user_ip(),
-                        'monthly_installments'=> $conekta_msi,
-                    ],
-                    'reference_id' => strval($order->get_id()),
-                ]
-            ],
-            //"three_ds_mode"=> "strict",    // todo if you want to use 3DS
-            //"return_url"=> $this->get_return_url( $order ), // todo if you want to use 3DS
             'shipping_lines' => $shipping_lines,
             'discount_lines' => $discount_lines,
             'tax_lines' => $tax_lines,
@@ -268,6 +256,22 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($shipping_contact)) {
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
+        $payment_method = new ChargeRequestPaymentMethod(
+            [
+                'type' => 'card',
+                'token_id' => $token_id,
+                'expires_at' => get_expired_at($this->settings['order_expiration']),
+                'customer_ip_address' => $this->get_user_ip()
+            ]
+        );
+        if ($this->settings['is_msi_enabled']=='yes'){
+            $payment_method->setMonthlyInstallments(3);
+        }
+        $charge = new ChargeRequest ([
+                'payment_method' => $payment_method,
+                'reference_id' => strval($order->get_id()),
+        ]);
+        $rq->setCharges([$charge]);
 
         try {
             $orderCreated = $this->get_api_instance($this->settings['cards_api_key'],$this->version)->createOrder($rq, $this->get_user_locale());
@@ -275,9 +279,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             $result->set_status( 'success' );
             $result->set_redirect_url($this->get_return_url( $order ));
-            //$result->set_redirect_url($orderCreated->getNextAction()->getRedirectToUrl()->getUrl()); // todo if you want to use 3DS
         } catch (ApiException $e) {
-            $description = $e->getMessage();
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
             $result->set_status( 'failure' );

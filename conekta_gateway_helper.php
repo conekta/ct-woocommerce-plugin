@@ -83,7 +83,6 @@ function ckpg_build_line_items($items, $version)
             'name'        => $item_name,
             'unit_price'  => $unit_price,
             'quantity'    => $quantity,
-            'brand'       => !empty($brands) ? $brands[0] : null,
             'tags'        => array_merge(['WooCommerce', "Conekta ".$version], $tags),
             'metadata'    => array(
                                     'soft_validations' => true,
@@ -91,6 +90,7 @@ function ckpg_build_line_items($items, $version)
                                   ),
            'description' => $productmeta->get_description() ?: 'no description',
         );
+
 
         if (!empty($sku)) {
             $line_item_params = array_merge(
