@@ -75,7 +75,8 @@ const ContentConekta = (props) => {
     }, []);
 
     useEffect(() => {
-        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, true, 5000);
+		const availableMsiOptions = settings.msi_options; // reemplazar con la lógica para obtener las opciones de MSI disponibles, el component espera un array de sólo numeros
+        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, true, 5000, availableMsiOptions);
         document.body.appendChild(script);
 
         return () => {
@@ -86,7 +87,7 @@ const ContentConekta = (props) => {
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            <div id="conektaIframeContainer" style={{ height: '500px' }}></div>
+            <div id="conektaIframeContainer"></div>
         </div>
     );
 };
