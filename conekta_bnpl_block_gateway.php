@@ -10,16 +10,16 @@ require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
-use Conekta\Configuration;
+use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
-use Conekta\Model\CustomerShippingContacts;
 use Conekta\Model\EventTypes;
+use Conekta\Model\CustomerShippingContacts;
 
-class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
+class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
 {
-    protected $GATEWAY_NAME = "WC_Conekta_Bank_Transfer_Gateway";
+    protected $GATEWAY_NAME = "WC_Conekta_Bnpl_Gateway";
     protected $order = null;
-    protected $currencies = array('MXN', 'USD');
+    protected $currencies = array('MXN');
 
     public $id;
     public $method_title;
@@ -30,13 +30,12 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     public $webhook_url;
 
     /**
-     * @throws ApiException
-     * @throws Exception
+     * @throws ApiException|Exception
      */
     public function __construct()
     {
-        $this->id = 'conekta_bank_transfer';
-        $this->method_title = __('Conekta Transferencia', 'Conekta bank transfer');
+        $this->id = 'conekta_bnpl';
+        $this->method_title = __('Conekta Pago en Plazos', 'Conekta');
         $this->has_fields = true;
         $this->ckpg_init_form_fields();
         $this->init_settings();
@@ -45,16 +44,12 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         $this->icon        = $this->settings['alternate_imageurl'] ?
                                                 $this->settings['alternate_imageurl'] :
                                                 WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
-                                                . '/images/spei.png';
+                                                . '/images/credits.png';
         $this->api_key = $this->settings['api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
-        add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
-        add_action('woocommerce_api_wc_conekta_bank_transfer', [$this, 'check_for_webhook']);
-        add_action('woocommerce_email_before_order_table', array($this, 'ckpg_email_instructions'));
-        add_action('woocommerce_email_before_order_table', array($this, 'ckpg_email_reference'));
-
+        add_action('woocommerce_api_wc_conekta_bnpl', [$this, 'check_for_webhook']);
         if (!$this->ckpg_validate_currency()) {
             $this->enabled = false;
         }
@@ -79,7 +74,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         if (!isset($_SERVER['REQUEST_METHOD'])
             || ('POST' !== $_SERVER['REQUEST_METHOD'])
             || !isset($_GET['wc-api'])
-            || ('wc_conekta_bank_transfer' !== $_GET['wc-api'])
+            || ('wc_conekta_bnpl' !== $_GET['wc-api'])
         ) {
             return;
         }
@@ -94,42 +89,16 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
 
             case EventTypes::ORDER_PAID:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderPaid($this->get_api_instance($this->settings['api_key'], $this->version), $event);
+                self::handleOrderPaid($this->get_api_instance(), $event);
                 break;
 
             case EventTypes::ORDER_EXPIRED:
             case EventTypes::ORDER_CANCELED:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'],$this->version),$event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance(),$event);
                 break;
             default:
                 break;
-        }
-    }
-
-    /**
-     * Output for the order received page.
-     * @param string $order_id
-     * @throws ApiException
-     */
-    function ckpg_thankyou_page($order_id)
-    {
-        $order = new WC_Order($order_id);
-        $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
-
-        if (empty($conekta_order_id)) {
-            return;
-        }
-        $conekta_order = $this->get_api_instance($this->settings['api_key'],$this->version)->getorderbyid($conekta_order_id);
-
-        foreach ($conekta_order->getCharges()->getData() as $charge) {
-            $payment_method = $charge->getPaymentMethod()->getObject();
-            if ($payment_method == 'bank_transfer_payment') {
-                $clabe = $charge->getPaymentMethod()->getClabe();
-                echo '<p><h4><strong>' . __('Clabe') . ':</strong> ' . $clabe . '</h4></p>';
-                echo '<p><h4><strong>' . esc_html(__('Beneficiario')) . ':</strong> ' . esc_html($this->settings['account_owner']) . '</h4></p>';
-                echo '<p><h4><strong>' . esc_html(__('Banco Receptor')) . ':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
-            }
         }
     }
 
@@ -147,26 +116,20 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Transferencias', 'woothemes'),
+                'default' => __('Pago en Plazos', 'woothemes'),
                 'required' => true
             ),
-            'account_owner' => array(
-                 'type'        => 'Account owner',
-                 'title'       => __('Account owner', 'woothemes'),
-                 'description' => __('Esto se mostrará en la página de éxito de SPEI como descripción de cuenta para referencia CLABE', 'woothemes'),
-                 'default'     => __('Conekta SPEI', 'woothemes')
-             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga desde tu banca digital con SPEI', 'woothemes'),
+                'default' => __('Paga en Plazos con Conekta', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(
                 'type' => 'password',
                 'title' => __('Conekta API key', 'woothemes'),
-                'description' => __('API Key Producción (Tokens/Llaves Privadas)', 'woothemes'),
+                'description' => __('API Key Producción (Tokens/Llave Privada)', 'woothemes'),
                 'default' => __('', 'woothemes'),
                 'required' => true
             ),
@@ -174,7 +137,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'number',
                 'title' => __('Vencimiento de las órdenes de pago (Días)', 'woothemes'),
                 'description' => __('La cantidad de dīas configuradas en esta opción, corresponde al tiempo en el que la orden estará activa para ser pagada por el cliente desde el momento de su creación.', 'woothemes'),
-                'default' => __(1),
+                'default' => __(2),
                 'custom_attributes' => array(
                     'min' => 1,
                     'max' => 30,
@@ -185,63 +148,16 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),
                 'description' => __('URL webhook)', 'woothemes'),
-                'default' => __(get_site_url() . '/?wc-api=wc_conekta_bank_transfer'),
+                'default' => __(get_site_url() . '/?wc-api=wc_conekta_bnpl'),
                 'required' => true
             ),
             'alternate_imageurl' => array(
                 'type'        => 'text',
                 'title'       => __('Imagen alternativa para mostrar en el momento del pago, utilice una URL completa y envíela a través de https', 'woothemes'),
                 'default'     => __('', 'woothemes')
-            ),
-            'instructions' => array(
-                'title' => __( 'Instructions', 'woocommerce' ),
-                'type' => 'textarea',
-                'description' => __( 'Instructions that will be added to the thank you page and emails.', 'woocommerce' ),
-                'default' =>__( 'Por favor realiza el pago en el portal de tu banco utilizando los datos que te enviamos por correo.', 'woocommerce' ),
-                'desc_tip' => true,
-            ),
+            )
         );
 
-    }
-    /**
-         * Add content to the WC emails.
-         *
-         * @access public
-         * @param WC_Order $order
-         * @param bool $sent_to_admin
-         * @param bool $plain_text
-         */
-    public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
-        $instructions = $this->form_fields['instructions'];
-        if ( $instructions && 'on-hold' === $order->get_status() ) {
-            echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
-        }
-    }
-      /**
-     * Add content to the WC emails.
-     *
-     * @access public
-     * @param WC_Order $order
-     */
-    function ckpg_email_reference($order) {
-
-        if (get_post_meta( $order->get_id(), 'conekta-clabe', true ) != null)
-            {
-                echo '<p><h4><strong>'.esc_html(__('Clabe')).':</strong> '
-                . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->settings['account_owner']).'</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
-            }
-    }
-
-    public function ckpg_admin_options()
-    {
-        include_once('templates/spei_admin.php');
-    }
-
-    public function payment_fields()
-    {
-        include_once('templates/spei.php');
     }
 
     protected function ckpg_mark_as_failed_payment($order)
@@ -254,6 +170,10 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         );
     }
 
+    public function get_api_instance(): OrdersApi
+    {
+       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
+    }
     /**
      * @throws Exception
      */
@@ -262,6 +182,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         global $woocommerce;
         $order = new WC_Order($order_id);
         $data = ckpg_get_request_data($order);
+        $redirect_url = $this->get_return_url($order);
         $items = $order->get_items();
         $taxes = $order->get_taxes();
         $fees = $order->get_fees();
@@ -284,14 +205,14 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         );
         $rq = new OrderRequest([
             'currency' => $data['currency'],
-            'charges' => [
-                [
-                    'payment_method' => [
-                        'type' => 'spei',
-                        'expires_at' => get_expired_at($this->settings['order_expiration']),
-                    ],
-                    'reference_id' => strval($order->get_id()),
-                ]
+            'checkout' => [
+                'allowed_payment_methods' => ['bnpl'],
+                'success_url' => $redirect_url,
+                'failure_url' => $redirect_url,
+                'name' => sprintf('Compra de %s', $customer_info['name']),
+                'type' => 'HostedPayment',
+                'redirection_time' => 10,
+                'expires_at' => get_expired_at($this->settings['order_expiration']),
             ],
             'shipping_lines' => $shipping_lines,
             'discount_lines' => $discount_lines,
@@ -304,19 +225,22 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
         try {
-            $orderCreated = $this->get_api_instance($this->settings['api_key'],$this->version)->createOrder($rq);
-            $order->update_status('on-hold', __('Awaiting the conekta bank transfer payment', 'woocommerce'));
+            $orderCreated = $this->get_api_instance()->createOrder($rq);
+            $order->update_status('pending', __('Awaiting the conekta bnpl payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
-            self::update_conekta_order_meta( $order, $orderCreated->getCharges()->getData()[0]->getPaymentMethod()->getClabe(), 'conekta-clabe');
             return array(
                 'result' => 'success',
-                'redirect' => $this->get_return_url($order)
+                'redirect' => $orderCreated->getCheckout()->getUrl()
             );
         } catch (Exception $e) {
             $description = $e->getMessage();
+            error_log($description);
             wc_add_notice(__('Error: ', 'woothemes') . $description);
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
+            return array(
+                'result' => 'failure',
+            );
         }
 
     }
@@ -333,23 +257,23 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     }
 }
 
-function ckpg_conekta_bank_transfer_add_gateway($methods)
+function ckpg_conekta_bnpl_add_gateway($methods)
 {
-    $methods[] = 'WC_Conekta_Bank_Transfer_Gateway';
+    $methods[] = 'WC_Conekta_Bnpl_Gateway';
     return $methods;
 }
 
-add_filter('woocommerce_payment_gateways', 'ckpg_conekta_bank_transfer_add_gateway');
+add_filter('woocommerce_payment_gateways', 'ckpg_conekta_bnpl_add_gateway');
 
-add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support');
-function woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support()
+add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_bnpl_woocommerce_block_support');
+function woocommerce_gateway_conekta_bnpl_woocommerce_block_support()
 {
     if (class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
-        require_once 'includes/blocks/class-wc-conekta-bank_transfer-payments-blocks.php';
+        require_once 'includes/blocks/class-wc-conekta-bnpl-payments-blocks.php';
         add_action(
             'woocommerce_blocks_payment_method_type_registration',
             function (Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry) {
-                $payment_method_registry->register(new WC_Gateway_Conekta_Bank_Transfer_Blocks_Support());
+                $payment_method_registry->register(new WC_Gateway_Conekta_Bnpl_Blocks_Support());
             }
         );
     }
