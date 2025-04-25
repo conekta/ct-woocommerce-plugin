@@ -115,11 +115,6 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     }
 
 
-    public function get_api_instance(): OrdersApi
-    {
-        return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
-    }
-
     private function get_product_type_renderers(): array {
         return [
             'cash_in' => [$this, 'render_cash_in'],
@@ -172,7 +167,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
     if (empty($conekta_order_id)) return;
 
-    $conekta_order = $this->get_api_instance()->getorderbyid($conekta_order_id);
+    $conekta_order = $this->get_api_instance($this->settings['api_key'],$this->version)->getorderbyid($conekta_order_id);
     $assets = include plugin_dir_path(__FILE__) . 'includes/blocks/payment-instructions.php';
     $logos_map = $assets['logos'];
     $renderers = $this->get_product_type_renderers();

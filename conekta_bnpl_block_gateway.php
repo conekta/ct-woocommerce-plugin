@@ -89,13 +89,13 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
 
             case EventTypes::ORDER_PAID:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderPaid($this->get_api_instance(), $event);
+                self::handleOrderPaid($this->get_api_instance($this->settings['api_key'],$this->version), $event);
                 break;
 
             case EventTypes::ORDER_EXPIRED:
             case EventTypes::ORDER_CANCELED:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderExpiredOrCanceled($this->get_api_instance(),$event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'],$this->version),$event);
                 break;
             default:
                 break;
@@ -170,10 +170,6 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
         );
     }
 
-    public function get_api_instance(): OrdersApi
-    {
-       return  new OrdersApi(null, Configuration::getDefaultConfiguration()->setAccessToken($this->settings['api_key']));
-    }
     /**
      * @throws Exception
      */
@@ -225,7 +221,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
         try {
-            $orderCreated = $this->get_api_instance()->createOrder($rq);
+            $orderCreated = $this->get_api_instance($this->settings['api_key'],$this->version)->createOrder($rq);
             $order->update_status('pending', __('Awaiting the conekta bnpl payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             return array(
