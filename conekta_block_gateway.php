@@ -292,7 +292,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         } catch (ApiException $e) {
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
-            wc_add_notice(__('Error: ', 'woothemes') . $$e->getMessage());
+            wc_add_notice(__('Error: ', 'woothemes') . $e->getMessage());
             $result->set_status( 'failure' );
             $result->set_payment_details( array_merge(
                 $result->payment_details,
