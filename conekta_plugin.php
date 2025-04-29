@@ -187,7 +187,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             'HTTP_CF_CONNECTING_IP',  // Cloudflare
             'HTTP_X_REAL_IP',         // Nginx
             'HTTP_CLIENT_IP',         // Proxy
-            'REMOTE_ADDR'             // Último recurso
+            'REMOTE_ADDR'             // Last option
         ];
     
         foreach ($ip_keys as $key) {

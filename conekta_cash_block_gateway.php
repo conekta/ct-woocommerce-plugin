@@ -101,13 +101,13 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
 
             case EventTypes::ORDER_PAID:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderPaid($this->get_api_instance($this->settings['api_key'],$this->version), $event);
+                self::handleOrderPaid($this->get_api_instance($this->settings['api_key'], $this->version), $event);
                 break;
 
             case EventTypes::ORDER_EXPIRED:
             case EventTypes::ORDER_CANCELED:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'],$this->version),$event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'], $this->version), $event);
                 break;
             default:
                 break;
@@ -167,7 +167,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
     $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
     if (empty($conekta_order_id)) return;
 
-    $conekta_order = $this->get_api_instance($this->settings['api_key'],$this->version)->getorderbyid($conekta_order_id);
+    $conekta_order = $this->get_api_instance($this->settings['api_key'], $this->version)->getorderbyid($conekta_order_id);
     $assets = include plugin_dir_path(__FILE__) . 'includes/blocks/payment-instructions.php';
     $logos_map = $assets['logos'];
     $renderers = $this->get_product_type_renderers();
@@ -391,7 +391,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
         }
         try {
-            $orderCreated = $this->get_api_instance($this->settings['api_key'],$this->version)->createOrder($rq);
+            $orderCreated = $this->get_api_instance($this->settings['api_key'], $this->version)->createOrder($rq);
             $order->update_status('on-hold', __('Awaiting the conekta cash payment', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
             self::update_conekta_order_meta( $order, $orderCreated->getCharges()->getData()[0]->getPaymentMethod()->getReference(), 'conekta-referencia');
