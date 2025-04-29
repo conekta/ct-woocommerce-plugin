@@ -50,8 +50,6 @@ By following these steps, you'll successfully install and configure the Conekta 
 = 5.2.0 =
 * support card payment integration with Conekta Component
 = 5.1.0 =
-* Replace cards payments with Conekta tokenizer
-= 5.1.0 =
 * Added bnpl payment method
 = 5.0.9 =
 * Added support for custom rates and discounts
