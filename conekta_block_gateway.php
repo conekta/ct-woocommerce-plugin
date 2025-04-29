@@ -274,7 +274,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'customer_ip_address' => $this->get_user_ip()
             ]
         );
-        if ($this->settings['is_msi_enabled']=='yes'){
+        if ($this->settings['is_msi_enabled']=='yes' && (int)$conekta_msi > 1) {
             $payment_method->setMonthlyInstallments((int)$conekta_msi);
         }
         $charge = new ChargeRequest ([
@@ -290,9 +290,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $result->set_status( 'success' );
             $result->set_redirect_url($this->get_return_url( $order ));
         } catch (ApiException $e) {
+            wc_add_notice(__('Error: ', 'woothemes') . $e->getMessage());
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
-            wc_add_notice(__('Error: ', 'woothemes') . $e->getMessage());
             $result->set_status( 'failure' );
             $result->set_payment_details( array_merge(
                 $result->payment_details,
