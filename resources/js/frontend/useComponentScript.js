@@ -5,7 +5,7 @@ export const CONEKTA_MSI_OPTION_KEY = "conekta_msi_option";
 export const useComponentScript = () => {
   const loadScript = (publicKey, locale, conektaSubmitFunction, tokenEmitter, enableMsi, availableMsiOptions, amount)=>{
     const script = document.createElement('script');
-        script.src = "https://pay.stg.conekta.io/v1.0/js/conekta-checkout.min.js";
+        script.src = "https://pay.conekta.com/v1.0/js/conekta-checkout.min.js";
         script.async = true;
         script.onload = () => {
             const config = {
