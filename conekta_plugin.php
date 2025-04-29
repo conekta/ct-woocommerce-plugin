@@ -221,6 +221,6 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         $client = new Client([
             'handler' => $stack,
         ]);
-        return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
+        return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key)->setHost("https://api.stg.conekta.io"));
     }
 }
