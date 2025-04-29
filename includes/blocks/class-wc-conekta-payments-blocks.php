@@ -83,7 +83,7 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
 			'api_key' 						 => $this->get_setting('cards_public_api_key') ?: $this->get_setting('cards_api_key'),
             'locale' 						 => $this->gateway->get_user_locale(),
 			'msi_enabled'					 => $this->get_setting('is_msi_enabled') === 'yes',
-			'available_msi_options' 		 => array_map('intval',$this->get_setting('months')),
+			'available_msi_options' 		 => array_map('intval', (array)$this->get_setting('months')),
         ];
     }
 }

@@ -182,6 +182,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     '9' => __('9', 'woothemes'),
                     '12' => __('12', 'woothemes'),
                     '18' => __('18', 'woothemes'),
+                    '24' => __('24', 'woothemes'),
                 ),
                 'default' => array(),
                 'class' => 'wc-enhanced-select',
@@ -291,6 +292,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         } catch (ApiException $e) {
             $this->ckpg_mark_as_failed_payment($order);
             WC()->session->reload_checkout = true;
+            wc_add_notice(__('Error: ', 'woothemes') . $$e->getMessage());
             $result->set_status( 'failure' );
             $result->set_payment_details( array_merge(
                 $result->payment_details,
