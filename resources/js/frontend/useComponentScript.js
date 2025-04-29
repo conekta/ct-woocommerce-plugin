@@ -34,7 +34,7 @@ export const useComponentScript = () => {
                     sessionStorage.setItem(CONEKTA_MSI_OPTION_KEY, DEFAULT_MSI_OPTION);
                 },
                 onEventListener: function (event) {
-                    if (event.name === "monthlyInstallmentSelected") {
+                    if (event.name === "monthlyInstallmentSelected" && event.value) {
                         sessionStorage.setItem(CONEKTA_MSI_OPTION_KEY, event.value.monthlyInstallments);
                     }
                 },
