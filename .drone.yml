@@ -18,7 +18,7 @@ steps:
       - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
       - composer install --no-interaction --no-progress
   - name: install dependencies node
-    image: node:16
+    image: node:18
     commands:
       - npm i
       - npm run build
