@@ -95,7 +95,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
             case EventTypes::ORDER_EXPIRED:
             case EventTypes::ORDER_CANCELED:
                 self::check_if_payment_payment_method_webhook($this->GATEWAY_NAME, $event);
-                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'],$this->version),$event);
+                self::handleOrderExpiredOrCanceled($this->get_api_instance($this->settings['api_key'], $this->version), $event);
                 break;
             default:
                 break;
