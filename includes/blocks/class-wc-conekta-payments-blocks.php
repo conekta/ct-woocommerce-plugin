@@ -80,6 +80,10 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
             'description' 		             => $this->get_setting( 'description' ),
             'supports'    			         => array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] ),
             'name'                           => $this->name,
+			'api_key' 						 => $this->get_setting('cards_public_api_key') ?: $this->get_setting('cards_api_key'),
+            'locale' 						 => $this->gateway->get_user_locale(),
+			'msi_enabled'					 => $this->get_setting('is_msi_enabled') === 'yes',
+			'available_msi_options' 		 => array_map('intval', (array)$this->get_setting('months')),
         ];
     }
 }
