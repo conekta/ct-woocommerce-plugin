@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.2.0
+Stable tag: 5.1.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,8 +47,6 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
-= 5.2.0 =
-* support card payment integration with Conekta Component
 = 5.1.0 =
 * Added bnpl payment method
 = 5.0.9 =
@@ -56,7 +54,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 = 5.0.8 =
 * Upgrade Wordpress version
 = 5.0.7 =
-* Test on WordPress 6.7.1
+* Test on Wordpress 6.7.1
 = 5.0.6 =
 * Fix instructions environment
 = 5.0.5 =
