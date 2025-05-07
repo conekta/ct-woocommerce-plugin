@@ -218,6 +218,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         );
     }
 
+    public function payment_fields() {
+        if (!empty($this->description)) {
+        echo wpautop(wp_kses_post($this->description));
+        }
+        echo '<div id="conektaIframeContainer"></div>';
+    }
 
     /**
      * @throws Exception
@@ -234,70 +240,21 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (empty($token_id)) {
             throw new Exception('Token de pago no recibido.');
         }
-        $data = ckpg_get_request_data($order);
-        $items = $order->get_items();
-        $taxes = $order->get_taxes();
-        $fees = $order->get_fees();
-        $fees_formatted = ckpg_build_get_fees($fees);
-        $discounts_data = $fees_formatted['discounts'];
-        $fees_data = $fees_formatted['fees'];
-        $tax_lines = ckpg_build_tax_lines($taxes);
-        $tax_lines = array_merge($tax_lines, $fees_data);
-        $discount_lines = ckpg_build_discount_lines($data);
-        $discount_lines = array_merge($discount_lines, $discounts_data);
-        $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
-        $shipping_lines = ckpg_build_shipping_lines($data);
-        $shipping_contact = ckpg_build_shipping_contact($data);
-        $customer_info = ckpg_build_customer_info($data);
-        $order_metadata = ckpg_build_order_metadata($data + array(
-                'plugin_conekta_version' => $this->version,
-                'woocommerce_version' => $woocommerce->version,
-                'payment_method' => $this->GATEWAY_NAME,
-            ));
-        $rq = new OrderRequest([
-            'currency' => $data['currency'],
-            'shipping_lines' => $shipping_lines,
-            'discount_lines' => $discount_lines,
-            'tax_lines' => $tax_lines,
-            'customer_info' => $customer_info,
-            'line_items' => $line_items,
-            'metadata' => $order_metadata
-        ]);
-        if (!empty($shipping_contact)) {
-            $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
-        }
-        $payment_method = new ChargeRequestPaymentMethod(
-            [
-                'type' => 'card',
-                'token_id' => $token_id,
-                'expires_at' => get_expired_at($this->settings['order_expiration']),
-                'customer_ip_address' => $this->get_user_ip()
-            ]
-        );
-        if ($this->settings['is_msi_enabled']=='yes' && (int)$conekta_msi > 1) {
-            $payment_method->setMonthlyInstallments((int)$conekta_msi);
-        }
-        $charge = new ChargeRequest ([
-                'payment_method' => $payment_method,
-                'reference_id' => strval($order->get_id()),
-        ]);
-        $rq->setCharges([$charge]);
+        $error_message = null;
+        $success = $this->process_conekta_payment_for_order($order, $token_id, $msi_option, $error_message);
 
-        try {
-            $orderCreated = $this->get_api_instance($this->settings['cards_api_key'], $this->version)->createOrder($rq, $this->get_user_locale());
-            $order->update_status('pending', __('Awaiting the conekta payment', 'woocommerce'));
-            self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
-            $result->set_status( 'success' );
-            $result->set_redirect_url($this->get_return_url( $order ));
-        } catch (ApiException $e) {
-            wc_add_notice(__('Error: ', 'woothemes') . $e->getMessage());
-            $this->ckpg_mark_as_failed_payment($order);
+        if ($success) {
+            $result->set_status('success');
+            $result->set_redirect_url($this->get_return_url($order));
+        } else {
+            wc_add_notice(__('Error: ', 'woothemes') . $error_message);
             WC()->session->reload_checkout = true;
-            $result->set_status( 'failure' );
-            $result->set_payment_details( array_merge(
+
+            $result->set_status('failure');
+            $result->set_payment_details(array_merge(
                 $result->payment_details,
                 [
-                    'error' => $e->getResponseObject(),
+                    'error' => $error_message,
                 ]
             ));
         }
@@ -312,6 +269,99 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public function ckpg_validate_currency(): bool
     {
         return in_array(get_woocommerce_currency(), $this->currencies);
+    }
+
+    protected function process_conekta_payment_for_order($order, $token_id, $msi_option, &$error_message = null) {
+        try {
+            $data = ckpg_get_request_data($order);
+            $items = $order->get_items();
+            $taxes = $order->get_taxes();
+            $fees = $order->get_fees();
+            $fees_formatted = ckpg_build_get_fees($fees);
+            $discounts_data = $fees_formatted['discounts'];
+            $fees_data = $fees_formatted['fees'];
+            $tax_lines = ckpg_build_tax_lines($taxes);
+            $tax_lines = array_merge($tax_lines, $fees_data);
+            $discount_lines = ckpg_build_discount_lines($data);
+            $discount_lines = array_merge($discount_lines, $discounts_data);
+            $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
+            $shipping_lines = ckpg_build_shipping_lines($data);
+            $shipping_contact = ckpg_build_shipping_contact($data);
+            $customer_info = ckpg_build_customer_info($data);
+            $order_metadata = ckpg_build_order_metadata($data + array(
+                'plugin_conekta_version' => $this->version,
+                'woocommerce_version' => WC()->version,
+                'payment_method' => $this->GATEWAY_NAME,
+                ));
+
+            $rq = new OrderRequest([
+                'currency' => $data['currency'],
+                'shipping_lines' => $shipping_lines,
+                'discount_lines' => $discount_lines,
+                'tax_lines' => $tax_lines,
+                'customer_info' => $customer_info,
+                'line_items' => $line_items,
+                'metadata' => $order_metadata
+            ]);
+        
+            if (!empty($shipping_contact)) {
+                $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
+            }
+        
+            $payment_method = new ChargeRequestPaymentMethod([
+                'type' => 'card',
+                'token_id' => $token_id,
+                'expires_at' => get_expired_at($this->settings['order_expiration']),
+                'customer_ip_address' => $this->get_user_ip()
+            ]);
+        
+            if ($this->settings['is_msi_enabled'] == 'yes' && (int)$msi_option > 1) {
+                $payment_method->setMonthlyInstallments((int)$msi_option);
+            }
+        
+            $charge = new ChargeRequest([
+                'payment_method' => $payment_method,
+                'reference_id' => strval($order->get_id()),
+            ]);
+        
+            $rq->setCharges([$charge]);
+        
+            $orderCreated = $this->get_api_instance($this->settings['cards_api_key'], $this->version)->createOrder($rq, $this->get_user_locale());
+            $order->update_status('pending', __('Esperando el pago con Conekta', 'woocommerce'));
+            self::update_conekta_order_meta($order, $orderCreated->getId(), 'conekta-order-id');
+        
+            return true;
+        } catch (ApiException $e) {
+            $this->ckpg_mark_as_failed_payment($order);
+            $error_message = $e->getMessage();
+            return false;
+        }
+    }
+
+    public function process_payment($order_id) {
+        $order = wc_get_order($order_id);
+
+        // Recupera el token del formulario (classic checkout)
+        $token_id = isset($_POST['conekta_token']) ? sanitize_text_field($_POST['conekta_token']) : null;
+        $msi_option = isset($_POST['conekta_msi_option']) ? (int) $_POST['conekta_msi_option'] : 1;
+
+        if (!$token_id) {
+            wc_add_notice(__('Error: No se recibió el token de Conekta.', 'woocommerce'), 'error');
+            return ['result' => 'failure'];
+        }
+
+        $error_message = null;
+        $success = $this->process_conekta_payment_for_order($order, $token_id, $msi_option, $error_message);
+
+        if ($success) {
+            return [
+                'result'   => 'success',
+                'redirect' => $this->get_return_url($order),
+            ];
+        } else {
+            wc_add_notice(__('Error al procesar el pago con Conekta: ', 'woocommerce') . $error_message, 'error');
+            return ['result' => 'failure'];
+        }
     }
 }
 
