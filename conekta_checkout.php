@@ -50,145 +50,36 @@ add_action('wp_enqueue_scripts', 'ckpg_enqueue_classic_checkout_script');
 
 function ckpg_enqueue_classic_checkout_script() {
     if (is_checkout() && ! is_wc_endpoint_url()) {
-    $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
+        $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
 
-    if (isset($available_gateways['conekta'])) {
-        wp_enqueue_script(
-            'conekta-checkout-classic',
-            'https://pay.conekta.com/v1.0/js/conekta-checkout.min.js',
-            [],
-            null,
-            true
-        );
+        if (isset($available_gateways['conekta'])) {
+            wp_enqueue_script(
+                'conekta-checkout-classic',
+                'https://pay.conekta.com/v1.0/js/conekta-checkout.min.js',
+                [],
+                null,
+                true
+            );
 
-        $settings = get_option('woocommerce_conekta_settings');
-        wp_localize_script('conekta-checkout-classic', 'conekta_settings', [
-            'public_key' => $settings['cards_public_api_key'] ?? '',
-            'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
-            'available_msi_options' => $settings['months'] ?? [],
-            'amount' => WC()->cart->get_total('edit') * 100,
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('conekta_payment_nonce'),
-        ]);
+            $script_path = 'resources/js/frontend/classic-checkout.js';
+            $script_url = plugin_dir_url(__FILE__) . $script_path;
+            $script_path = plugin_dir_path(__FILE__) . $script_path;
 
-        $js = <<<JS
-                document.addEventListener('DOMContentLoaded', function () {
-                    window.initConektaIframe = function () {
-                        if (!window.ConektaCheckoutComponents) return;
-                        const container = document.querySelector('#conektaIframeContainer');
-                        if (!container || container.querySelector('iframe')) return;
+            wp_enqueue_script(
+                'conekta-classic-checkout',
+                $script_url,
+                ['conekta-checkout-classic'],
+                file_exists($script_path) ? filemtime($script_path) : null,
+                true
+            );
 
-                        ConektaCheckoutComponents.Card({
-                        config: {
-                            targetIFrame: '#conektaIframeContainer',
-                            publicKey: conekta_settings.public_key,
-                            locale: 'es',
-                            useExternalSubmit: true
-                        },
-                        options: {
-                            autoResize: true,
-                            amount: conekta_settings.amount,
-                            enableMsi: conekta_settings.enable_msi === 'yes',
-                            availableMsiOptions: conekta_settings.available_msi_options
-                        },
-                        callbacks: {
-                            onCreateTokenSucceeded: function (token) {
-                                const form = document.querySelector('form.checkout');
-                                
-                                if (!form.querySelector('[name="conekta_token"]')) {
-                                    const input = document.createElement('input');
-                                    input.type = 'hidden';
-                                    input.name = 'conekta_token';
-                                    form.appendChild(input);
-                                }
-                                form.querySelector('[name="conekta_token"]').value = token.id;
-
-                                const msi = sessionStorage.getItem('conekta_msi_option') || '1';
-                                if (!form.querySelector('[name="conekta_msi_option"]')) {
-                                    const msiInput = document.createElement('input');
-                                    msiInput.type = 'hidden';
-                                    msiInput.name = 'conekta_msi_option';
-                                    form.appendChild(msiInput);
-                                }
-                                form.querySelector('[name="conekta_msi_option"]').value = msi;
-
-                                const formData = new FormData(form);
-                                formData.append('wc-ajax', 'checkout');
-
-                                fetch(window.location.origin + '/?wc-ajax=checkout', {
-                                    method: 'POST',
-                                    body: formData,
-                                    credentials: 'same-origin'
-                                })
-                                .then(response => response.json())
-                                .then(data => {
-                                    if (data.result === 'success') {
-                                        window.location.href = data.redirect;
-                                    } else {
-                                        alert(data.messages || 'Error al procesar el pago');
-                                    }
-                                })
-                                .catch(error => {
-                                    console.error('Error:', error);
-                                    alert('Error al procesar el pago');
-                                });
-                            },
-                            onCreateTokenError: function (error) {
-                                alert('Hubo un error al generar el token: ' + error.message);
-                            },
-                            onEventListener: function (event) {
-                                if (event.name === 'monthlyInstallmentSelected' && event.value) {
-                                    sessionStorage.setItem('conekta_msi_option', event.value.monthlyInstallments);
-                                }
-                            },
-                            onUpdateSubmitTrigger: function (triggerSubmitFromExternalFunction) {
-                                const form = document.querySelector('form.checkout');
-                                form._conektaSubmitFunction = triggerSubmitFromExternalFunction;
-                                if (!form._conektaSubmitListener) {
-                                    const submitListener = async function(e) {
-                                        const paymentMethod = document.querySelector('input[name="payment_method"]:checked');
-                                        if (paymentMethod && paymentMethod.value === 'conekta') {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-
-                                            try {
-                                                await form._conektaSubmitFunction();
-                                            } catch (error) {
-                                                console.error("Error en submit function:", error);
-                                                alert('Hubo un error al procesar el pago: ' + error.message);
-                                            }
-                                        }
-                                    };
-                                    form._conektaSubmitListener = submitListener;
-                                    form.addEventListener('submit', submitListener, true);
-                                }
-                            }
-                        }
-                        });
-                    };
-
-                    document.addEventListener('change', function (e) {
-                        if (e.target.name === 'payment_method') {
-                            if (e.target.value === 'conekta') {
-                                setTimeout(function () {
-                                    window.initConektaIframe && window.initConektaIframe();
-                                }, 100);
-                            }
-                        }
-                    });
-
-                    document.body.addEventListener('updated_checkout', function () {
-                        const selected = document.querySelector('input[name="payment_method"]:checked');
-                        if (selected && selected.value === 'conekta') {
-                            setTimeout(function () {
-                                window.initConektaIframe && window.initConektaIframe();
-                            }, 100);
-                        }
-                    });
-                });
-                JS;
-
-        wp_add_inline_script('conekta-checkout-classic', $js);
+            $settings = get_option('woocommerce_conekta_settings');
+            wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
+                'public_key' => $settings['cards_public_api_key'] ?? '',
+                'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
+                'available_msi_options' => $settings['months'] ?? [],
+                'amount' => WC()->cart->get_total('edit') * 100,
+            ]);
         }
     }
 }

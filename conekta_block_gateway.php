@@ -220,9 +220,11 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
     public function payment_fields() {
         if (!empty($this->description)) {
-        echo wpautop(wp_kses_post($this->description));
+            echo wpautop(wp_kses_post($this->description));
         }
         echo '<div id="conektaIframeContainer"></div>';
+        echo '<input type="hidden" name="conekta_token" />';
+        echo '<input type="hidden" name="conekta_msi_option" value="1" />';
     }
 
     /**
