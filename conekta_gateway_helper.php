@@ -76,21 +76,15 @@ function ckpg_build_line_items($items, $version)
         $item_name   = item_name_validation($item['name']);
         $unit_price  = intval(round(floatval($unit_price) / 10), 2);
         $quantity    = intval($item['qty']);
-        $tags = wp_get_post_terms($item['product_id'], 'product_tag', array('fields' => 'names'));
-        $brands = wp_get_post_terms($item['product_id'], 'product_brand', array('fields' => 'names'));
+
 
         $line_item_params = array(
             'name'        => $item_name,
             'unit_price'  => $unit_price,
             'quantity'    => $quantity,
-            'tags'        => array_merge(['WooCommerce', "Conekta ".$version], $tags),
-            'metadata'    => array(
-                                    'soft_validations' => true,
-                                    'images' =>  $productmeta->get_gallery_image_ids(),
-                                  ),
-           'description' => $productmeta->get_description() ?: 'no description',
+            'tags'        => ['WooCommerce', "Conekta ".$version],
+            'metadata'    => array('soft_validations' => true)
         );
-
 
         if (!empty($sku)) {
             $line_item_params = array_merge(
