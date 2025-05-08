@@ -28,15 +28,38 @@ const utils = {
     }, POLLING_INTERVAL);
   },
   getTranslation: (key) => {
-    const locale = conekta_settings.locale || 'es';
-    return window.CONEKTA_TRANSLATIONS?.[locale]?.[key] || window.CONEKTA_TRANSLATIONS?.es?.[key] || key;
-  }
+    const locale = conekta_settings.locale || "es";
+    return (
+      window.CONEKTA_TRANSLATIONS?.[locale]?.[key] ||
+      window.CONEKTA_TRANSLATIONS?.es?.[key] ||
+      key
+    );
+  },
+  setLoading: (isLoading) => {
+    const form = document.querySelector(FORM_SELECTOR);
+    if (!form || typeof jQuery === "undefined") return;
+
+    const $form = jQuery(form);
+
+    if (isLoading) {
+      $form.block({
+        message: null,
+        overlayCSS: {
+          background: "#fff",
+          opacity: 0.6,
+        },
+      });
+    } else {
+      $form.unblock();
+    }
+  },
 };
 
 // Form handling
 const formHandler = {
   submitForm: async (formData) => {
     try {
+      utils.setLoading(true);
       const response = await fetch(
         window.location.origin + "/?wc-ajax=checkout",
         {
@@ -50,11 +73,22 @@ const formHandler = {
       if (data.result === "success") {
         window.location.href = data.redirect;
       } else {
-        alert(data.messages || utils.getTranslation('form_error'));
+        utils.setLoading(false);
+        const form = document.querySelector(FORM_SELECTOR);
+        if (form) {
+          const existing = form.querySelector(".woocommerce-notices-wrapper");
+          if (existing) existing.remove();
+
+          const wrapper = document.createElement("div");
+          wrapper.className = "woocommerce-notices-wrapper";
+          wrapper.innerHTML = data.messages;
+
+          form.prepend(wrapper);
+        }
       }
     } catch (error) {
-      console.error("Error:", error);
-      alert(utils.getTranslation('form_error'));
+      utils.setLoading(false);
+      alert(utils.getTranslation("form_error"));
     }
   },
 
@@ -68,10 +102,12 @@ const formHandler = {
       e.stopPropagation();
 
       try {
+        utils.setLoading(true);
         await triggerSubmitFunction();
       } catch (error) {
         console.error("Error in submit function:", error);
-        alert(utils.getTranslation('form_error'));
+        utils.setLoading(false);
+        alert(utils.getTranslation("form_error"));
       }
     };
 
@@ -109,7 +145,8 @@ const conektaConfig = {
     },
 
     onCreateTokenError: (error) => {
-      alert(utils.getTranslation('token_error') + ": " + error.message);
+      utils.setLoading(false);
+      alert(utils.getTranslation("token_error") + ": " + error.message);
     },
 
     onEventListener: (event) => {
@@ -120,7 +157,9 @@ const conektaConfig = {
         );
       }
     },
-
+    onFormError: () => {
+      utils.setLoading(false);
+    },
     onUpdateSubmitTrigger: (triggerSubmitFunction) => {
       const form = document.querySelector(FORM_SELECTOR);
       form._conektaSubmitFunction = triggerSubmitFunction;

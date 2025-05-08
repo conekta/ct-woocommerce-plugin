@@ -335,7 +335,21 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             return true;
         } catch (ApiException $e) {
             $this->ckpg_mark_as_failed_payment($order);
-            $error_message = $e->getMessage();
+            
+            $responseBody = json_decode($e->getResponseBody());
+            $error_message = "Error al procesar el pago";
+            
+            $hasErrorDetails = $responseBody && 
+                             property_exists($responseBody, 'details') && 
+                             is_array($responseBody->details) && 
+                             !empty($responseBody->details) &&
+                             property_exists($responseBody->details[0], 'message');
+            
+            if ($hasErrorDetails) {
+                $error_message = $responseBody->details[0]->message;
+            }
+            
+            error_log($error_message);
             return false;
         }
     }
@@ -374,8 +388,8 @@ function ckpg_conekta_add_gateway($methods)
 }
 
 add_filter('woocommerce_payment_gateways', 'ckpg_conekta_add_gateway');
-
 add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_woocommerce_block_support');
+
 function woocommerce_gateway_conekta_woocommerce_block_support()
 {
     if (class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
