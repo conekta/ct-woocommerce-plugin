@@ -61,6 +61,19 @@ function ckpg_enqueue_classic_checkout_script() {
                 true
             );
 
+            // Enqueue translations
+            $translations_path = 'resources/js/frontend/classic-translations.js';
+            $translations_url = plugin_dir_url(__FILE__) . $translations_path;
+            $translations_path = plugin_dir_path(__FILE__) . $translations_path;
+
+            wp_enqueue_script(
+                'conekta-classic-translations',
+                $translations_url,
+                [],
+                file_exists($translations_path) ? filemtime($translations_path) : null,
+                true
+            );
+
             $script_path = 'resources/js/frontend/classic-checkout.js';
             $script_url = plugin_dir_url(__FILE__) . $script_path;
             $script_path = plugin_dir_path(__FILE__) . $script_path;
@@ -68,17 +81,21 @@ function ckpg_enqueue_classic_checkout_script() {
             wp_enqueue_script(
                 'conekta-classic-checkout',
                 $script_url,
-                ['conekta-checkout-classic'],
+                ['conekta-checkout-classic', 'conekta-classic-translations'],
                 file_exists($script_path) ? filemtime($script_path) : null,
                 true
             );
 
             $settings = get_option('woocommerce_conekta_settings');
+            $locale = get_locale();
+            $short_locale = substr($locale, 0, 2);
+
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
                 'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
                 'amount' => WC()->cart->get_total('edit') * 100,
+                'locale' => $short_locale
             ]);
         }
     }
