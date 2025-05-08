@@ -77,7 +77,7 @@ function ckpg_enqueue_classic_checkout_script() {
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
-                'available_msi_options' => $settings['months'] ?? [],
+                'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
                 'amount' => WC()->cart->get_total('edit') * 100,
             ]);
         }
