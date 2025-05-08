@@ -238,7 +238,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
 
         $token_id = $context->payment_data['conekta_token'];
-        $conekta_msi = $context->payment_data['conekta_msi_option'];
+        $msi_option = $context->payment_data['conekta_msi_option'];
         if (empty($token_id)) {
             throw new Exception('Token de pago no recibido.');
         }
