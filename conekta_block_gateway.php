@@ -356,8 +356,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
-
-        // Recupera el token del formulario (classic checkout)
+        
         $token_id = isset($_POST['conekta_token']) ? sanitize_text_field($_POST['conekta_token']) : null;
         $msi_option = isset($_POST['conekta_msi_option']) ? (int) $_POST['conekta_msi_option'] : 1;
 
