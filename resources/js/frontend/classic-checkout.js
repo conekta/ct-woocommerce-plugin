@@ -84,6 +84,7 @@ const formHandler = {
           wrapper.innerHTML = data.messages;
 
           form.prepend(wrapper);
+          wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }
     } catch (error) {
