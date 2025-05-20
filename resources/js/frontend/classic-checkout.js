@@ -61,7 +61,7 @@ const formHandler = {
     try {
       utils.setLoading(true);
       const response = await fetch(
-        window.location.origin + "/?wc-ajax=checkout",
+        window.location.origin + wc_checkout_params.checkout_url,
         {
           method: "POST",
           body: formData,
