@@ -109,8 +109,10 @@ const formHandler = {
         await triggerSubmitFunction();
       } catch (error) {
         console.error("Error in submit function:", error);
-        utils.setLoading(false);
-        alert(utils.getTranslation("form_error"));
+        if (error.message !== 'Can not send postrobot_method. Target window is closed') {
+          utils.setLoading(false);
+          alert(utils.getTranslation("form_error"));
+        }
       }
     };
 
