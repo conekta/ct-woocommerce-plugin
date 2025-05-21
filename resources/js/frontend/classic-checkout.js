@@ -233,7 +233,6 @@ const domObserver = {
             const form = document.querySelector(FORM_SELECTOR);
             if (form) {
               form._conektaSubmitFunction = null;
-              form._conektaSubmitListener = null;
             }
           }
         });
