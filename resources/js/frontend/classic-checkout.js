@@ -53,6 +53,20 @@ const utils = {
       $form.unblock();
     }
   },
+  showErrorMessage: (message) => {
+    const form = document.querySelector(FORM_SELECTOR);
+    if (!form) return;
+
+    const existing = form.querySelector(".woocommerce-notices-wrapper");
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "woocommerce-notices-wrapper";
+    wrapper.innerHTML = `<div class="woocommerce-error">${message}</div>`;
+
+    form.prepend(wrapper);
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 };
 
 // Form handling
@@ -89,7 +103,7 @@ const formHandler = {
       }
     } catch (error) {
       utils.setLoading(false);
-      alert(utils.getTranslation("form_error"));
+      utils.showErrorMessage(utils.getTranslation("form_error"));
     }
   },
 
@@ -111,7 +125,7 @@ const formHandler = {
         console.error("Error in submit function:", error);
         utils.setLoading(false);
         if (error.message !== 'Can not send postrobot_method. Target window is closed') {
-          alert(utils.getTranslation("form_error"));
+          utils.showErrorMessage(utils.getTranslation("form_error"));
         }
       }
     };
@@ -151,7 +165,7 @@ const conektaConfig = {
 
     onCreateTokenError: (error) => {
       utils.setLoading(false);
-      alert(utils.getTranslation("token_error") + ": " + error.message);
+      utils.showErrorMessage(utils.getTranslation("token_error") + ": " + error.message);
     },
 
     onEventListener: (event) => {
