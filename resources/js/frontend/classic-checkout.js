@@ -94,7 +94,9 @@ const formHandler = {
   },
 
   setupSubmitListener: (form, triggerSubmitFunction) => {
-    if (form._conektaSubmitListener) return;
+    if (form._conektaSubmitListener) {
+      form.removeEventListener("submit", form._conektaSubmitListener, true);
+    }
 
     const submitListener = async (e) => {
       if (!utils.isConektaSelected()) return;
@@ -188,6 +190,7 @@ const conektaInitializer = {
     }
 
     try {
+      console.log("Initializing Conekta iframe...");
       ConektaCheckoutComponents.Card({
         config: conektaConfig.getConfig(),
         options: conektaConfig.getOptions(),
@@ -220,6 +223,19 @@ const domObserver = {
   observer: new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       if (mutation.type === "childList") {
+        mutation.removedNodes.forEach((node) => {
+          if (
+            node.id === CONTAINER_SELECTOR.replace("#", "") ||
+            (node.querySelector && node.querySelector(CONTAINER_SELECTOR))
+          ) {
+            const form = document.querySelector(FORM_SELECTOR);
+            if (form) {
+              form._conektaSubmitFunction = null;
+              form._conektaSubmitListener = null;
+            }
+          }
+        });
+
         mutation.addedNodes.forEach((node) => {
           if (
             node.id === CONTAINER_SELECTOR.replace("#", "") ||
