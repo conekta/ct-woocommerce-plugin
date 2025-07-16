@@ -126,9 +126,10 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
             $payment_method = $charge->getPaymentMethod()->getObject();
             if ($payment_method == 'bank_transfer_payment') {
                 $clabe = $charge->getPaymentMethod()->getClabe();
+                $bank = $charge->getPaymentMethod()->getBank();
                 echo '<p><h4><strong>' . __('Clabe') . ':</strong> ' . $clabe . '</h4></p>';
                 echo '<p><h4><strong>' . esc_html(__('Beneficiario')) . ':</strong> ' . esc_html($this->settings['account_owner']) . '</h4></p>';
-                echo '<p><h4><strong>' . esc_html(__('Banco Receptor')) . ':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
+                echo '<p><h4><strong>' . esc_html(__('Banco Receptor')) . ':</strong> ' . esc_html($bank) . '</h4></p>';
             }
         }
     }
@@ -230,7 +231,6 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 echo '<p><h4><strong>'.esc_html(__('Clabe')).':</strong> '
                 . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
                 echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->settings['account_owner']).'</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Banco Receptor')).':</strong>  Sistema de Transferencias y Pagos (STP)<h4></p>';
             }
     }
 
