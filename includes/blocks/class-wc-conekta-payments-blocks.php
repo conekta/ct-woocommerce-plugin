@@ -84,6 +84,8 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
             'locale' 						 => $this->gateway->get_user_locale(),
 			'msi_enabled'					 => $this->get_setting('is_msi_enabled') === 'yes',
 			'available_msi_options' 		 => array_map('intval', (array)$this->get_setting('months')),
+            'is_3ds_enabled'                 => $this->get_setting('is_3ds_enabled') === 'yes',
+            '3ds_mode'                       => $this->get_setting('3ds_mode'),
         ];
     }
 }
