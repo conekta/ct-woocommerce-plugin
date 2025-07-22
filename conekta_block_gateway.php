@@ -49,6 +49,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->api_key = $this->settings['cards_api_key'];
         $this->public_api_key = $this->settings['cards_public_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
+        $this->is_3ds_enabled = isset($this->settings['is_3ds_enabled']) && $this->settings['is_3ds_enabled'] === 'yes';
+        $this->three_ds_mode = isset($this->settings['3ds_mode']) ? $this->settings['3ds_mode'] : 'smart';
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);
@@ -172,6 +174,24 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 'title' => __('Meses sin Intereses', 'woothemes'),
                 'label' => __('Habilitar Meses sin Intereses', 'woothemes'),
                 'default' => 'no'
+            ),
+            'is_3ds_enabled' => array(
+                'type' => 'checkbox',
+                'title' => __('3D Secure', 'woothemes'),
+                'label' => __('Habilitar 3D Secure para pagos con tarjeta', 'woothemes'),
+                'description' => __('Activa la autenticación 3D Secure para proteger las transacciones contra fraudes. <a href="https://developers.conekta.com/docs/activar-3d-secure-2" target="_blank">Más información</a>.', 'woothemes'),
+                'default' => 'no'
+            ),
+            '3ds_mode' => array(
+                'type' => 'select',
+                'title' => __('Modo de 3D Secure', 'woothemes'),
+                'description' => __('Smart: Solo se requiere autenticación cuando Conekta detecta riesgo. Strict: Se requiere autenticación para todas las transacciones.', 'woothemes'),
+                'default' => 'smart',
+                'options' => array(
+                    'smart' => __('Smart (recomendado)', 'woothemes'),
+                    'strict' => __('Strict', 'woothemes'),
+                ),
+                'class' => 'wc-enhanced-select',
             ),
             'months' => array(
                 'type' => 'multiselect',
