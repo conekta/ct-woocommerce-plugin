@@ -157,24 +157,44 @@ const create3dsIframe = (url) => {
             // Create modal container
             const modalContainer = document.createElement('div');
             modalContainer.id = 'conekta3dsModalContainer';
-            modalContainer.style.position = 'fixed';
-            modalContainer.style.top = '0';
-            modalContainer.style.left = '0';
-            modalContainer.style.right = '0';
-            modalContainer.style.bottom = '0';
+            // Dejamos de usar un modal superpuesto; el contenedor se embeberá
+            // dentro de "#conektaIframeContainer" para que la autenticación 3DS
+            // se muestre en línea.
             modalContainer.style.display = 'flex';
             modalContainer.style.flexDirection = 'column';
             modalContainer.style.justifyContent = 'center';
             modalContainer.style.alignItems = 'center';
-            modalContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-            modalContainer.style.zIndex = '9999';
+
+            // Aseguramos overlay sobre el tokenizador
+            const parentContainer = document.getElementById('conektaIframeContainer');
+            if (!parentContainer) {
+                console.error('Target container for 3DS not found');
+                reject(new Error('No se encontró el contenedor para 3DS'));
+                return;
+            }
+
+            if (getComputedStyle(parentContainer).position === 'static') {
+                parentContainer.style.position = 'relative';
+            }
+
+            modalContainer.style.position = 'absolute';
+            modalContainer.style.top = '0';
+            modalContainer.style.left = '0';
+            modalContainer.style.right = '0';
+            modalContainer.style.bottom = '0';
+            modalContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+            modalContainer.style.zIndex = '999';
+            
+            // El código que movía parentContainer debajo se adelanta para usarlo después
+            // (la definición de parentContainer ya está arriba)
             
             // Create header with title
             const header = document.createElement('div');
             header.style.backgroundColor = 'white';
             header.style.padding = '15px';
             header.style.borderRadius = '8px 8px 0 0';
-            header.style.width = '500px';
+            header.style.width = '100%';
+            header.style.maxWidth = '600px';
             header.style.borderBottom = '1px solid #ddd';
             header.style.textAlign = 'center';
             
@@ -191,8 +211,10 @@ const create3dsIframe = (url) => {
             const iframe = document.createElement('iframe');
             iframe.id = 'conekta3dsIframe';
             iframe.src = `${url}?source=embedded`;
-            iframe.style.width = '500px';
-            iframe.style.height = '500px';
+            iframe.style.width = '95%';
+            iframe.style.maxWidth = '600px';
+            iframe.style.height = '600px';
+            iframe.style.maxHeight = '95%';
             iframe.style.border = 'none';
             iframe.style.backgroundColor = 'white';
             iframe.style.borderRadius = '0 0 8px 8px';
@@ -214,13 +236,13 @@ const create3dsIframe = (url) => {
 
             modalContainer.appendChild(iframe);
             
-            document.body.appendChild(modalContainer);
+            parentContainer.appendChild(modalContainer);
             
             // Add timeout to reject if iframe doesn't load
             const timeoutId = setTimeout(() => {
                 reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
-                if (document.body.contains(modalContainer)) {
-                    document.body.removeChild(modalContainer);
+                if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
+                    modalContainer.remove();
                 }
             }, 60000); // 60 seconds timeout
             
@@ -234,8 +256,8 @@ const create3dsIframe = (url) => {
                         window.removeEventListener('message', messageHandler);
                         clearTimeout(timeoutId);
                         
-                        if (document.body.contains(modalContainer)) {
-                            document.body.removeChild(modalContainer);
+                        if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
+                            modalContainer.remove();
                         }
                         
                         if (event.data.error || event.data.payment_status !== 'paid') {
@@ -250,8 +272,8 @@ const create3dsIframe = (url) => {
                 } catch (msgError) {
                     console.error('Error processing 3DS message:', msgError);
                     clearTimeout(timeoutId);
-                    if (document.body.contains(modalContainer)) {
-                        document.body.removeChild(modalContainer);
+                    if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
+                        modalContainer.remove();
                     }
                     reject(new Error('Error en el procesamiento de la respuesta 3D Secure'));
                 }
@@ -264,8 +286,8 @@ const create3dsIframe = (url) => {
                 if (keyEvent.key === 'Escape' || keyEvent.keyCode === 27) {
                     window.removeEventListener('keydown', keyHandler);
                     clearTimeout(timeoutId);
-                    if (document.body.contains(modalContainer)) {
-                        document.body.removeChild(modalContainer);
+                    if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
+                        modalContainer.remove();
                     }
                     reject(new Error('Autenticación 3D Secure cancelada por el usuario'));
                 }
@@ -345,9 +367,9 @@ const ContentConekta = (props) => {
                                         meta: {
                                             paymentMethodData: {
                                                 conekta_token: token,
-                                                conekta_msi_option: msiOption,
-                                                conekta_order_id: orderResponse.order_id,
-                                                conekta_woo_order_id: orderResponse.woo_order_id,
+                                                conekta_msi_option: String(msiOption),
+                                                conekta_order_id: String(orderResponse.order_id),
+                                                conekta_woo_order_id: String(orderResponse.woo_order_id),
                                                 conekta_3ds_completed: true
                                             },
                                         }
@@ -364,9 +386,9 @@ const ContentConekta = (props) => {
                                 meta: {
                                     paymentMethodData: {
                                         conekta_token: token,
-                                        conekta_msi_option: msiOption,
-                                        conekta_order_id: orderResponse.order_id,
-                                        conekta_woo_order_id: orderResponse.woo_order_id
+                                        conekta_msi_option: String(msiOption),
+                                        conekta_order_id: String(orderResponse.order_id),
+                                        conekta_woo_order_id: String(orderResponse.woo_order_id)
                                     },
                                 }
                             };
@@ -387,7 +409,7 @@ const ContentConekta = (props) => {
                         meta: {
                             paymentMethodData: {
                                 conekta_token: token,
-                                conekta_msi_option: sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION,
+                                conekta_msi_option: String(sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION),
                             },
                         }
                     };
