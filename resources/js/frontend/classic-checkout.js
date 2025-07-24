@@ -129,7 +129,22 @@ const threeDsHandler = {
       // Create modal container
       const modalContainer = document.createElement('div');
       modalContainer.id = 'conekta3dsModalContainer';
-      modalContainer.style.position = 'fixed';
+      // Dejamos de usar un modal superpuesto y embebemos el iframe dentro del
+      // contenedor principal de Conekta.
+      const parentContainer = document.querySelector(CONTAINER_SELECTOR);
+      if (!parentContainer) {
+        console.error('Target container for 3DS not found');
+        reject(new Error('No se encontró el contenedor para 3DS'));
+        return;
+      }
+
+      // Aseguramos que el contenedor padre tenga posicionamiento relativo
+      if (getComputedStyle(parentContainer).position === 'static') {
+        parentContainer.style.position = 'relative';
+      }
+
+      // Estilos del overlay 3DS para quedar por encima
+      modalContainer.style.position = 'absolute';
       modalContainer.style.top = '0';
       modalContainer.style.left = '0';
       modalContainer.style.right = '0';
@@ -137,28 +152,31 @@ const threeDsHandler = {
       modalContainer.style.display = 'flex';
       modalContainer.style.justifyContent = 'center';
       modalContainer.style.alignItems = 'center';
-      modalContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-      modalContainer.style.zIndex = '9999';
+      modalContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+      modalContainer.style.zIndex = '999';
       
       // Create iframe
       const iframe = document.createElement('iframe');
       iframe.id = 'conekta3dsIframe';
       iframe.src = `${url}?source=embedded`;
-      iframe.style.width = '500px';
-      iframe.style.height = '600px';
+      // Ajustamos tamaño responsivo para que se mantenga dentro del contenedor del bloque
+      iframe.style.width = '95%';
+      iframe.style.maxWidth = '600px';
+      iframe.style.height = '650px';
+      iframe.style.maxHeight = '95%';
       iframe.style.border = 'none';
       iframe.style.backgroundColor = 'white';
       iframe.style.borderRadius = '8px';
       
       modalContainer.appendChild(iframe);
-      document.body.appendChild(modalContainer);
+      parentContainer.appendChild(modalContainer);
       
       // Listen for message event from iframe
       const messageHandler = (event) => {
         // Check that the origin is from Conekta
         if (event.origin === 'https://3ds-pay.conekta.com') {
           window.removeEventListener('message', messageHandler);
-          document.body.removeChild(modalContainer);
+          modalContainer.remove();
           
           if (event.data.error || event.data.payment_status !== 'paid') {
             reject(new Error('3DS authentication failed'));
