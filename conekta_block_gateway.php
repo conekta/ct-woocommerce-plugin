@@ -276,7 +276,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($conekta_order_id)) {
             try {
                 $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-                $conekta_order = $conekta_api->getOrder($conekta_order_id);
+                $conekta_order = $conekta_api->getOrderById($conekta_order_id);
                 
                 // If there's a temporary order from 3DS, use that order's information
                 if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order->get_id()) {
@@ -452,7 +452,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($conekta_order_id)) {
             try {
                 $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-                $conekta_order = $conekta_api->getOrder($conekta_order_id);
+                $conekta_order = $conekta_api->getOrderById($conekta_order_id);
                 
                 // If there's a temporary order from 3DS, use that order's information
                 if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order_id) {
