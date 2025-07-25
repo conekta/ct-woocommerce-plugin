@@ -129,8 +129,6 @@ const threeDsHandler = {
       // Create modal container
       const modalContainer = document.createElement('div');
       modalContainer.id = 'conekta3dsModalContainer';
-      // Dejamos de usar un modal superpuesto y embebemos el iframe dentro del
-      // contenedor principal de Conekta.
       const parentContainer = document.querySelector(CONTAINER_SELECTOR);
       if (!parentContainer) {
         console.error('Target container for 3DS not found');
@@ -138,12 +136,10 @@ const threeDsHandler = {
         return;
       }
 
-      // Aseguramos que el contenedor padre tenga posicionamiento relativo
       if (getComputedStyle(parentContainer).position === 'static') {
         parentContainer.style.position = 'relative';
       }
 
-      // Estilos del overlay 3DS para quedar por encima
       modalContainer.style.position = 'absolute';
       modalContainer.style.top = '0';
       modalContainer.style.left = '0';
@@ -159,7 +155,6 @@ const threeDsHandler = {
       const iframe = document.createElement('iframe');
       iframe.id = 'conekta3dsIframe';
       iframe.src = `${url}?source=embedded`;
-      // Ajustamos tamaño responsivo para que se mantenga dentro del contenedor del bloque
       iframe.style.width = '95%';
       iframe.style.maxWidth = '600px';
       iframe.style.height = '650px';

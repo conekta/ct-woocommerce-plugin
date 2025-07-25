@@ -157,15 +157,12 @@ const create3dsIframe = (url) => {
             // Create modal container
             const modalContainer = document.createElement('div');
             modalContainer.id = 'conekta3dsModalContainer';
-            // Dejamos de usar un modal superpuesto; el contenedor se embeberá
-            // dentro de "#conektaIframeContainer" para que la autenticación 3DS
-            // se muestre en línea.
+            
             modalContainer.style.display = 'flex';
             modalContainer.style.flexDirection = 'column';
             modalContainer.style.justifyContent = 'center';
             modalContainer.style.alignItems = 'center';
-
-            // Aseguramos overlay sobre el tokenizador
+ 
             const parentContainer = document.getElementById('conektaIframeContainer');
             if (!parentContainer) {
                 console.error('Target container for 3DS not found');
@@ -184,11 +181,7 @@ const create3dsIframe = (url) => {
             modalContainer.style.bottom = '0';
             modalContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
             modalContainer.style.zIndex = '999';
-            
-            // El código que movía parentContainer debajo se adelanta para usarlo después
-            // (la definición de parentContainer ya está arriba)
-            
-            // Create header with title
+
             const header = document.createElement('div');
             header.style.backgroundColor = 'white';
             header.style.padding = '15px';
@@ -197,17 +190,16 @@ const create3dsIframe = (url) => {
             header.style.maxWidth = '600px';
             header.style.borderBottom = '1px solid #ddd';
             header.style.textAlign = 'center';
-            
+
             const title = document.createElement('h3');
             title.textContent = 'Autenticación 3D Secure';
             title.style.margin = '0';
             title.style.padding = '0';
             title.style.fontWeight = 'bold';
-            
+
             header.appendChild(title);
             modalContainer.appendChild(header);
-            
-            // Create iframe
+
             const iframe = document.createElement('iframe');
             iframe.id = 'conekta3dsIframe';
             iframe.src = `${url}?source=embedded`;
@@ -219,16 +211,14 @@ const create3dsIframe = (url) => {
             iframe.style.backgroundColor = 'white';
             iframe.style.borderRadius = '0 0 8px 8px';
             
-            // Add loading indicator
             const loadingDiv = document.createElement('div');
             loadingDiv.textContent = 'Cargando autenticación 3D Secure...';
             loadingDiv.style.padding = '20px';
             loadingDiv.style.backgroundColor = 'white';
             loadingDiv.style.textAlign = 'center';
             loadingDiv.id = 'conekta3dsLoading';
-            
             modalContainer.appendChild(loadingDiv);
-            
+
             // Hide loading when iframe is loaded
             iframe.onload = function() {
                 loadingDiv.style.display = 'none';
