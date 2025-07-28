@@ -23,7 +23,7 @@ class WC_Conekta_REST_API {
         register_rest_route('conekta/v1', '/create-3ds-order', [
             'methods' => 'POST',
             'callback' => [self::class, 'create_3ds_order'],
-            'permission_callback' => '__return_true', // Permitir acceso a todos los usuarios
+            'permission_callback' => 'is_checkout', // Permitir acceso a todos los usuarios
         ]);
     }
     
@@ -279,8 +279,7 @@ class WC_Conekta_REST_API {
                 error_log('Error building request data: ' . $e->getMessage());
                 return new WP_REST_Response([
                     'success' => false,
-                    'message' => 'Error building request data: ' . $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
+                    'message' => 'Error building request data: ' . $e->getMessage()
                 ], 500);
             }
             
@@ -328,8 +327,7 @@ class WC_Conekta_REST_API {
                 error_log('Error creating OrderRequest: ' . $e->getMessage());
                 return new WP_REST_Response([
                     'success' => false,
-                    'message' => 'Error creating OrderRequest: ' . $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
+                    'message' => 'Error creating OrderRequest: ' . $e->getMessage()
                 ], 500);
             }
             
