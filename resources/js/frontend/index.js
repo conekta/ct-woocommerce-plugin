@@ -54,10 +54,7 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
         // Add order_id if provided
         if (orderId) {
             requestData.order_id = orderId;
-            console.log('Using order ID from checkout:', orderId);
         } else {
-            console.log('No order ID available, using blocks cart data');
-            
             // Add blocks-specific data
             requestData.is_blocks_context = true;
             
@@ -119,8 +116,6 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             }
         }
         
-        console.log('Sending 3DS request data:', JSON.stringify(requestData, null, 2));
-        
         const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {
             method: 'POST',
             headers,
@@ -144,8 +139,6 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
 const create3dsIframe = (url) => {
     return new Promise((resolve, reject) => {
         try {
-            console.log('Creating 3DS iframe for URL:', url);
-            
             // Remove any existing iframe
             const existingIframe = document.getElementById('conekta3dsIframe');
             const existingContainer = document.getElementById('conekta3dsModalContainer');
@@ -239,9 +232,6 @@ const create3dsIframe = (url) => {
             // Listen for message event from iframe
             const messageHandler = (event) => {
                 try {
-                    // Check that the origin is from Conekta
-                    console.log('3DS message received:', event.origin, event.data);
-                    
                     if (event.origin === 'https://3ds-pay.conekta.com') {
                         window.removeEventListener('message', messageHandler);
                         clearTimeout(timeoutId);
@@ -300,9 +290,6 @@ const ContentConekta = (props) => {
     const { loadScript } = useComponentScript();
     const [processing, setProcessing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
-    
-    // Log props structure to help debugging
-    console.log('Conekta props:', props);
 
     useEffect(() => {
         const unsubscribe = onPaymentSetup(async () => {
@@ -330,28 +317,18 @@ const ContentConekta = (props) => {
                     // Get token from Conekta Component
                     conektaSubmitFunction.current();
                     const token = await waitGetToken();
-                    console.log('Token recibido:', token);
                     
                     // If 3DS is enabled, create 3DS order
                     if (is3dsEnabled) {
                         try {
                             const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
-                            console.log('MSI option:', msiOption);
                             
-                            // Create order with 3DS
-                            const orderResponse = await create3dsOrder(token, null, msiOption, props);
-                            console.log('3DS order created:', orderResponse);
-                            
-                            // If next_action is present, authentication is required
                             if (orderResponse.next_action) {
-                                // Show 3DS iframe
                                 const redirectUrl = orderResponse.next_action.redirect_url;
-                                console.log('Showing 3DS iframe with URL:', redirectUrl);
                                 const authResult = await create3dsIframe(redirectUrl);
                                 
                                 // Verify order status
                                 if (authResult.payment_status === 'paid') {
-                                    console.log('3DS authentication successful');
                                     return {
                                         type: emitResponse.responseTypes.SUCCESS,
                                         meta: {
@@ -370,7 +347,6 @@ const ContentConekta = (props) => {
                             }
                             
                             // If we get here, order was created but no 3DS needed
-                            console.log('Order created without 3DS authentication requirement');
                             return {
                                 type: emitResponse.responseTypes.SUCCESS,
                                 meta: {
@@ -393,7 +369,6 @@ const ContentConekta = (props) => {
                     }
                     
                     // Standard non-3DS flow
-                    console.log('Using standard non-3DS flow');
                     return {
                         type: emitResponse.responseTypes.SUCCESS,
                         meta: {
