@@ -335,7 +335,7 @@ class WC_Conekta_REST_API {
                 'type' => 'card',
                 'token_id' => $token,
                 'expires_at' => get_expired_at($gateway->settings['order_expiration']),
-                'customer_ip_address' => self::get_user_ip()
+                'customer_ip_address' => \WC_Geolocation::get_ip_address()
             ]);
             
             if ($gateway->settings['is_msi_enabled'] == 'yes' && (int)$msi_option > 1) {
@@ -382,22 +382,6 @@ class WC_Conekta_REST_API {
                 'message' => $e->getMessage(),
             ], 500);
         }
-    }
-    
-    /**
-     * Helper function to get user's IP address
-     * 
-     * @return string
-     */
-    private static function get_user_ip() {
-        if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
-            $ip = $_SERVER['HTTP_CLIENT_IP'];
-        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
-        } else {
-            $ip = $_SERVER['REMOTE_ADDR'];
-        }
-        return $ip;
     }
     
     /**
