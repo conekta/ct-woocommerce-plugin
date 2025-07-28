@@ -191,28 +191,9 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     }
     
     public static function get_user_ip(): string {
-        $ip_keys = [
-            'HTTP_X_FORWARDED_FOR',   // Load Balancer / Proxies
-            'HTTP_CF_CONNECTING_IP',  // Cloudflare
-            'HTTP_X_REAL_IP',         // Nginx
-            'HTTP_CLIENT_IP',         // Proxy
-            'REMOTE_ADDR'             // Last option
-        ];
-    
-        foreach ($ip_keys as $key) {
-            if (!empty($_SERVER[$key])) {
-                $ip_list = explode(',', $_SERVER[$key]);
-                $ip_list = array_map('trim', $ip_list);
-
-                foreach (array_reverse($ip_list) as $ip) {
-                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                        return $ip;
-                    }
-                }
-            }
-        }
-    
-        return '0.0.0.0';
+        // Delegamos a la función nativa de WooCommerce, que maneja distintos encabezados
+        // y valida rangos privados/reservados.
+        return \WC_Geolocation::get_ip_address();
     }
 
     public static function get_api_instance(string  $api_key, string $version): OrdersApi
@@ -232,34 +213,33 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         ]);
         return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
     }
-}
 
-// Handle 3DS callback
-add_action('woocommerce_api_conekta_3ds_callback', 'handle_conekta_3ds_callback');
-
-function handle_conekta_3ds_callback() {
-    // Get payment status from query parameters
-    $payment_status = isset($_GET['payment_status']) ? sanitize_text_field($_GET['payment_status']) : '';
-    $order_id = isset($_GET['order_id']) ? sanitize_text_field($_GET['order_id']) : '';
-    $woo_order_id = isset($_GET['woo_order_id']) ? sanitize_text_field($_GET['woo_order_id']) : '';
-    
-    // Redirect to checkout page with appropriate status
-    if (!empty($order_id)) {
-        // Store the order ID and status in session to be processed in the checkout
-        WC()->session->set('conekta_3ds_order_id', $order_id);
-        WC()->session->set('conekta_3ds_payment_status', $payment_status);
+    public static function handle_conekta_3ds_callback() {
+        // Get payment status from query parameters
+        $payment_status = isset($_GET['payment_status']) ? sanitize_text_field($_GET['payment_status']) : '';
+        $order_id = isset($_GET['order_id']) ? sanitize_text_field($_GET['order_id']) : '';
+        $woo_order_id = isset($_GET['woo_order_id']) ? sanitize_text_field($_GET['woo_order_id']) : '';
         
-        // Store WooCommerce order ID if available
-        if (!empty($woo_order_id)) {
-            WC()->session->set('conekta_woo_order_id', $woo_order_id);
+        // Redirect to checkout page with appropriate status
+        if (!empty($order_id)) {
+            // Store the order ID and status in session to be processed in the checkout
+            WC()->session->set('conekta_3ds_order_id', $order_id);
+            WC()->session->set('conekta_3ds_payment_status', $payment_status);
+            
+            // Store WooCommerce order ID if available
+            if (!empty($woo_order_id)) {
+                WC()->session->set('conekta_woo_order_id', $woo_order_id);
+            }
+            
+            // Redirect to checkout
+            wp_safe_redirect(wc_get_checkout_url());
+            exit;
         }
         
-        // Redirect to checkout
+        // Fallback redirect
         wp_safe_redirect(wc_get_checkout_url());
         exit;
     }
-    
-    // Fallback redirect
-    wp_safe_redirect(wc_get_checkout_url());
-    exit;
 }
+
+add_action('woocommerce_api_conekta_3ds_callback', [ 'WC_Conekta_Plugin', 'handle_conekta_3ds_callback' ]);
