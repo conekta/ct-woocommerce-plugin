@@ -23,7 +23,7 @@ class WC_Conekta_REST_API {
         register_rest_route('conekta/v1', '/create-3ds-order', [
             'methods' => 'POST',
             'callback' => [self::class, 'create_3ds_order'],
-            'permission_callback' => 'is_checkout', // Permitir acceso a todos los usuarios
+            'permission_callback' => '__return_true',
         ]);
     }
     
