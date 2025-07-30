@@ -323,6 +323,8 @@ const ContentConekta = (props) => {
                         try {
                             const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
                             
+                            const orderResponse = await create3dsOrder(token, null, msiOption, props);
+                            
                             if (orderResponse.next_action) {
                                 const redirectUrl = orderResponse.next_action.redirect_url;
                                 const authResult = await create3dsIframe(redirectUrl);
