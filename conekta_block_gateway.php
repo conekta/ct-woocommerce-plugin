@@ -287,6 +287,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                         if ($conekta_order_meta) {
                             self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
                         }
+
+                        $temp_order->delete(true);
                     }
                 } else {
                     // Update order meta in current order
@@ -463,6 +465,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                         if ($conekta_order_meta) {
                             self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
                         }
+
+                        $temp_order->delete(true);
                     }
                 } else {
                     // Update order meta in current order
