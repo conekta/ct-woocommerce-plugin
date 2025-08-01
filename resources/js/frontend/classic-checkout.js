@@ -1,5 +1,5 @@
 // Constants
-const CONTAINER_SELECTOR = "#conektaIframeContainer";
+const CONTAINER_SELECTOR = "#conektaITokenizerframeContainer";
 const FORM_SELECTOR = "form.checkout";
 const PAYMENT_METHOD_SELECTOR = 'input[name="payment_method"]:checked';
 const MSI_STORAGE_KEY = "conekta_msi_option";
