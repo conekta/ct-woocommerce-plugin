@@ -155,7 +155,7 @@ const create3dsIframe = (url) => {
             conekta3dsContainer.style.justifyContent = 'center';
             conekta3dsContainer.style.alignItems = 'center';
  
-            const parentContainer = document.getElementById('conektaIframeContainer');
+            const parentContainer = document.getElementById('conektaITokenizerframeContainer');
             if (!parentContainer) {
                 console.error('Target container for 3DS not found');
                 reject(new Error('No se encontró el contenedor para 3DS'));
@@ -421,7 +421,7 @@ const ContentConekta = (props) => {
         <div>
             <p>{decodeEntities(settings.description)}</p>
             {errorMessage && <p style={{color: 'red'}}>{errorMessage}</p>}
-            <div key={props.billing.cartTotal.value} id="conektaIframeContainer"></div>
+            <div key={props.billing.cartTotal.value} id="conektaITokenizerframeContainer"></div>
             {processing && <p>Procesando su pago...</p>}
         </div>
     );
