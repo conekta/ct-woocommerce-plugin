@@ -1,5 +1,6 @@
 // Constants
 const CONTAINER_SELECTOR = "#conektaITokenizerframeContainer";
+const THREE_DS_TIMEOUT = 60 * 1000; // igual que blocks
 const FORM_SELECTOR = "form.checkout";
 const PAYMENT_METHOD_SELECTOR = 'input[name="payment_method"]:checked';
 const MSI_STORAGE_KEY = "conekta_msi_option";
@@ -136,6 +137,7 @@ const threeDsHandler = {
       // Create modal container
       const conekta3dsContainer = document.createElement('div');
       conekta3dsContainer.id = 'conekta3dsContainer';
+      conekta3dsContainer.classList.add('conekta-slide-in');
       const parentContainer = document.querySelector(CONTAINER_SELECTOR);
       if (!parentContainer) {
         console.error('Target container for 3DS not found');
@@ -178,7 +180,11 @@ const threeDsHandler = {
         // Check that the origin is from Conekta
         if (event.origin === 'https://3ds-pay.conekta.com') {
           window.removeEventListener('message', messageHandler);
-          conekta3dsContainer.remove();
+          conekta3dsContainer.classList.remove('conekta-slide-in');
+          conekta3dsContainer.classList.add('conekta-slide-out');
+          setTimeout(()=>{
+            conekta3dsContainer.remove();
+          },300);
           
           if (event.data.error || event.data.payment_status !== 'paid') {
             reject(new Error('3DS authentication failed'));
