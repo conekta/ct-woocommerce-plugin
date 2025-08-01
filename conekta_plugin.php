@@ -11,6 +11,7 @@ use \Conekta\Configuration;
 use \Conekta\Model\WebhookRequest;
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
+use Conekta\Api\CompaniesApi;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
@@ -212,6 +213,24 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             'handler' => $stack,
         ]);
         return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
+    }
+
+    public static function get_companies_api_instance(string $api_key, string $version): CompaniesApi
+    {
+        $stack = HandlerStack::create();
+        $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
+            return $request->withHeader(
+                'X-Conekta-Client-User-Agent',
+                json_encode([
+                    'plugin_name'    => 'woocommerce',
+                    'plugin_version' => $version,
+                ])
+            );
+        }));
+        $client = new Client([
+            'handler' => $stack,
+        ]);
+        return new CompaniesApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
     }
 
     public static function handle_conekta_3ds_callback() {
