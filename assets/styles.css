@@ -6,11 +6,31 @@
 }
 /* ...resto de estilos ya presentes... */
 
-/* =================  Checkout CLASSIC ================= */
-form.checkout.three-ds-process {
+.wc-block-components-checkout-step--disabled.three-ds-process {
     opacity: 1 !important;
 }
 
-form.checkout.three-ds-process .blockUI.blockOverlay.three-ds-process {
+.wc-block-components-checkout-step--disabled.three-ds-process .wc-block-components-radio-control-accordion-option:not(.wc-block-components-radio-control-accordion-option--checked-option-highlighted) {
     opacity: 0.6 !important;
 }
+
+/* ===== Animaciones de altura ===== */
+@keyframes conekta-expand {
+    0%   { max-height: 0; opacity: 0; }
+    100% { max-height: 1000px; opacity: 1; }
+}
+@keyframes conekta-collapse {
+    0%   { max-height: 1000px; opacity: 1; }
+    100% { max-height: 0; opacity: 0; }
+}
+
+.conekta-slide-in {
+    overflow: hidden;
+    animation: conekta-expand 0.4s ease forwards;
+}
+.conekta-slide-out {
+    overflow: hidden;
+    animation: conekta-collapse 0.4s ease forwards;
+}
+
+/* =================  Checkout CLASSIC ================= */

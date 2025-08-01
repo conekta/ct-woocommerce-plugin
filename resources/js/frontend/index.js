@@ -171,8 +171,13 @@ const create3dsIframe = (url) => {
                 return;
             }
 
-            // Ocultar contenedor del tokenizer y mostrar contenedor 3DS
-            parentContainer.style.display = 'none';
+            // Animar ocultar tokenizer
+            parentContainer.classList.remove('conekta-slide-in');
+            parentContainer.classList.add('conekta-slide-out');
+            setTimeout(() => {
+                parentContainer.style.display = 'none';
+                parentContainer.classList.remove('conekta-slide-out');
+            }, 300);
 
             if (getComputedStyle(parentContainer).position === 'static') {
                 parentContainer.style.position = 'relative';
@@ -222,6 +227,8 @@ const create3dsIframe = (url) => {
             };
 
             conekta3dsContainer.appendChild(iframe);
+            // Animar aparición del contenedor 3DS
+            conekta3dsContainer.classList.add('conekta-slide-in');
             
 
             
@@ -229,9 +236,16 @@ const create3dsIframe = (url) => {
             const timeoutId = setTimeout(() => {
                 reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
                 if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                    conekta3dsContainer.innerHTML = '';
-                            conekta3dsContainer.style.display = 'none';
-                            parentContainer.style.display = '';
+                    conekta3dsContainer.classList.remove('conekta-slide-in');
+                            conekta3dsContainer.classList.add('conekta-slide-out');
+                            setTimeout(()=>{
+                                conekta3dsContainer.innerHTML='';
+                                conekta3dsContainer.style.display='none';
+                                conekta3dsContainer.classList.remove('conekta-slide-out');
+                                // mostrar tokenizer con animación
+                                parentContainer.style.display='';
+                                parentContainer.classList.add('conekta-slide-in');
+                            },300);
                 }
             }, THREE_DS_TIMEOUT); // timeout 3DS
             
@@ -243,9 +257,16 @@ const create3dsIframe = (url) => {
                         clearTimeout(timeoutId);
                         
                         if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                            conekta3dsContainer.innerHTML = '';
-                            conekta3dsContainer.style.display = 'none';
-                            parentContainer.style.display = '';
+                            conekta3dsContainer.classList.remove('conekta-slide-in');
+                            conekta3dsContainer.classList.add('conekta-slide-out');
+                            setTimeout(()=>{
+                                conekta3dsContainer.innerHTML='';
+                                conekta3dsContainer.style.display='none';
+                                conekta3dsContainer.classList.remove('conekta-slide-out');
+                                // mostrar tokenizer con animación
+                                parentContainer.style.display='';
+                                parentContainer.classList.add('conekta-slide-in');
+                            },300);
                         }
                         
                         if (event.data.error || event.data.payment_status !== 'paid') {
@@ -261,9 +282,16 @@ const create3dsIframe = (url) => {
                     console.error('Error processing 3DS message:', msgError);
                     clearTimeout(timeoutId);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.innerHTML = '';
-                            conekta3dsContainer.style.display = 'none';
-                            parentContainer.style.display = '';
+                        conekta3dsContainer.classList.remove('conekta-slide-in');
+                            conekta3dsContainer.classList.add('conekta-slide-out');
+                            setTimeout(()=>{
+                                conekta3dsContainer.innerHTML='';
+                                conekta3dsContainer.style.display='none';
+                                conekta3dsContainer.classList.remove('conekta-slide-out');
+                                // mostrar tokenizer con animación
+                                parentContainer.style.display='';
+                                parentContainer.classList.add('conekta-slide-in');
+                            },300);
                     }
                     reject(new Error('Error en el procesamiento de la respuesta 3D Secure'));
                 }
@@ -277,9 +305,16 @@ const create3dsIframe = (url) => {
                     window.removeEventListener('keydown', keyHandler);
                     clearTimeout(timeoutId);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.innerHTML = '';
-                            conekta3dsContainer.style.display = 'none';
-                            parentContainer.style.display = '';
+                        conekta3dsContainer.classList.remove('conekta-slide-in');
+                            conekta3dsContainer.classList.add('conekta-slide-out');
+                            setTimeout(()=>{
+                                conekta3dsContainer.innerHTML='';
+                                conekta3dsContainer.style.display='none';
+                                conekta3dsContainer.classList.remove('conekta-slide-out');
+                                // mostrar tokenizer con animación
+                                parentContainer.style.display='';
+                                parentContainer.classList.add('conekta-slide-in');
+                            },300);
                     }
                     reject(new Error('Autenticación 3D Secure cancelada por el usuario'));
                 }
