@@ -11,8 +11,7 @@ const labelConekta = decodeEntities(settings.title);
 const tokenEmitter = new TokenEmitter();
 
 // Process 3DS if enabled
-const is3dsEnabled = settings.is_3ds_enabled || false;
-const threeDsMode = settings['3ds_mode'] || 'smart';
+const is3dsEnabled = settings.three_ds_enabled || false;
 
 const waitGetToken = () => {
     return new Promise((resolve, reject) => {
@@ -227,7 +226,7 @@ const create3dsIframe = (url) => {
                 if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
                     modalContainer.remove();
                 }
-            }, 60000); // 60 seconds timeout
+            }, 5 * 60 * 1000); // 5 minutes timeout
             
             // Listen for message event from iframe
             const messageHandler = (event) => {
