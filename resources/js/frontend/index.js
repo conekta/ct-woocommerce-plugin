@@ -134,6 +134,9 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
     }
 };
 
+// Tiempo máximo esperando carga de 3DS (1 minuto)
+const THREE_DS_TIMEOUT = 60 * 1000; // 60 000 ms
+
 // Create iframe for 3DS authentication
 const create3dsIframe = (url) => {
     return new Promise((resolve, reject) => {
@@ -146,9 +149,15 @@ const create3dsIframe = (url) => {
                 existingContainer.parentNode.removeChild(existingContainer);
             }
             
-            // Create modal container
-            const conekta3dsContainer = document.createElement('div');
-            conekta3dsContainer.id = 'conekta3dsContainer';
+            // Usa contenedor existente para 3DS
+            const conekta3dsContainer = document.getElementById('conektaIThreeDsframeContainer');
+            if (!conekta3dsContainer) {
+                console.error('3DS container not found');
+                reject(new Error('No se encontró el contenedor para 3DS'));
+                return;
+            }
+            conekta3dsContainer.innerHTML = '';
+            conekta3dsContainer.style.display = 'flex';
             
             conekta3dsContainer.style.display = 'flex';
             conekta3dsContainer.style.flexDirection = 'column';
@@ -162,17 +171,14 @@ const create3dsIframe = (url) => {
                 return;
             }
 
+            // Ocultar contenedor del tokenizer y mostrar contenedor 3DS
+            parentContainer.style.display = 'none';
+
             if (getComputedStyle(parentContainer).position === 'static') {
                 parentContainer.style.position = 'relative';
             }
 
-            conekta3dsContainer.style.position = 'absolute';
-            conekta3dsContainer.style.top = '0';
-            conekta3dsContainer.style.left = '0';
-            conekta3dsContainer.style.right = '0';
-            conekta3dsContainer.style.bottom = '0';
-            conekta3dsContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-            conekta3dsContainer.style.zIndex = '999';
+
 
             const header = document.createElement('div');
             header.style.backgroundColor = 'white';
@@ -197,8 +203,7 @@ const create3dsIframe = (url) => {
             iframe.src = `${url}?source=embedded`;
             iframe.style.width = '95%';
             iframe.style.maxWidth = '600px';
-            iframe.style.height = '600px';
-            iframe.style.maxHeight = '95%';
+            iframe.style.height = '700px';
             iframe.style.border = 'none';
             iframe.style.backgroundColor = 'white';
             iframe.style.borderRadius = '0 0 8px 8px';
@@ -218,15 +223,17 @@ const create3dsIframe = (url) => {
 
             conekta3dsContainer.appendChild(iframe);
             
-            parentContainer.appendChild(conekta3dsContainer);
+
             
             // Add timeout to reject if iframe doesn't load
             const timeoutId = setTimeout(() => {
                 reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
                 if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                    conekta3dsContainer.remove();
+                    conekta3dsContainer.innerHTML = '';
+                            conekta3dsContainer.style.display = 'none';
+                            parentContainer.style.display = '';
                 }
-            }, 5 * 60 * 1000); // 5 minutes timeout
+            }, THREE_DS_TIMEOUT); // timeout 3DS
             
             // Listen for message event from iframe
             const messageHandler = (event) => {
@@ -236,7 +243,9 @@ const create3dsIframe = (url) => {
                         clearTimeout(timeoutId);
                         
                         if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                            conekta3dsContainer.remove();
+                            conekta3dsContainer.innerHTML = '';
+                            conekta3dsContainer.style.display = 'none';
+                            parentContainer.style.display = '';
                         }
                         
                         if (event.data.error || event.data.payment_status !== 'paid') {
@@ -252,7 +261,9 @@ const create3dsIframe = (url) => {
                     console.error('Error processing 3DS message:', msgError);
                     clearTimeout(timeoutId);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.remove();
+                        conekta3dsContainer.innerHTML = '';
+                            conekta3dsContainer.style.display = 'none';
+                            parentContainer.style.display = '';
                     }
                     reject(new Error('Error en el procesamiento de la respuesta 3D Secure'));
                 }
@@ -266,7 +277,9 @@ const create3dsIframe = (url) => {
                     window.removeEventListener('keydown', keyHandler);
                     clearTimeout(timeoutId);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.remove();
+                        conekta3dsContainer.innerHTML = '';
+                            conekta3dsContainer.style.display = 'none';
+                            parentContainer.style.display = '';
                     }
                     reject(new Error('Autenticación 3D Secure cancelada por el usuario'));
                 }
@@ -289,6 +302,18 @@ const ContentConekta = (props) => {
     const { loadScript } = useComponentScript();
     const [processing, setProcessing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+
+    // Añadir clase al bloque de métodos de pago durante el proceso 3DS/tokenización
+    useEffect(() => {
+        const paymentMethodContainer = document.querySelector('.wc-block-checkout__payment-method');
+        if (paymentMethodContainer) {
+            if (processing) {
+                paymentMethodContainer.classList.add('three-ds-process');
+            } else {
+                paymentMethodContainer.classList.remove('three-ds-process');
+            }
+        }
+    }, [processing]);
 
     useEffect(() => {
         const unsubscribe = onPaymentSetup(async () => {
@@ -422,6 +447,7 @@ const ContentConekta = (props) => {
             <p>{decodeEntities(settings.description)}</p>
             {errorMessage && <p style={{color: 'red'}}>{errorMessage}</p>}
             <div id="conektaITokenizerframeContainer"></div>
+            <div id="conektaIThreeDsframeContainer"></div>
             {processing && <p>Procesando su pago...</p>}
         </div>
     );

@@ -51,8 +51,17 @@ const utils = {
           background: "#fff",
         },
       });
+      form.classList.add('three-ds-process');
+      // Asegura que el overlay recién creado herede la clase
+      setTimeout(() => {
+        const overlay = form.querySelector('.blockUI.blockOverlay');
+        if (overlay) {
+          overlay.classList.add('three-ds-process');
+        }
+      }, 0);
     } else {
       $form.unblock();
+      form.classList.remove('three-ds-process');
     }
   },
   showErrorMessage: (message) => {
