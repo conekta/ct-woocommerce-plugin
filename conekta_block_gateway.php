@@ -280,7 +280,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     $temp_order = wc_get_order($conekta_woo_order_id);
                     if ($temp_order) {
                         // Transfer data from temporary order to current order if needed
-                        $conekta_order_meta = $order->get_meta('conekta-order-id');
+                        $conekta_order_meta = $temp_order->get_meta('conekta-order-id');
                         if ($conekta_order_meta) {
                             self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
                         }
@@ -458,7 +458,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     $temp_order = wc_get_order($conekta_woo_order_id);
                     if ($temp_order) {
                         // Transfer data from temporary order to current order
-                        $conekta_order_meta = $order->get_meta('conekta-order-id');
+                        $conekta_order_meta = $temp_order->get_meta('conekta-order-id');
                         if ($conekta_order_meta) {
                             self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
                         }
