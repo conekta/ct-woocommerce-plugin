@@ -8,8 +8,7 @@ const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
 
 // 3DS configuration
-const is3dsEnabled = conekta_settings.is_3ds_enabled === "yes";
-const threeDsMode = conekta_settings["3ds_mode"] || "smart";
+const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes";
 
 // Utilities
 const utils = {
@@ -50,7 +49,6 @@ const utils = {
         message: null,
         overlayCSS: {
           background: "#fff",
-          opacity: 0.6,
         },
       });
     } else {
