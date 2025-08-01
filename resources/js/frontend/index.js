@@ -140,20 +140,20 @@ const create3dsIframe = (url) => {
         try {
             // Remove any existing iframe
             const existingIframe = document.getElementById('conekta3dsIframe');
-            const existingContainer = document.getElementById('conekta3dsModalContainer');
+            const existingContainer = document.getElementById('conekta3dsContainer');
             
             if (existingContainer) {
                 existingContainer.parentNode.removeChild(existingContainer);
             }
             
             // Create modal container
-            const modalContainer = document.createElement('div');
-            modalContainer.id = 'conekta3dsModalContainer';
+            const conekta3dsContainer = document.createElement('div');
+            conekta3dsContainer.id = 'conekta3dsContainer';
             
-            modalContainer.style.display = 'flex';
-            modalContainer.style.flexDirection = 'column';
-            modalContainer.style.justifyContent = 'center';
-            modalContainer.style.alignItems = 'center';
+            conekta3dsContainer.style.display = 'flex';
+            conekta3dsContainer.style.flexDirection = 'column';
+            conekta3dsContainer.style.justifyContent = 'center';
+            conekta3dsContainer.style.alignItems = 'center';
  
             const parentContainer = document.getElementById('conektaIframeContainer');
             if (!parentContainer) {
@@ -166,13 +166,13 @@ const create3dsIframe = (url) => {
                 parentContainer.style.position = 'relative';
             }
 
-            modalContainer.style.position = 'absolute';
-            modalContainer.style.top = '0';
-            modalContainer.style.left = '0';
-            modalContainer.style.right = '0';
-            modalContainer.style.bottom = '0';
-            modalContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-            modalContainer.style.zIndex = '999';
+            conekta3dsContainer.style.position = 'absolute';
+            conekta3dsContainer.style.top = '0';
+            conekta3dsContainer.style.left = '0';
+            conekta3dsContainer.style.right = '0';
+            conekta3dsContainer.style.bottom = '0';
+            conekta3dsContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+            conekta3dsContainer.style.zIndex = '999';
 
             const header = document.createElement('div');
             header.style.backgroundColor = 'white';
@@ -190,7 +190,7 @@ const create3dsIframe = (url) => {
             title.style.fontWeight = 'bold';
 
             header.appendChild(title);
-            modalContainer.appendChild(header);
+            conekta3dsContainer.appendChild(header);
 
             const iframe = document.createElement('iframe');
             iframe.id = 'conekta3dsIframe';
@@ -209,22 +209,22 @@ const create3dsIframe = (url) => {
             loadingDiv.style.backgroundColor = 'white';
             loadingDiv.style.textAlign = 'center';
             loadingDiv.id = 'conekta3dsLoading';
-            modalContainer.appendChild(loadingDiv);
+            conekta3dsContainer.appendChild(loadingDiv);
 
             // Hide loading when iframe is loaded
             iframe.onload = function() {
                 loadingDiv.style.display = 'none';
             };
 
-            modalContainer.appendChild(iframe);
+            conekta3dsContainer.appendChild(iframe);
             
-            parentContainer.appendChild(modalContainer);
+            parentContainer.appendChild(conekta3dsContainer);
             
             // Add timeout to reject if iframe doesn't load
             const timeoutId = setTimeout(() => {
                 reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
-                if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
-                    modalContainer.remove();
+                if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
+                    conekta3dsContainer.remove();
                 }
             }, 5 * 60 * 1000); // 5 minutes timeout
             
@@ -235,8 +235,8 @@ const create3dsIframe = (url) => {
                         window.removeEventListener('message', messageHandler);
                         clearTimeout(timeoutId);
                         
-                        if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
-                            modalContainer.remove();
+                        if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
+                            conekta3dsContainer.remove();
                         }
                         
                         if (event.data.error || event.data.payment_status !== 'paid') {
@@ -251,8 +251,8 @@ const create3dsIframe = (url) => {
                 } catch (msgError) {
                     console.error('Error processing 3DS message:', msgError);
                     clearTimeout(timeoutId);
-                    if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
-                        modalContainer.remove();
+                    if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
+                        conekta3dsContainer.remove();
                     }
                     reject(new Error('Error en el procesamiento de la respuesta 3D Secure'));
                 }
@@ -265,8 +265,8 @@ const create3dsIframe = (url) => {
                 if (keyEvent.key === 'Escape' || keyEvent.keyCode === 27) {
                     window.removeEventListener('keydown', keyHandler);
                     clearTimeout(timeoutId);
-                    if (modalContainer.parentNode && modalContainer.parentNode.contains(modalContainer)) {
-                        modalContainer.remove();
+                    if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
+                        conekta3dsContainer.remove();
                     }
                     reject(new Error('Autenticación 3D Secure cancelada por el usuario'));
                 }
