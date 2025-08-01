@@ -206,9 +206,17 @@ const create3dsIframe = (url) => {
             const iframe = document.createElement('iframe');
             iframe.id = 'conekta3dsIframe';
             iframe.src = `${url}?source=embedded`;
-            iframe.style.width = '95%';
-            iframe.style.maxWidth = '600px';
-            iframe.style.height = '700px';
+            iframe.style.width = '100%';
+            const updateIframeHeight = () => {
+                const isMobile = window.innerWidth <= 768;
+                iframe.style.height = isMobile ? '600px' : '700px';
+            };
+            
+            updateIframeHeight();
+            
+            const resizeListener = () => updateIframeHeight();
+            window.addEventListener('resize', resizeListener);
+            
             iframe.style.border = 'none';
             iframe.style.backgroundColor = 'white';
             iframe.style.borderRadius = '0 0 8px 8px';
@@ -221,19 +229,52 @@ const create3dsIframe = (url) => {
             loadingDiv.id = 'conekta3dsLoading';
             conekta3dsContainer.appendChild(loadingDiv);
 
-            // Hide loading when iframe is loaded
             iframe.onload = function() {
                 loadingDiv.style.display = 'none';
             };
 
             conekta3dsContainer.appendChild(iframe);
-            // Animar aparición del contenedor 3DS
-            conekta3dsContainer.classList.add('conekta-slide-in');
+            conekta3dsContainer.classList.add('conekta-slide-in'); 
+            
+            setTimeout(() => {
+                requestAnimationFrame(() => {
+                    if (conekta3dsContainer && conekta3dsContainer.offsetParent !== null) {
+                        const containerRect = conekta3dsContainer.getBoundingClientRect();
+                        const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+                        const containerTop = containerRect.top + currentScroll;
+                        
+                        const targetPosition = Math.max(0, containerTop - 400);
+                        
+                        console.log('Scroll automático:', {
+                            containerTop: containerTop,
+                            currentScroll: currentScroll,
+                            targetPosition: targetPosition
+                        });
+                        
+                        window.scrollTo({
+                            top: targetPosition,
+                            behavior: 'smooth'
+                        });
+                    }
+                });
+            }, 1000); 
+            
+            setTimeout(() => {
+                const containerRect = conekta3dsContainer.getBoundingClientRect();
+                if (containerRect.top > 100) {
+                    console.log('Aplicando scroll de respaldo...');
+                    conekta3dsContainer.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            }, 2500);
             
 
             
             // Add timeout to reject if iframe doesn't load
             const timeoutId = setTimeout(() => {
+                window.removeEventListener('resize', resizeListener);
                 reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
                 if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
                     conekta3dsContainer.classList.remove('conekta-slide-in');
@@ -254,6 +295,7 @@ const create3dsIframe = (url) => {
                 try {
                     if (event.origin === 'https://3ds-pay.conekta.com') {
                         window.removeEventListener('message', messageHandler);
+                        window.removeEventListener('resize', resizeListener);
                         clearTimeout(timeoutId);
                         
                         if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
@@ -281,6 +323,7 @@ const create3dsIframe = (url) => {
                 } catch (msgError) {
                     console.error('Error processing 3DS message:', msgError);
                     clearTimeout(timeoutId);
+                    window.removeEventListener('resize', resizeListener);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
                         conekta3dsContainer.classList.remove('conekta-slide-in');
                             conekta3dsContainer.classList.add('conekta-slide-out');
@@ -303,6 +346,7 @@ const create3dsIframe = (url) => {
             const keyHandler = (keyEvent) => {
                 if (keyEvent.key === 'Escape' || keyEvent.keyCode === 27) {
                     window.removeEventListener('keydown', keyHandler);
+                    window.removeEventListener('resize', resizeListener);
                     clearTimeout(timeoutId);
                     if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
                         conekta3dsContainer.classList.remove('conekta-slide-in');
