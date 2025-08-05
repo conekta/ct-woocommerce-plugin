@@ -18,7 +18,7 @@ use GuzzleHttp\Client;
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.2.6";
+	public $version  = "5.2.7";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit, debit, cash, and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";

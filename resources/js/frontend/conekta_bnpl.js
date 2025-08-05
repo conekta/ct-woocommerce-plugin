@@ -20,8 +20,8 @@ const LabelConekta = ( props ) => {
 	const Icons = () => (
 		<div style={{ display: 'flex',  alignItems: 'center' }}>
 			<>
-				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-klarna.svg`} alt="klarna" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-creditea.svg`} alt="creditea" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-aplazo.svg`} alt="aplazo" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 			</>
 		</div>
 	);
