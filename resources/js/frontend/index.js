@@ -80,12 +80,12 @@ const ContentConekta = (props) => {
         return () => {
             document.body.removeChild(script);
         };
-    }, []);
+    }, [props.billing.cartTotal.value]);
 
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            <div id="conektaIframeContainer"></div>
+            <div key={props.billing.cartTotal.value} id="conektaIframeContainer"></div>
         </div>
     );
 };
