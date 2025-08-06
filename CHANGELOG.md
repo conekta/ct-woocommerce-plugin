@@ -1,3 +1,7 @@
+## [5.3.0]() - 2025-08-06
+- Fix: WooCommerce Blocks now correctly update payment amount when coupons are applied or removed
+- Fix: Monthly installments (MSI) now calculate correctly with discounted totals in Blocks checkout
+
 ## [4.0.3]() - 2024-02-13
 - Fix status orders, new orders are created with status "pending payment" and not "on-hold"
 
