@@ -9,7 +9,7 @@ export const useComponentScript = () => {
         script.async = true;
         script.onload = () => {
             const config = {
-                targetIFrame: "#conektaIframeContainer",
+                targetIFrame: "#conektaITokenizerframeContainer",
                 publicKey,
                 locale,
                 useExternalSubmit: true,

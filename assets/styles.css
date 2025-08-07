@@ -4,139 +4,33 @@
     --conekta-color-tertiary-100: #E5EDFF;
     --conekta-font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+/* ...resto de estilos ya presentes... */
 
-.conekta-reference-title {
-    font-size: 0.875rem;
-    text-align: center;
-    font-weight: 600;
-    line-height: 2rem;
-    text-transform: uppercase;
-    color: var(--conekta-font-body);
-    font-family: var(--conekta-font-body);
+.wc-block-components-checkout-step--disabled.three-ds-process {
+    opacity: 1 !important;
 }
 
-.conekta-conekta-link {
-    font-weight: 400;
-    color: var(--conekta-color-primary-500);
-    text-decoration: underline;
-    text-align: center;
-    font-family: var(--conekta-font-body);
-    font-size: 1rem;
-    margin: 0;
+.wc-block-components-checkout-step--disabled.three-ds-process .wc-block-components-radio-control-accordion-option:not(.wc-block-components-radio-control-accordion-option--checked-option-highlighted) {
+    opacity: 0.6 !important;
 }
 
-.conekta-agreement-text {
-    font-weight: 700;
-    font-size: 1.5rem;
-    text-align: center;
-    color: var(--conekta-font-body);
-    font-family: var(--conekta-font-body);
-    margin: 0;
+/* ===== Animaciones de altura ===== */
+@keyframes conekta-expand {
+    0%   { max-height: 0; opacity: 0; }
+    100% { max-height: 1000px; opacity: 1; }
+}
+@keyframes conekta-collapse {
+    0%   { max-height: 1000px; opacity: 1; }
+    100% { max-height: 0; opacity: 0; }
 }
 
-.conekta-small-text {
-    font-size: 1rem;
+.conekta-slide-in {
+    overflow: hidden;
+    animation: conekta-expand 0.4s ease forwards;
+}
+.conekta-slide-out {
+    overflow: hidden;
+    animation: conekta-collapse 0.4s ease forwards;
 }
 
-.conekta-copy-button {
-    all: unset;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    appearance: none;
-    user-select: none;
-    position: relative;
-    white-space: nowrap;
-    vertical-align: middle;
-    outline: 2px solid transparent;
-    outline-offset: 2px;
-    line-height: 1.2;
-    border-radius: 0.375rem;
-    transition: all 0.2s ease-in-out;
-    margin-top: 1rem;
-    height: 1.5rem;
-    min-width: 2.5rem;
-    padding-inline-start: 1rem;
-    padding-inline-end: 1rem;
-    padding: 0 10px;
-    background-color: var(--conekta-color-tertiary-100);
-    color: var(--conekta-color-primary-400);
-    font-weight: 400;
-    font-size: 0.75rem;
-    font-family: var(--conekta-font-body);
-    cursor: pointer;
-}
-
-.conekta-charges-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-}
-
-.conekta-box {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 20px;
-    width: 541px;
-    max-width: 90%;
-    margin-bottom: 30px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    font-family: sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-.conekta-barcode {
-    text-align: center;
-    margin: 12px 0;
-}
-
-.conekta-ref {
-    font-size: 20px;
-    font-weight: bold;
-    text-align: center;
-    word-break: break-word;
-}
-
-.conekta-instructions {
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-.conekta-instructions ol {
-    padding: 0;
-    margin-inline: 12px;
-}
-
-.conekta-logo-row {
-    text-align: center;
-    margin-bottom: 15px;
-    margin-top: 20px;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-}
-
-.conekta-logo-row img {
-    margin: 0 5px;
-    max-width: 100%;
-    height: auto;
-}
-
-.conekta-logo-row img.bbva_cash_in-logo {
-    max-width: 142px;
-    margin-block: 12px;
-}
-
-.conekta-commission {
-    font-size: 0.875rem;
-    text-align: center;
-    font-weight: 600;
-    line-height: 2rem;
-    color: var(--conekta-font-body);
-    font-family: var(--conekta-font-body);
-    margin: 0;
-}
+/* =================  Checkout CLASSIC ================= */
