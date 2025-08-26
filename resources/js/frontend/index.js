@@ -134,8 +134,7 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
     }
 };
 
-// Tiempo máximo esperando carga de 3DS (1 minuto)
-const THREE_DS_TIMEOUT = 60 * 1000; // 60 000 ms
+const THREE_DS_TIMEOUT = 60 * 1000;
 
 // Create iframe for 3DS authentication
 const create3dsIframe = (url) => {
@@ -283,7 +282,7 @@ const create3dsIframe = (url) => {
                                 conekta3dsContainer.innerHTML='';
                                 conekta3dsContainer.style.display='none';
                                 conekta3dsContainer.classList.remove('conekta-slide-out');
-                                // mostrar tokenizer con animación
+
                                 parentContainer.style.display='';
                                 parentContainer.classList.add('conekta-slide-in');
                             },300);
@@ -305,7 +304,7 @@ const create3dsIframe = (url) => {
                                 conekta3dsContainer.innerHTML='';
                                 conekta3dsContainer.style.display='none';
                                 conekta3dsContainer.classList.remove('conekta-slide-out');
-                                // mostrar tokenizer con animación
+
                                 parentContainer.style.display='';
                                 parentContainer.classList.add('conekta-slide-in');
                             },300);
@@ -331,7 +330,7 @@ const create3dsIframe = (url) => {
                                 conekta3dsContainer.innerHTML='';
                                 conekta3dsContainer.style.display='none';
                                 conekta3dsContainer.classList.remove('conekta-slide-out');
-                                // mostrar tokenizer con animación
+
                                 parentContainer.style.display='';
                                 parentContainer.classList.add('conekta-slide-in');
                             },300);
@@ -355,7 +354,7 @@ const create3dsIframe = (url) => {
                                 conekta3dsContainer.innerHTML='';
                                 conekta3dsContainer.style.display='none';
                                 conekta3dsContainer.classList.remove('conekta-slide-out');
-                                // mostrar tokenizer con animación
+
                                 parentContainer.style.display='';
                                 parentContainer.classList.add('conekta-slide-in');
                             },300);

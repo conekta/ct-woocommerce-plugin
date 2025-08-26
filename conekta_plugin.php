@@ -192,8 +192,6 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     }
     
     public static function get_user_ip(): string {
-        // Delegamos a la función nativa de WooCommerce, que maneja distintos encabezados
-        // y valida rangos privados/reservados.
         return \WC_Geolocation::get_ip_address();
     }
 

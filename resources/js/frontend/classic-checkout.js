@@ -53,7 +53,6 @@ const utils = {
         },
       });
       form.classList.add('three-ds-process');
-      // Asegura que el overlay recién creado herede la clase
       setTimeout(() => {
         const overlay = form.querySelector('.blockUI.blockOverlay');
         if (overlay) {
