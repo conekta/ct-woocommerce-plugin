@@ -11,14 +11,18 @@ use \Conekta\Configuration;
 use \Conekta\Model\WebhookRequest;
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
+use Conekta\Api\CompaniesApi;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Client;
 
+// Include REST API endpoints for 3DS
+require_once(__DIR__ . '/conekta-rest-api.php');
+
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.3.0";
+	public $version  = "5.4.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit, debit, cash, and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -78,6 +82,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         echo json_encode(['message' => 'OK']);
         exit;
     }
+    
     public static function check_if_payment_payment_method_webhook(string $payment_method, array $event){
         $conekta_order = $event['data']['object'];
         if ($conekta_order["metadata"]["payment_method"] !==  $payment_method){
@@ -86,6 +91,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             exit;
         }
     }
+    
     /**
      * @throws ApiException
      */
@@ -118,6 +124,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         echo json_encode(['message' => 'OK', 'order_id' => $order_id]);
         exit;
     }
+    
     /**
      * @throws ApiException
      */
@@ -143,6 +150,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         echo json_encode(['cancelled' => 'OK', 'order_id' => $order_id]);
         exit;
     }
+    
     /**
      * @throws ApiException
      */
@@ -152,6 +160,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
+    
     public static function validate_reference_id(array $conekta_order): bool
     {
         return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
@@ -181,29 +190,9 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     
         return in_array($site_locale, ['es', 'en']) ? $site_locale : 'es';
     }
+    
     public static function get_user_ip(): string {
-        $ip_keys = [
-            'HTTP_X_FORWARDED_FOR',   // Load Balancer / Proxies
-            'HTTP_CF_CONNECTING_IP',  // Cloudflare
-            'HTTP_X_REAL_IP',         // Nginx
-            'HTTP_CLIENT_IP',         // Proxy
-            'REMOTE_ADDR'             // Last option
-        ];
-    
-        foreach ($ip_keys as $key) {
-            if (!empty($_SERVER[$key])) {
-                $ip_list = explode(',', $_SERVER[$key]);
-                $ip_list = array_map('trim', $ip_list);
-
-                foreach (array_reverse($ip_list) as $ip) {
-                    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                        return $ip;
-                    }
-                }
-            }
-        }
-    
-        return '0.0.0.0';
+        return \WC_Geolocation::get_ip_address();
     }
 
     public static function get_api_instance(string  $api_key, string $version): OrdersApi
@@ -223,4 +212,51 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         ]);
         return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
     }
+
+    public static function get_companies_api_instance(string $api_key, string $version): CompaniesApi
+    {
+        $stack = HandlerStack::create();
+        $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
+            return $request->withHeader(
+                'X-Conekta-Client-User-Agent',
+                json_encode([
+                    'plugin_name'    => 'woocommerce',
+                    'plugin_version' => $version,
+                ])
+            );
+        }));
+        $client = new Client([
+            'handler' => $stack,
+        ]);
+        return new CompaniesApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
+    }
+
+    public static function handle_conekta_3ds_callback() {
+        // Get payment status from query parameters
+        $payment_status = isset($_GET['payment_status']) ? sanitize_text_field($_GET['payment_status']) : '';
+        $order_id = isset($_GET['order_id']) ? sanitize_text_field($_GET['order_id']) : '';
+        $woo_order_id = isset($_GET['woo_order_id']) ? sanitize_text_field($_GET['woo_order_id']) : '';
+        
+        // Redirect to checkout page with appropriate status
+        if (!empty($order_id)) {
+            // Store the order ID and status in session to be processed in the checkout
+            WC()->session->set('conekta_3ds_order_id', $order_id);
+            WC()->session->set('conekta_3ds_payment_status', $payment_status);
+            
+            // Store WooCommerce order ID if available
+            if (!empty($woo_order_id)) {
+                WC()->session->set('conekta_woo_order_id', $woo_order_id);
+            }
+            
+            // Redirect to checkout
+            wp_safe_redirect(wc_get_checkout_url());
+            exit;
+        }
+        
+        // Fallback redirect
+        wp_safe_redirect(wc_get_checkout_url());
+        exit;
+    }
 }
+
+add_action('woocommerce_api_conekta_3ds_callback', [ 'WC_Conekta_Plugin', 'handle_conekta_3ds_callback' ]);

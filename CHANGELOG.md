@@ -1,3 +1,9 @@
+## [5.4.0]() - 2024-12-19
+
+- Feature: Added 3D Secure (3DS) v2 support for enhanced payment security
+- Feature: Improved fraud prevention measures with latest 3DS authentication
+- Enhancement: Better compatibility with modern payment security standards
+
 ## [5.3.0]() - 2025-08-06
 - Fix: WooCommerce Blocks now correctly update payment amount when coupons are applied or removed
 - Fix: Monthly installments (MSI) now calculate correctly with discounted totals in Blocks checkout

@@ -1,11 +1,15 @@
 // Constants
-const CONTAINER_SELECTOR = "#conektaIframeContainer";
+const CONTAINER_SELECTOR = "#conektaITokenizerframeContainer";
+const THREE_DS_TIMEOUT = 60 * 1000; // igual que blocks
 const FORM_SELECTOR = "form.checkout";
 const PAYMENT_METHOD_SELECTOR = 'input[name="payment_method"]:checked';
 const MSI_STORAGE_KEY = "conekta_msi_option";
 const DEFAULT_MSI = "1";
 const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
+
+// 3DS configuration
+const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes";
 
 // Utilities
 const utils = {
@@ -46,11 +50,18 @@ const utils = {
         message: null,
         overlayCSS: {
           background: "#fff",
-          opacity: 0.6,
         },
       });
+      form.classList.add('three-ds-process');
+      setTimeout(() => {
+        const overlay = form.querySelector('.blockUI.blockOverlay');
+        if (overlay) {
+          overlay.classList.add('three-ds-process');
+        }
+      }, 0);
     } else {
       $form.unblock();
+      form.classList.remove('three-ds-process');
     }
   },
   showErrorMessage: (message) => {
@@ -67,6 +78,127 @@ const utils = {
     form.prepend(wrapper);
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
+};
+
+// 3DS handling
+const threeDsHandler = {
+  create3dsOrder: async (token, msiOption) => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add nonce if available
+      if (conekta_settings.wpApiNonce) {
+        headers['X-WP-Nonce'] = conekta_settings.wpApiNonce;
+      }
+      
+      // Get order_id from the checkout form if available
+      const form = document.querySelector(FORM_SELECTOR);
+      const orderId = form.querySelector('#order_id')?.value;
+      
+      const requestData = {
+        token,
+        msi_option: msiOption
+      };
+      
+      // Add order_id if available
+      if (orderId) {
+        requestData.order_id = orderId;
+      }
+      
+      const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestData),
+        credentials: 'same-origin'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Error creating 3DS order: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error creating 3DS order:', error);
+      throw error;
+    }
+  },
+  
+  show3dsIframe: (url) => {
+    return new Promise((resolve, reject) => {
+      // Remove any existing iframe
+      const existingIframe = document.getElementById('conekta3dsIframe');
+      if (existingIframe) {
+        existingIframe.parentNode.removeChild(existingIframe);
+      }
+      
+      // Create modal container
+      const conekta3dsContainer = document.createElement('div');
+      conekta3dsContainer.id = 'conekta3dsContainer';
+      conekta3dsContainer.classList.add('conekta-slide-in');
+      const parentContainer = document.querySelector(CONTAINER_SELECTOR);
+      if (!parentContainer) {
+        console.error('Target container for 3DS not found');
+        reject(new Error('No se encontró el contenedor para 3DS'));
+        return;
+      }
+
+      if (getComputedStyle(parentContainer).position === 'static') {
+        parentContainer.style.position = 'relative';
+      }
+
+      conekta3dsContainer.style.position = 'absolute';
+      conekta3dsContainer.style.top = '0';
+      conekta3dsContainer.style.left = '0';
+      conekta3dsContainer.style.right = '0';
+      conekta3dsContainer.style.bottom = '0';
+      conekta3dsContainer.style.display = 'flex';
+      conekta3dsContainer.style.justifyContent = 'center';
+      conekta3dsContainer.style.alignItems = 'center';
+      conekta3dsContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+      conekta3dsContainer.style.zIndex = '999';
+      
+      // Create iframe
+      const iframe = document.createElement('iframe');
+      iframe.id = 'conekta3dsIframe';
+      iframe.src = `${url}?source=embedded`;
+      iframe.style.width = '95%';
+      iframe.style.maxWidth = '600px';
+      iframe.style.height = '650px';
+      iframe.style.maxHeight = '95%';
+      iframe.style.border = 'none';
+      iframe.style.backgroundColor = 'white';
+      iframe.style.borderRadius = '8px';
+      
+      conekta3dsContainer.appendChild(iframe);
+      parentContainer.appendChild(conekta3dsContainer);
+      
+      // Listen for message event from iframe
+      const messageHandler = (event) => {
+        // Check that the origin is from Conekta
+        if (event.origin === 'https://3ds-pay.conekta.com') {
+          window.removeEventListener('message', messageHandler);
+          conekta3dsContainer.classList.remove('conekta-slide-in');
+          conekta3dsContainer.classList.add('conekta-slide-out');
+          setTimeout(()=>{
+            conekta3dsContainer.remove();
+          },300);
+          
+          if (event.data.error || event.data.payment_status !== 'paid') {
+            reject(new Error('3DS authentication failed'));
+          } else {
+            resolve({
+              order_id: event.data.order_id,
+              payment_status: event.data.payment_status
+            });
+          }
+        }
+      };
+      
+      window.addEventListener('message', messageHandler);
+    });
+  },
 };
 
 // Form handling
@@ -152,15 +284,52 @@ const conektaConfig = {
   }),
 
   getCallbacks: () => ({
-    onCreateTokenSucceeded: (token) => {
+    onCreateTokenSucceeded: async (token) => {
       const form = document.querySelector(FORM_SELECTOR);
+      const msiOption = sessionStorage.getItem(MSI_STORAGE_KEY) || DEFAULT_MSI;
+      
+      // Set token and MSI option in the form
       form.querySelector('[name="conekta_token"]').value = token.id;
-      form.querySelector('[name="conekta_msi_option"]').value =
-        sessionStorage.getItem(MSI_STORAGE_KEY) || DEFAULT_MSI;
-
-      const formData = new FormData(form);
-      formData.append("wc-ajax", "checkout");
-      formHandler.submitForm(formData);
+      form.querySelector('[name="conekta_msi_option"]').value = msiOption;
+      
+      // If 3DS is enabled, create order with 3DS
+      if (is3dsEnabled) {
+        try {
+          const orderResponse = await threeDsHandler.create3dsOrder(token.id, msiOption);
+          
+          // If next_action is present, authentication is required
+          if (orderResponse.next_action) {
+            // Show 3DS iframe
+            const redirectUrl = orderResponse.next_action.redirect_url;
+            
+            try {
+              // Show 3DS iframe and wait for result
+              await threeDsHandler.show3dsIframe(redirectUrl);
+              
+              // Submit form after successful 3DS authentication
+              const formData = new FormData(form);
+              formData.append("wc-ajax", "checkout");
+              formHandler.submitForm(formData);
+            } catch (error) {
+              utils.setLoading(false);
+              utils.showErrorMessage(utils.getTranslation("3ds_error") || "3D Secure authentication failed");
+            }
+          } else {
+            // No 3DS authentication required, continue with checkout
+            const formData = new FormData(form);
+            formData.append("wc-ajax", "checkout");
+            formHandler.submitForm(formData);
+          }
+        } catch (error) {
+          utils.setLoading(false);
+          utils.showErrorMessage(error.message || utils.getTranslation("token_error"));
+        }
+      } else {
+        // Standard non-3DS flow
+        const formData = new FormData(form);
+        formData.append("wc-ajax", "checkout");
+        formHandler.submitForm(formData);
+      }
     },
 
     onCreateTokenError: (error) => {
@@ -267,6 +436,16 @@ const domObserver = {
     domObserver.observer.observe(form, { childList: true, subtree: true });
   },
 };
+
+// Add 3DS translation if not exists
+if (window.CONEKTA_TRANSLATIONS) {
+  const locales = Object.keys(window.CONEKTA_TRANSLATIONS);
+  locales.forEach(locale => {
+    if (!window.CONEKTA_TRANSLATIONS[locale]['3ds_error']) {
+      window.CONEKTA_TRANSLATIONS[locale]['3ds_error'] = 'Autenticación 3D Secure fallida';
+    }
+  });
+}
 
 // Main initialization
 document.addEventListener("DOMContentLoaded", () => {
