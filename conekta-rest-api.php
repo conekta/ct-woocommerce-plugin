@@ -82,15 +82,17 @@ class WC_Conekta_REST_API {
                     ], 500);
                 }
             } else {
-                // Check if we're in a WooCommerce Blocks context
+                // Check if we're in a WooCommerce Blocks context or Classic checkout context
                 $is_blocks_context = isset($params['is_blocks_context']) && $params['is_blocks_context'];
+                $is_classic_context = isset($params['is_classic_context']) && $params['is_classic_context'];
                 $cart_data = isset($params['cart_data']) ? $params['cart_data'] : null;
                 $billing_data = isset($params['billing_data']) ? $params['billing_data'] : null;
                 
-                if ($is_blocks_context && $cart_data) {
-                    // Create an order from the cart and billing data provided by blocks
+                if (($cart_data || $billing_data) && ($is_blocks_context || $is_classic_context)) {
+                    // Create an order from the cart and billing data provided by blocks or classic checkout
                     try {
-                        error_log('Creating order from blocks cart data');
+                        $context = $is_blocks_context ? 'blocks' : 'classic checkout';
+                        error_log("Creating order from {$context} with provided data");
                         
                         // Create order
                         $order = wc_create_order();
@@ -130,10 +132,11 @@ class WC_Conekta_REST_API {
                         } else {
                             // If no items provided, add a placeholder item
                             $item = new WC_Order_Item_Product();
+                            $total = isset($cart_data['total']) ? ($cart_data['total'] / 100) : 1.00; // Convert from cents to currency units
                             $item->set_props([
                                 'name' => 'Temporary 3DS validation',
                                 'quantity' => 1,
-                                'total' => $cart_data['total'] ?? 1.00,
+                                'total' => $total,
                             ]);
                             $order->add_item($item);
                         }
@@ -143,15 +146,16 @@ class WC_Conekta_REST_API {
                         
                         // Calculate totals and save
                         $order->calculate_totals();
-                        $order->set_status('pending', 'Orden creada para verificación 3DS desde Blocks');
+                        $status_note = $is_blocks_context ? 'Orden creada para verificación 3DS desde Blocks' : 'Orden creada para verificación 3DS desde Classic Checkout';
+                        $order->set_status('pending', $status_note);
                         $order->save();
                         
-                        error_log('Blocks checkout order created: ' . $order->get_id());
+                        error_log("{$context} order created: " . $order->get_id());
                     } catch (\Exception $e) {
-                        error_log('Error creating order from blocks data: ' . $e->getMessage());
+                        error_log("Error creating order from {$context} data: " . $e->getMessage());
                         return new WP_REST_Response([
                             'success' => false,
-                            'message' => 'Error creating order from blocks data: ' . $e->getMessage(),
+                            'message' => "Error creating order from {$context} data: " . $e->getMessage(),
                         ], 500);
                     }
                 } else {
