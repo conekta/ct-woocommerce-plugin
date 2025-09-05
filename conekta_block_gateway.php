@@ -451,12 +451,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         // If we have a Conekta order ID from 3DS process, we need to check its status
         if (!empty($conekta_order_id)) {
             try {
-                error_log("Classic Checkout - Processing 3DS order: {$conekta_order_id}, WooCommerce order: {$order_id}, Payment Status: {$payment_status}, 3DS Completed: " . ($is_3ds_completed ? 'true' : 'false'));
+                info_log("Classic Checkout - Processing 3DS order: {$conekta_order_id}, WooCommerce order: {$order_id}, Payment Status: {$payment_status}, 3DS Completed: " . ($is_3ds_completed ? 'true' : 'false'));
                 
                 $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
                 $conekta_order = $conekta_api->getOrderById($conekta_order_id);
                 
-                error_log("Classic Checkout - Conekta order status: " . $conekta_order->getPaymentStatus());
+                info_log("Classic Checkout - Conekta order status: " . $conekta_order->getPaymentStatus());
                 
                 // If there's a temporary order from 3DS, use that order's information
                 if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order_id) {
@@ -479,15 +479,15 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     // Order is already paid, just update the status
                     $order->update_status('processing', __('Pago procesado con Conekta (3DS)', 'woocommerce'));
                     $success = true;
-                    error_log("Classic Checkout - Order already paid, marked as processing");
+                    info_log("Classic Checkout - Order already paid, marked as processing");
                 } else if (($payment_status === 'paid' || $is_3ds_completed) && $conekta_order->getPaymentStatus() === 'pending_payment') {
                     // Order needs to be captured
                     try {
-                        error_log("Classic Checkout - Attempting to capture payment for order: {$conekta_order_id}");
+                        info_log("Classic Checkout - Attempting to capture payment for order: {$conekta_order_id}");
                         $conekta_api->ordersCreateCapture($conekta_order_id);
                         $order->update_status('processing', __('Pago capturado con Conekta (3DS)', 'woocommerce'));
                         $success = true;
-                        error_log("Classic Checkout - Payment captured successfully");
+                        info_log("Classic Checkout - Payment captured successfully");
                     } catch (\Exception $e) {
                         $error_message = 'Error capturing payment: ' . $e->getMessage();
                         $success = false;

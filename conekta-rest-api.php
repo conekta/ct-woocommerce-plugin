@@ -73,7 +73,7 @@ class WC_Conekta_REST_API {
                             'message' => 'Order not found',
                         ], 404);
                     }
-                    error_log('Using existing order: ' . $order_id);
+                    info_log('Using existing order: ' . $order_id);
                 } catch (\Exception $e) {
                     error_log('Error getting order: ' . $e->getMessage());
                     return new WP_REST_Response([
@@ -92,7 +92,7 @@ class WC_Conekta_REST_API {
                     // Create an order from the cart and billing data provided by blocks or classic checkout
                     try {
                         $context = $is_blocks_context ? 'blocks' : 'classic checkout';
-                        error_log("Creating order from {$context} with provided data");
+                        info_log("Creating order from {$context} with provided data");
                         
                         // Create order
                         $order = wc_create_order();
@@ -150,7 +150,7 @@ class WC_Conekta_REST_API {
                         $order->set_status('pending', $status_note);
                         $order->save();
                         
-                        error_log("{$context} order created: " . $order->get_id());
+                        info_log("{$context} order created: " . $order->get_id());
                     } catch (\Exception $e) {
                         error_log("Error creating order from {$context} data: " . $e->getMessage());
                         return new WP_REST_Response([
@@ -161,7 +161,7 @@ class WC_Conekta_REST_API {
                 } else {
                     // Create a minimal order for 3DS verification
                     try {
-                        error_log('Creating minimal order for 3DS verification');
+                        info_log('Creating minimal order for 3DS verification');
                         
                         // Create simple order
                         $order = wc_create_order();
@@ -194,7 +194,7 @@ class WC_Conekta_REST_API {
                         $order->set_status('pending', 'Orden creada para verificación 3DS');
                         $order->save();
                         
-                        error_log('Minimal 3DS validation order created: ' . $order->get_id());
+                        info_log('Minimal 3DS validation order created: ' . $order->get_id());
                     } catch (\Exception $e) {
                         error_log('Error creating minimal order: ' . $e->getMessage());
                         return new WP_REST_Response([
@@ -207,14 +207,14 @@ class WC_Conekta_REST_API {
             
             // Build request data
             try {
-                error_log('Building request data for order: ' . $order->get_id());
+                info_log('Building request data for order: ' . $order->get_id());
                 
                 // Build request data from order
                 $data = ckpg_get_request_data($order);
                 
                 // Handle case where order might not have all required fields
                 if (empty($data) || !isset($data['customer_info']) || !isset($data['amount'])) {
-                    error_log('Order lacks required data, using minimal valid data');
+                    info_log('Order lacks required data, using minimal valid data');
                     
                     // Get minimal required customer info
                     $email = $order->get_billing_email();
@@ -289,7 +289,7 @@ class WC_Conekta_REST_API {
             
             // Create OrderRequest
             try {
-                error_log('Creating OrderRequest');
+                info_log('Creating OrderRequest');
                 
                 // Base request with required fields
                 $request_data = [
