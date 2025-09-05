@@ -429,10 +429,11 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $token_id = isset($_POST['conekta_token']) ? sanitize_text_field($_POST['conekta_token']) : null;
         $msi_option = isset($_POST['conekta_msi_option']) ? (int) $_POST['conekta_msi_option'] : 1;
         
-        // Check if we have 3DS data from the session
-        $conekta_order_id = WC()->session->get('conekta_3ds_order_id');
-        $conekta_woo_order_id = WC()->session->get('conekta_woo_order_id');
-        $payment_status = WC()->session->get('conekta_3ds_payment_status');
+        // Check if we have 3DS data from $_POST (modern approach) or session (fallback)
+        $conekta_order_id = isset($_POST['conekta_order_id']) ? sanitize_text_field($_POST['conekta_order_id']) : WC()->session->get('conekta_3ds_order_id');
+        $conekta_woo_order_id = isset($_POST['conekta_woo_order_id']) ? sanitize_text_field($_POST['conekta_woo_order_id']) : WC()->session->get('conekta_woo_order_id');
+        $payment_status = isset($_POST['conekta_payment_status']) ? sanitize_text_field($_POST['conekta_payment_status']) : WC()->session->get('conekta_3ds_payment_status');
+        $is_3ds_completed = isset($_POST['conekta_3ds_completed']) && $_POST['conekta_3ds_completed'] === 'true';
         
         // Clear session data
         WC()->session->__unset('conekta_3ds_order_id');
@@ -450,8 +451,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         // If we have a Conekta order ID from 3DS process, we need to check its status
         if (!empty($conekta_order_id)) {
             try {
+                info_log("Classic Checkout - Processing 3DS order: {$conekta_order_id}, WooCommerce order: {$order_id}, Payment Status: {$payment_status}, 3DS Completed: " . ($is_3ds_completed ? 'true' : 'false'));
+                
                 $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
                 $conekta_order = $conekta_api->getOrderById($conekta_order_id);
+                
+                info_log("Classic Checkout - Conekta order status: " . $conekta_order->getPaymentStatus());
                 
                 // If there's a temporary order from 3DS, use that order's information
                 if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order_id) {
@@ -474,14 +479,24 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     // Order is already paid, just update the status
                     $order->update_status('processing', __('Pago procesado con Conekta (3DS)', 'woocommerce'));
                     $success = true;
-                } else if ($payment_status === 'paid') {
+                    info_log("Classic Checkout - Order already paid, marked as processing");
+                } else if (($payment_status === 'paid' || $is_3ds_completed) && $conekta_order->getPaymentStatus() === 'pending_payment') {
                     // Order needs to be captured
-                    $conekta_api->ordersCreateCapture($conekta_order_id);
-                    $order->update_status('processing', __('Pago capturado con Conekta (3DS)', 'woocommerce'));
-                    $success = true;
+                    try {
+                        info_log("Classic Checkout - Attempting to capture payment for order: {$conekta_order_id}");
+                        $conekta_api->ordersCreateCapture($conekta_order_id);
+                        $order->update_status('processing', __('Pago capturado con Conekta (3DS)', 'woocommerce'));
+                        $success = true;
+                        info_log("Classic Checkout - Payment captured successfully");
+                    } catch (\Exception $e) {
+                        $error_message = 'Error capturing payment: ' . $e->getMessage();
+                        $success = false;
+                        error_log("Classic Checkout - Error capturing payment: " . $e->getMessage());
+                    }
                 } else {
                     $error_message = 'El pago no pudo ser procesado. Estado: ' . $conekta_order->getPaymentStatus();
                     $success = false;
+                    error_log("Classic Checkout - Payment failed. Conekta status: " . $conekta_order->getPaymentStatus() . ", Payment status: {$payment_status}, 3DS completed: " . ($is_3ds_completed ? 'true' : 'false'));
                 }
             } catch (\Exception $e) {
                 $error_message = $e->getMessage();

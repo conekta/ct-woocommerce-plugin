@@ -1,5 +1,7 @@
-## [5.4.0]() - 2024-12-19
+## [5.4.1]() - 2024-09-05
+- Fix: Classic checkout now properly supports 3D Secure (3DS) functionality
 
+## [5.4.0]() - 2024-08-28
 - Feature: Added 3D Secure (3DS) v2 support for enhanced payment security
 - Feature: Improved fraud prevention measures with latest 3DS authentication
 - Enhancement: Better compatibility with modern payment security standards

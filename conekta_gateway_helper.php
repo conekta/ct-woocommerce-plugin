@@ -419,3 +419,17 @@ function get_expired_at(int $daysToAdd): int
     $currentDate->add(new DateInterval("P{$daysToAdd}D"));
     return $currentDate->getTimestamp();
 }
+
+/**
+ * Log informational messages
+ * 
+ * @param string $message Message to log
+ * @param array $context Additional context data
+ */
+function info_log($message, $context = [])
+{
+    if (!empty($context)) {
+        $message .= ' | Context: ' . json_encode($context);
+    }
+    error_log('[INFO] ' . $message);
+}

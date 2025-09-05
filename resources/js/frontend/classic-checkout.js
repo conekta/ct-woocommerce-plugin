@@ -9,7 +9,7 @@ const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
 
 // 3DS configuration
-const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes";
+const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes" || conekta_settings.three_ds_enabled === "1";
 
 // Utilities
 const utils = {
@@ -53,12 +53,6 @@ const utils = {
         },
       });
       form.classList.add('three-ds-process');
-      setTimeout(() => {
-        const overlay = form.querySelector('.blockUI.blockOverlay');
-        if (overlay) {
-          overlay.classList.add('three-ds-process');
-        }
-      }, 0);
     } else {
       $form.unblock();
       form.classList.remove('three-ds-process');
@@ -105,6 +99,48 @@ const threeDsHandler = {
       // Add order_id if available
       if (orderId) {
         requestData.order_id = orderId;
+      } else {
+        // Extract billing data from checkout form for classic checkout
+        const getBillingDataFromForm = () => {
+          const billingData = {};
+          
+          // Get billing fields from form
+          const billingFields = [
+            'billing_first_name', 'billing_last_name', 'billing_company',
+            'billing_address_1', 'billing_address_2', 'billing_city', 
+            'billing_state', 'billing_postcode', 'billing_country',
+            'billing_email', 'billing_phone'
+          ];
+          
+          billingFields.forEach(field => {
+            const input = form.querySelector(`[name="${field}"]`);
+            if (input) {
+              // Remove 'billing_' prefix for consistency with blocks
+              const key = field.replace('billing_', '');
+              billingData[key] = input.value || '';
+            }
+          });
+          
+          return billingData;
+        };
+        
+        // Add classic checkout context data
+        requestData.is_blocks_context = false; // This is classic checkout
+        requestData.is_classic_context = true;
+        
+        // Get billing data from form
+        const billingData = getBillingDataFromForm();
+        if (Object.keys(billingData).length > 0) {
+          requestData.billing_data = billingData;
+        }
+
+        // Add cart data from available settings
+        if (conekta_settings.amount) {
+          requestData.cart_data = {
+            total: Number(conekta_settings.amount), // Convert to cents for Conekta API
+            currency: conekta_settings.currency || 'MXN'
+          };  
+        }
       }
       
       const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {
@@ -146,6 +182,7 @@ const threeDsHandler = {
 
       if (getComputedStyle(parentContainer).position === 'static') {
         parentContainer.style.position = 'relative';
+        parentContainer.style.zIndex = '9999';
       }
 
       conekta3dsContainer.style.position = 'absolute';
@@ -304,20 +341,45 @@ const conektaConfig = {
             
             try {
               // Show 3DS iframe and wait for result
-              await threeDsHandler.show3dsIframe(redirectUrl);
+              const authResult = await threeDsHandler.show3dsIframe(redirectUrl);
               
-              // Submit form after successful 3DS authentication
+              // After successful 3DS authentication, add order data to form
               const formData = new FormData(form);
               formData.append("wc-ajax", "checkout");
+              
+              // Add 3DS order data to the form submission
+              if (orderResponse.order_id) {
+                formData.append("conekta_order_id", String(orderResponse.order_id));
+              }
+              if (orderResponse.woo_order_id) {
+                formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
+              }
+              if (authResult.payment_status) {
+                formData.append("conekta_payment_status", String(authResult.payment_status));
+              }
+              formData.append("conekta_3ds_completed", "true");
+              
               formHandler.submitForm(formData);
             } catch (error) {
               utils.setLoading(false);
               utils.showErrorMessage(utils.getTranslation("3ds_error") || "3D Secure authentication failed");
             }
           } else {
-            // No 3DS authentication required, continue with checkout
+            // No 3DS authentication required, but add order data if available
             const formData = new FormData(form);
             formData.append("wc-ajax", "checkout");
+            
+            // Add order data to form submission
+            if (orderResponse.order_id) {
+              formData.append("conekta_order_id", String(orderResponse.order_id));
+            }
+            if (orderResponse.woo_order_id) {
+              formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
+            }
+            if (orderResponse.payment_status) {
+              formData.append("conekta_payment_status", String(orderResponse.payment_status));
+            }
+            
             formHandler.submitForm(formData);
           }
         } catch (error) {
