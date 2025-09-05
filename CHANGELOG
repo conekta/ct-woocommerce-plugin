@@ -1,3 +1,45 @@
+5.4.1, 2024-09-05
+-------------------------------------
+- Fix: Classic checkout now properly supports 3D Secure (3DS) functionality
+
+5.4.0, 2024-08-28
+-------------------------------------
+- Feature: Added 3D Secure (3DS) v2 support for enhanced payment security
+- Feature: Improved fraud prevention measures with latest 3DS authentication
+- Enhancement: Better compatibility with modern payment security standards
+
+5.3.0, 2025-08-06
+-------------------------------------
+- Fix: WooCommerce Blocks now correctly update payment amount when coupons are applied or removed
+- Fix: Monthly installments (MSI) now calculate correctly with discounted totals in Blocks checkout
+
+4.0.3, 2024-02-13
+-------------------------------------
+- Fix status orders, new orders are created with status "pending payment" and not "on-hold"
+
+4.0.2, 2024-01-24
+-------------------------------------
+- Fix error when creating order with empty shipping contact
+
+4.0.1, 2024-01-23
+-------------------------------------
+- Fix error when create charge in php 7.4
+
+4.0.0, 2024-01-23
+-------------------------------------
+- Update conekta-php library
+- Checkout Blocks compatibility.
+- Updated to the new redirected checkout process: Conekta Component.
+- Simplified integration process using one API key for all payment methods.
+
+3.7.7, 2023-12-05
+-------------------------------------
+- fix shipping lines amount
+
+3.7.6, 2023-11-14
+-------------------------------------
+- supports order.expired and order.cancelled for changing order status
+
 3.7.5, 2023-04-28
 -------------------------------------
 - Remove tests on lib conekta
