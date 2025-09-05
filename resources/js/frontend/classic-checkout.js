@@ -9,7 +9,7 @@ const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
 
 // 3DS configuration
-const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes";
+const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes" || conekta_settings.three_ds_enabled === "1";
 
 // Utilities
 const utils = {
