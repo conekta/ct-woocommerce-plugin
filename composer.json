@@ -12,6 +12,6 @@
         }
     ],
     "require": {
-        "conekta/conekta-php": "6.0.11"
+        "conekta/conekta-php": "7.0.4"
     }
 }
