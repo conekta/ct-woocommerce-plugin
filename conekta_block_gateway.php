@@ -61,7 +61,9 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $company = $companies_api->getCurrentCompany($this->get_user_locale());
             $this->three_ds_enabled = $company->getThreeDsEnabled();
             $this->three_ds_mode = $company->getThreeDsMode();
-        } catch (\Exception $e) {}
+        } catch (\Exception $e) {
+            error_log('Conekta - Error fetching company info: ' . $e->getMessage());
+        }
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);
