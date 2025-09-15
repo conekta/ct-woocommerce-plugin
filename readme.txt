@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 5.4.2 =
-* Enhancement: General improvements and bug fixes
+* Enhancement: Updated Conekta PHP SDK to v7.0.5 and refactored to use new SDK methods.
 = 5.4.1 =
 * Fix: Classic checkout now properly supports 3D Secure (3DS) functionality
 = 5.3.0 =
