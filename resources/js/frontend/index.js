@@ -11,7 +11,7 @@ const labelConekta = decodeEntities(settings.title);
 const tokenEmitter = new TokenEmitter();
 
 // Process 3DS if enabled
-const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes" || conekta_settings.three_ds_enabled === "1";
+const is3dsEnabled = settings.three_ds_enabled === true || settings.three_ds_enabled === "yes" || settings.three_ds_enabled === "1";
 
 const waitGetToken = () => {
     return new Promise((resolve, reject) => {
