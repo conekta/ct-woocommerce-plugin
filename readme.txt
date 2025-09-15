@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.1
+Stable tag: 5.4.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,10 +47,10 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.2 =
+* Enhancement: Updated Conekta PHP SDK to v7.0.5 and refactored to use new SDK methods.
 = 5.4.1 =
-* Added 3D Secure (3DS) v2 support for enhanced payment security
-* Improved fraud prevention measures with latest 3DS authentication
-* Better compatibility with modern payment security standards
+* Fix: Classic checkout now properly supports 3D Secure (3DS) functionality
 = 5.3.0 =
 * Removes klarna image and adds aplazo image.
 = 5.2.6 =

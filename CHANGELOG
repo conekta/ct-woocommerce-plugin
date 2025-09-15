@@ -1,3 +1,7 @@
+5.4.2, 2024-09-15
+-------------------------------------
+- Enhancement: Updated Conekta PHP SDK to v7.0.5 and refactored to use new SDK methods.
+
 5.4.1, 2024-09-05
 -------------------------------------
 - Fix: Classic checkout now properly supports 3D Secure (3DS) functionality
