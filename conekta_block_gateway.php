@@ -57,13 +57,10 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->three_ds_mode    = '';
 
         try {
-            $request = $this->get_companies_api_instance($this->api_key, $this->version)->getCompanyRequest('current', $this->get_user_locale());
-            $client = new Client();
-            $response = $client->send($request);
-            $body = (string) $response->getBody();
-            $company = json_decode($body);		
-            $this->three_ds_enabled = $company->three_ds_enabled;
-            $this->three_ds_mode = $company->three_ds_mode;
+            $companies_api = $this->get_companies_api_instance($this->api_key, $this->version);
+            $company = $companies_api->getCurrentCompany($this->get_user_locale());
+            $this->three_ds_enabled = $company->getThreeDsEnabled();
+            $this->three_ds_mode = $company->getThreeDsMode();
         } catch (\Exception $e) {}
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
