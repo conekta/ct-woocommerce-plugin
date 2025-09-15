@@ -12,6 +12,8 @@
         }
     ],
     "require": {
-        "conekta/conekta-php": "7.0.5"
+        "php": ">=7.4",
+        "conekta/conekta-php": "7.0.5",
+        "symfony/deprecation-contracts": "^2.2"
     }
 }
