@@ -1,3 +1,11 @@
+5.4.3, 2025-09-26
+-------------------------------------
+- Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
+- Fix: Corrected double conversion to cents issue that caused incorrect shipping amounts
+- Enhancement: Improved shipping data capture from both WooCommerce Blocks and Classic checkout
+- Enhancement: Added comprehensive shipping method support for credit card payment flows
+- Enhancement: Better consistency between payment methods for shipping cost handling
+
 5.4.2, 2024-09-15
 -------------------------------------
 - Enhancement: Updated Conekta PHP SDK to v7.0.5 and refactored to use new SDK methods.
