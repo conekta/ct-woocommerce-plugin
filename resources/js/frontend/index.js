@@ -113,6 +113,68 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
                     phone: billingData.phone || ''
                 };
             }
+            
+            // Process shipping data - use shippingAddress or shippingData
+            const shippingData = props?.shippingData?.shippingAddress || props?.shipping?.shippingAddress;
+            
+            if (shippingData) {
+                requestData.shipping_data = {
+                    first_name: shippingData.first_name || '',
+                    last_name: shippingData.last_name || '',
+                    company: shippingData.company || '',
+                    address_1: shippingData.address_1 || '',
+                    address_2: shippingData.address_2 || '',
+                    city: shippingData.city || '',
+                    state: shippingData.state || '',
+                    postcode: shippingData.postcode || '',
+                    country: shippingData.country || 'MX'
+                };
+            }
+            
+            // Process shipping options - try multiple paths to get shipping data
+            let shippingRates = props?.shippingData?.shippingRates || [];
+            
+            // Alternative paths for shipping data
+            if (!shippingRates.length) {
+                shippingRates = props?.shipping?.shippingRates || [];
+            }
+            
+            if (!shippingRates.length && props?.cartData?.shippingRates) {
+                shippingRates = props.cartData.shippingRates;
+            }
+            
+            if (shippingRates && shippingRates.length > 0) {
+                // Find selected shipping rate
+                let selectedRate = shippingRates.find(rate => rate.selected);
+                
+                // If no selected rate found, try to find it in nested structure
+                if (!selectedRate) {
+                    for (const packageRates of shippingRates) {
+                        if (Array.isArray(packageRates.shipping_rates)) {
+                            selectedRate = packageRates.shipping_rates.find(rate => rate.selected);
+                            if (selectedRate) break;
+                        }
+                    }
+                }
+                
+                if (selectedRate) {
+                    let cost = 0;
+                    // Try multiple ways to get the cost
+                    if (selectedRate.cost !== undefined) {
+                        cost = parseFloat(selectedRate.cost);
+                    } else if (selectedRate.price !== undefined) {
+                        cost = parseFloat(selectedRate.price);
+                    } else if (selectedRate.rate_cost !== undefined) {
+                        cost = parseFloat(selectedRate.rate_cost);
+                    }
+                    
+                    requestData.shipping_method = {
+                        id: selectedRate.id || selectedRate.rate_id || '',
+                        label: selectedRate.label || selectedRate.name || selectedRate.rate_label || '',
+                        cost: cost
+                    };
+                }
+            }
         }
         
         const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {

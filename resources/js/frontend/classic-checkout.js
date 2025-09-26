@@ -134,6 +134,73 @@ const threeDsHandler = {
           requestData.billing_data = billingData;
         }
 
+        // Get shipping data from form
+        const getShippingDataFromForm = () => {
+          const shippingData = {};
+          
+          // Get shipping fields from form
+          const shippingFields = [
+            'shipping_first_name', 'shipping_last_name', 'shipping_company',
+            'shipping_address_1', 'shipping_address_2', 'shipping_city', 
+            'shipping_state', 'shipping_postcode', 'shipping_country'
+          ];
+          
+          shippingFields.forEach(field => {
+            const input = form.querySelector(`[name="${field}"]`);
+            if (input) {
+              // Remove 'shipping_' prefix for consistency with blocks
+              const key = field.replace('shipping_', '');
+              shippingData[key] = input.value || '';
+            }
+          });
+          
+          return shippingData;
+        };
+        
+        const shippingData = getShippingDataFromForm();
+        if (Object.keys(shippingData).length > 0) {
+          requestData.shipping_data = shippingData;
+        }
+
+        // Get shipping method from form
+        const shippingMethodInput = form.querySelector('input[name^="shipping_method"]:checked');
+        if (shippingMethodInput) {
+          const methodValue = shippingMethodInput.value;
+          let methodLabel = methodValue;
+          let methodCost = 0;
+          
+          // Try to get label and cost from various sources
+          const methodRow = shippingMethodInput.closest('tr, li, .wc-shipping-row');
+          if (methodRow) {
+            // Try to find label in the row
+            const labelElement = methodRow.querySelector('label, .shipping-method-label, .shipping-name');
+            if (labelElement) {
+              methodLabel = labelElement.textContent.trim();
+            }
+            
+            // Try to find cost in the row
+            const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
+            if (costElement) {
+              const costText = costElement.textContent.replace(/[^\d.,]/g, '');
+              methodCost = parseFloat(costText.replace(',', '.')) || 0;
+            }
+          }
+          
+          // If we still don't have cost, try to extract from label
+          if (methodCost === 0 && methodLabel) {
+            const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
+            if (costMatch) {
+              methodCost = parseFloat(costMatch[1].replace(',', '.')) || 0;
+            }
+          }
+          
+          requestData.shipping_method = {
+            id: methodValue,
+            label: methodLabel,
+            cost: methodCost
+          };
+        }
+
         // Add cart data from available settings
         if (conekta_settings.amount) {
           requestData.cart_data = {
