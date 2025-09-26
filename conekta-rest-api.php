@@ -269,23 +269,16 @@ class WC_Conekta_REST_API {
                     // Add shipping lines even for minimal data
                     $amountShipping = amount_validation($order->get_shipping_total());
                     $shipping_method = $order->get_shipping_method();
-                    if (!empty($shipping_method)) {
-                        $data['shipping_lines'] = [
-                            [
-                                'amount'  => $amountShipping,
-                                'carrier' => $shipping_method,
-                                'method'  => $shipping_method
-                            ]
-                        ];
-                    } else {
-                        $data['shipping_lines'] = [
-                            [
-                                'amount'   => $amountShipping,
-                                'carrier'  => 'carrier',
-                                'method'   => 'pickup'
-                            ]
-                        ];
-                    }
+                    $carrier = !empty($shipping_method) ? $shipping_method : 'carrier';
+                    $method = !empty($shipping_method) ? $shipping_method : 'pickup';
+
+                    $data['shipping_lines'] = [
+                        [
+                            'amount'  => $amountShipping,
+                            'carrier' => $carrier,
+                            'method'  => $method
+                        ]
+                    ];
                 }
                 
                 $items = $order->get_items();
