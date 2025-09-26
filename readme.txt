@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.2
+Stable tag: 5.4.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,12 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.3 =
+* Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
+* Fix: Corrected double conversion to cents issue that caused incorrect shipping amounts
+* Enhancement: Improved shipping data capture from both WooCommerce Blocks and Classic checkout
+* Enhancement: Added comprehensive shipping method support for credit card payment flows
+* Enhancement: Better consistency between payment methods for shipping cost handling
 = 5.4.2 =
 * Enhancement: Updated Conekta PHP SDK to v7.0.5 and refactored to use new SDK methods.
 = 5.4.1 =

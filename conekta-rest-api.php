@@ -87,6 +87,8 @@ class WC_Conekta_REST_API {
                 $is_classic_context = isset($params['is_classic_context']) && $params['is_classic_context'];
                 $cart_data = isset($params['cart_data']) ? $params['cart_data'] : null;
                 $billing_data = isset($params['billing_data']) ? $params['billing_data'] : null;
+                $shipping_data = isset($params['shipping_data']) ? $params['shipping_data'] : null;
+                $shipping_method = isset($params['shipping_method']) ? $params['shipping_method'] : null;
                 
                 if (($cart_data || $billing_data) && ($is_blocks_context || $is_classic_context)) {
                     // Create an order from the cart and billing data provided by blocks or classic checkout
@@ -110,6 +112,31 @@ class WC_Conekta_REST_API {
                             $order->set_billing_country($billing_data['country'] ?? 'MX');
                             $order->set_billing_email($billing_data['email'] ?? 'guest@example.com');
                             $order->set_billing_phone($billing_data['phone'] ?? '');
+                        }
+                        
+                        // Set shipping info from provided data
+                        if ($shipping_data) {
+                            $order->set_shipping_first_name($shipping_data['first_name'] ?? '');
+                            $order->set_shipping_last_name($shipping_data['last_name'] ?? '');
+                            $order->set_shipping_company($shipping_data['company'] ?? '');
+                            $order->set_shipping_address_1($shipping_data['address_1'] ?? '');
+                            $order->set_shipping_address_2($shipping_data['address_2'] ?? '');
+                            $order->set_shipping_city($shipping_data['city'] ?? '');
+                            $order->set_shipping_state($shipping_data['state'] ?? '');
+                            $order->set_shipping_postcode($shipping_data['postcode'] ?? '');
+                            $order->set_shipping_country($shipping_data['country'] ?? 'MX');
+                        }
+                        
+                        // Set shipping method from provided data
+                        if ($shipping_method) {
+                            $shipping_item = new WC_Order_Item_Shipping();
+                            $shipping_cost = isset($shipping_method['cost']) ? ($shipping_method['cost'] / 100) : 0;
+                            $shipping_item->set_props([
+                                'method_title' => $shipping_method['label'] ?? 'Shipping',
+                                'method_id' => $shipping_method['id'] ?? 'flat_rate',
+                                'total' => $shipping_cost
+                            ]);
+                            $order->add_item($shipping_item);
                         }
                         
                         // Add items from cart
@@ -237,6 +264,20 @@ class WC_Conekta_REST_API {
                             'phone' => $phone,
                             'email' => $email
                         ],
+                    ];
+                    
+                    // Add shipping lines even for minimal data
+                    $amountShipping = amount_validation($order->get_shipping_total());
+                    $shipping_method = $order->get_shipping_method();
+                    $carrier = !empty($shipping_method) ? $shipping_method : 'carrier';
+                    $method = !empty($shipping_method) ? $shipping_method : 'pickup';
+
+                    $data['shipping_lines'] = [
+                        [
+                            'amount'  => $amountShipping,
+                            'carrier' => $carrier,
+                            'method'  => $method
+                        ]
                     ];
                 }
                 
