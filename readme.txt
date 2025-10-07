@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.3
+Stable tag: 5.4.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,12 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.4 =
+* Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
+* Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
+* Feature: Added order expiration configuration in minutes (10-1440 min) for Pay by Bank
+* Enhancement: Automatic payment window opening with intelligent fallback for blocked popups
+* Enhancement: Improved user experience with seamless BBVA payment flow
 = 5.4.3 =
 * Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
 * Fix: Corrected double conversion to cents issue that caused incorrect shipping amounts

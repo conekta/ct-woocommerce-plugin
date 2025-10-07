@@ -421,6 +421,18 @@ function get_expired_at(int $daysToAdd): int
 }
 
 /**
+ * @param int $minutesToAdd
+ * @return int
+ * @throws Exception
+ */
+function get_expired_at_minutes(int $minutesToAdd): int
+{
+    $currentDate = new DateTime('now', new DateTimeZone('UTC'));
+    $currentDate->add(new DateInterval("PT{$minutesToAdd}M"));
+    return $currentDate->getTimestamp();
+}
+
+/**
  * Log informational messages
  * 
  * @param string $message Message to log

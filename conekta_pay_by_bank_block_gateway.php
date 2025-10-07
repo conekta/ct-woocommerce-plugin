@@ -15,9 +15,9 @@ use Conekta\Model\OrderRequest;
 use Conekta\Model\CustomerShippingContacts;
 use Conekta\Model\EventTypes;
 
-class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
+class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
 {
-    protected $GATEWAY_NAME = "WC_Conekta_Bank_Transfer_Gateway";
+    protected $GATEWAY_NAME = "WC_Conekta_Pay_By_Bank_Gateway";
     protected $order = null;
     protected $currencies = array('MXN', 'USD');
 
@@ -35,8 +35,8 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
      */
     public function __construct()
     {
-        $this->id = 'conekta_bank_transfer';
-        $this->method_title = __('Conekta Transferencia', 'Conekta bank transfer');
+        $this->id = 'conekta_pay_by_bank';
+        $this->method_title = __('Conekta Pago Directo', 'Conekta pay by bank');
         $this->has_fields = true;
         $this->ckpg_init_form_fields();
         $this->init_settings();
@@ -45,13 +45,13 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         $this->icon        = $this->settings['alternate_imageurl'] ?
                                                 $this->settings['alternate_imageurl'] :
                                                 WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
-                                                . '/images/spei.png';
+                                                . '/images/bbva.png';
         $this->api_key = $this->settings['api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_thankyou_' . $this->id, array($this, 'ckpg_thankyou_page'));
-        add_action('woocommerce_api_wc_conekta_bank_transfer', [$this, 'check_for_webhook']);
+        add_action('woocommerce_api_wc_conekta_pay_by_bank', [$this, 'check_for_webhook']);
         add_action('woocommerce_email_before_order_table', array($this, 'ckpg_email_instructions'));
         add_action('woocommerce_email_before_order_table', array($this, 'ckpg_email_reference'));
 
@@ -79,7 +79,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         if (!isset($_SERVER['REQUEST_METHOD'])
             || ('POST' !== $_SERVER['REQUEST_METHOD'])
             || !isset($_GET['wc-api'])
-            || ('wc_conekta_bank_transfer' !== $_GET['wc-api'])
+            || ('wc_conekta_pay_by_bank' !== $_GET['wc-api'])
         ) {
             return;
         }
@@ -115,22 +115,59 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     function ckpg_thankyou_page($order_id)
     {
         $order = new WC_Order($order_id);
-        $conekta_order_id = get_post_meta($order->get_id(), 'conekta-order-id', true);
+        $reference = get_post_meta($order->get_id(), 'conekta-reference', true);
+        $redirectUrl = get_post_meta($order->get_id(), 'conekta-redirect-url', true);
+        $deepLink = get_post_meta($order->get_id(), 'conekta-deep-link', true);
 
-        if (empty($conekta_order_id)) {
-            return;
-        }
-        $conekta_order = $this->get_api_instance($this->settings['api_key'], $this->version)->getorderbyid($conekta_order_id);
-
-        foreach ($conekta_order->getCharges()->getData() as $charge) {
-            $payment_method = $charge->getPaymentMethod()->getObject();
-            if ($payment_method == 'bank_transfer_payment') {
-                $clabe = $charge->getPaymentMethod()->getClabe();
-                $bank = $charge->getPaymentMethod()->getBank();
-                echo '<p><h4><strong>' . __('Clabe') . ':</strong> ' . $clabe . '</h4></p>';
-                echo '<p><h4><strong>' . esc_html(__('Beneficiario')) . ':</strong> ' . esc_html($this->settings['account_owner']) . '</h4></p>';
-                echo '<p><h4><strong>' . esc_html(__('Banco Receptor')) . ':</strong> ' . esc_html($bank) . '</h4></p>';
+        if (!empty($reference)) {
+            $isMobile = wp_is_mobile();
+            $paymentUrl = $isMobile ? $deepLink : $redirectUrl;
+            
+            echo '<div class="woocommerce-info" style="margin-bottom: 20px;" id="bbva-payment-info">';
+            echo '<p style="font-size: 16px; margin-bottom: 10px;"><strong>' . __('¡Estás a un paso de completar tu compra!', 'woothemes') . '</strong></p>';
+            echo '<p id="bbva-redirect-message">' . __('Debes completar tu pago en la ventana de BBVA que se abrió automáticamente.', 'woothemes') . '</p>';
+            
+            if (!empty($paymentUrl)) {
+                echo '<div id="bbva-manual-redirect" style="display: none;">';
+                echo '<p>' . __('Si la ventana no se abrió, haz clic en el botón de abajo:', 'woothemes') . '</p>';
+                echo '<p style="text-align: center; margin-top: 15px;">';
+                echo '<a href="' . esc_url($paymentUrl) . '" target="_blank" rel="noopener noreferrer" class="button" style="font-size: 16px; padding: 12px 24px;" id="bbva-pay-button">';
+                echo __('Ir a BBVA para Pagar', 'woothemes');
+                echo '</a>';
+                echo '</p>';
+                echo '</div>';
+                
+                echo '<script type="text/javascript">
+                    (function() {
+                        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                        var redirectUrl = ' . json_encode($redirectUrl) . ';
+                        var deepLink = ' . json_encode($deepLink) . ';
+                        var paymentUrl = isMobile ? deepLink : redirectUrl;
+                        
+                        if (paymentUrl) {
+                            setTimeout(function() {
+                                var newWindow = window.open(paymentUrl, "_blank", "noopener,noreferrer");
+                                
+                                if (!isMobile && (!newWindow || newWindow.closed || typeof newWindow.closed === "undefined")) {
+                                    var manualRedirect = document.getElementById("bbva-manual-redirect");
+                                    var redirectMessage = document.getElementById("bbva-redirect-message");
+                                    
+                                    if (manualRedirect) {
+                                        manualRedirect.style.display = "block";
+                                        if (redirectMessage) {
+                                            redirectMessage.style.display = "none";
+                                        }
+                                    }
+                                }
+                            }, 500);
+                        }
+                    })();
+                </script>';
             }
+            
+            echo '<hr style="margin: 20px 0;">';
+            echo '<p><strong>' . __('Referencia de Pago', 'woothemes') . ':</strong> ' . esc_html($reference) . '</p>';
+            echo '</div>';
         }
     }
 
@@ -148,20 +185,14 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('Título', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Transferencias', 'woothemes'),
+                'default' => __('Pago Directo BBVA', 'woothemes'),
                 'required' => true
             ),
-            'account_owner' => array(
-                 'type'        => 'Account owner',
-                 'title'       => __('Account owner', 'woothemes'),
-                 'description' => __('Esto se mostrará en la página de éxito de SPEI como descripción de cuenta para referencia CLABE', 'woothemes'),
-                 'default'     => __('Conekta SPEI', 'woothemes')
-             ),
             'description' => array(
                 'type' => 'text',
                 'title' => __('Descripción', 'woothemes'),
                 'description' => __('', 'woothemes'),
-                'default' => __('Paga desde tu banca digital con SPEI', 'woothemes'),
+                'default' => __('Paga desde la App BBVA al instante con tu cuenta, sin compartir datos bancarios. Para continuar, te llevaremos a un sitio seguro de BBVA.', 'woothemes'),
                 'required' => true
             ),
             'api_key' => array(
@@ -173,12 +204,12 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
             ),
             'order_expiration' => array(
                 'type' => 'number',
-                'title' => __('Vencimiento de las órdenes de pago (Días)', 'woothemes'),
-                'description' => __('La cantidad de dīas configuradas en esta opción, corresponde al tiempo en el que la orden estará activa para ser pagada por el cliente desde el momento de su creación.', 'woothemes'),
-                'default' => __(1),
+                'title' => __('Vencimiento de las órdenes de pago (Minutos)', 'woothemes'),
+                'description' => __('La cantidad de minutos configurados en esta opción, corresponde al tiempo en el que la orden estará activa para ser pagada por el cliente desde el momento de su creación.', 'woothemes'),
+                'default' => __(10),
                 'custom_attributes' => array(
-                    'min' => 1,
-                    'max' => 30,
+                    'min' => 10,
+                    'max' => 1440,
                     'step' => 1
                 ),
             ),
@@ -186,7 +217,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),
                 'description' => __('URL webhook', 'woothemes'),
-                'default' => __(get_site_url() . '/?wc-api=wc_conekta_bank_transfer'),
+                'default' => __(get_site_url() . '/?wc-api=wc_conekta_pay_by_bank'),
                 'required' => true
             ),
             'alternate_imageurl' => array(
@@ -198,7 +229,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'title' => __( 'Instructions', 'woocommerce' ),
                 'type' => 'textarea',
                 'description' => __( 'Instructions that will be added to the thank you page and emails.', 'woocommerce' ),
-                'default' =>__( 'Por favor realiza el pago en el portal de tu banco utilizando los datos que te enviamos por correo.', 'woocommerce' ),
+                'default' =>__( 'Serás redirigido a BBVA para completar tu pago de forma segura.', 'woocommerce' ),
                 'desc_tip' => true,
             ),
         );
@@ -214,7 +245,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
          */
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         $instructions = $this->form_fields['instructions'];
-        if ( $instructions && 'on-hold' === $order->get_status() ) {
+        if ( $instructions && 'pending' === $order->get_status() ) {
             echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
         }
     }
@@ -225,23 +256,22 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
      * @param WC_Order $order
      */
     function ckpg_email_reference($order) {
+        $reference = get_post_meta( $order->get_id(), 'conekta-reference', true );
 
-        if (get_post_meta( $order->get_id(), 'conekta-clabe', true ) != null)
-            {
-                echo '<p><h4><strong>'.esc_html(__('Clabe')).':</strong> '
-                . esc_html( get_post_meta( $order->get_id(), 'conekta-clabe', true ) ). '</h4></p>';
-                echo '<p><h4><strong>'.esc_html(__('Beneficiario')).':</strong> '.esc_html($this->settings['account_owner']).'</h4></p>';
-            }
+        if (!empty($reference)) {
+            echo '<p><h4><strong>'.esc_html(__('Referencia de Pago')).':</strong> ' . esc_html($reference) . '</h4></p>';
+            echo '<p>'.esc_html(__('Tu pago ha sido procesado a través de BBVA Pago Directo.')).'</p>';
+        }
     }
 
     public function ckpg_admin_options()
     {
-        include_once('templates/spei_admin.php');
+        include_once('templates/pay_by_bank_admin.php');
     }
 
     public function payment_fields()
     {
-        include_once('templates/spei.php');
+        include_once('templates/pay_by_bank.php');
     }
 
     protected function ckpg_mark_as_failed_payment($order)
@@ -282,41 +312,74 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
                 'payment_method' => $this->GATEWAY_NAME,
             )
         );
-        $rq = new OrderRequest([
+        $orderData = [
+            'line_items' => $line_items,
             'currency' => $data['currency'],
+            'customer_info' => $customer_info,
+            'metadata' => $order_metadata,
             'charges' => [
                 [
                     'payment_method' => [
-                        'type' => 'spei',
-                        'expires_at' => get_expired_at($this->settings['order_expiration']),
-                    ],
-                    'reference_id' => strval($order->get_id()),
+                        'type' => 'pay_by_bank',
+                        'product_type' => 'bbva_pay_by_bank',
+                        'expires_at' => get_expired_at_minutes($this->settings['order_expiration']),
+                    ]
                 ]
-            ],
-            'shipping_lines' => $shipping_lines,
-            'discount_lines' => $discount_lines,
-            'tax_lines' => $tax_lines,
-            'customer_info' => $customer_info,
-            'line_items' => $line_items,
-            'metadata' => $order_metadata
-        ]);
+            ]
+        ];
+        
         if (!empty($shipping_contact)) {
-            $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
+            $orderData['shipping_contact'] = $shipping_contact;
         }
+        
+        if (!empty($shipping_lines)) {
+            $orderData['shipping_lines'] = $shipping_lines;
+        }
+        
+        if (!empty($discount_lines)) {
+            $orderData['discount_lines'] = $discount_lines;
+        }
+        
+        if (!empty($tax_lines)) {
+            $orderData['tax_lines'] = $tax_lines;
+        }
+        
+        $rq = new OrderRequest($orderData);
         try {
             $orderCreated = $this->get_api_instance($this->settings['api_key'], $this->version)->createOrder($rq);
-            $order->update_status('on-hold', __('Awaiting the conekta bank transfer payment', 'woocommerce'));
+            $order->update_status('pending', __('Awaiting BBVA payment authorization', 'woocommerce'));
             self::update_conekta_order_meta( $order, $orderCreated->getId(), 'conekta-order-id');
-            self::update_conekta_order_meta( $order, $orderCreated->getCharges()->getData()[0]->getPaymentMethod()->getClabe(), 'conekta-clabe');
+            
+            $paymentMethod = $orderCreated->getCharges()->getData()[0]->getPaymentMethod();
+            $redirectUrl = $paymentMethod->getRedirectUrl();
+            $deepLink = $paymentMethod->getDeepLink();
+            
+            self::update_conekta_order_meta( $order, $redirectUrl, 'conekta-redirect-url');
+            self::update_conekta_order_meta( $order, $deepLink, 'conekta-deep-link');
+            self::update_conekta_order_meta( $order, $paymentMethod->getReference(), 'conekta-reference');
+            
+            // Add BBVA URLs as query parameters for JavaScript to intercept
+            $thankYouUrl = add_query_arg(
+                array(
+                    'redirect_url' => urlencode($redirectUrl),
+                    'deep_link' => urlencode($deepLink),
+                    'auto_redirect' => '1'
+                ),
+                $this->get_return_url($order)
+            );
+            
             return array(
                 'result' => 'success',
-                'redirect' => $this->get_return_url($order)
+                'redirect' => $thankYouUrl
             );
         } catch (Exception $e) {
             $description = $e->getMessage();
-            wc_add_notice(__('Error: ', 'woothemes') . $description);
+            wc_add_notice(__('Error: ', 'woothemes') . $description, 'error');
             $this->ckpg_mark_as_failed_payment($order);
-            WC()->session->reload_checkout = true;
+            return array(
+                'result' => 'failure',
+                'redirect' => ''
+            );
         }
 
     }
@@ -333,23 +396,23 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     }
 }
 
-function ckpg_conekta_bank_transfer_add_gateway($methods)
+function ckpg_conekta_pay_by_bank_add_gateway($methods)
 {
-    $methods[] = 'WC_Conekta_Bank_Transfer_Gateway';
+    $methods[] = 'WC_Conekta_Pay_By_Bank_Gateway';
     return $methods;
 }
 
-add_filter('woocommerce_payment_gateways', 'ckpg_conekta_bank_transfer_add_gateway');
+add_filter('woocommerce_payment_gateways', 'ckpg_conekta_pay_by_bank_add_gateway');
 
-add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support');
-function woocommerce_gateway_conekta_bank_transfer_woocommerce_block_support()
+add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_pay_by_bank_woocommerce_block_support');
+function woocommerce_gateway_conekta_pay_by_bank_woocommerce_block_support()
 {
     if (class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
-        require_once 'includes/blocks/class-wc-conekta-bank_transfer-payments-blocks.php';
+        require_once 'includes/blocks/class-wc-conekta-pay_by_bank-payments-blocks.php';
         add_action(
             'woocommerce_blocks_payment_method_type_registration',
             function (Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry) {
-                $payment_method_registry->register(new WC_Gateway_Conekta_Bank_Transfer_Blocks_Support());
+                $payment_method_registry->register(new WC_Gateway_Conekta_Pay_By_Bank_Blocks_Support());
             }
         );
     }
