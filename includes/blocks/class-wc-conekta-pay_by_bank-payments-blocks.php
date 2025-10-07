@@ -79,8 +79,7 @@ final class WC_Gateway_Conekta_Pay_By_Bank_Blocks_Support extends AbstractPaymen
             'title'       		        => $this->get_setting( 'title' ),
             'description' 		        => $this->get_setting( 'description' ),
             'supports'    			    => array_filter( $this->gateway->supports, [ $this->gateway, 'supports' ] ),
-            'name'                      => $this->name,
-			'api_key'                   => $this->get_setting( 'api_key' ),
+            'name'                      => $this->name
         ];
     }
 }
