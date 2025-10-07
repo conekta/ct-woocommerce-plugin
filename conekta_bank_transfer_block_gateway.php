@@ -185,7 +185,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
             'webhook_url' => array(
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),
-                'description' => __('URL webhook)', 'woothemes'),
+                'description' => __('URL webhook', 'woothemes'),
                 'default' => __(get_site_url() . '/?wc-api=wc_conekta_bank_transfer'),
                 'required' => true
             ),

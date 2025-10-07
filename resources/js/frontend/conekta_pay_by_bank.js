@@ -52,30 +52,31 @@ const conekta_pay_by_bank = {
 registerPaymentMethod(conekta_pay_by_bank);
 
 if (typeof window !== 'undefined') {
-    const handleBBVARedirect = () => {
+    const handleRedirect = () => {
         const urlParams = new URLSearchParams(window.location.search);
-        const bbvaRedirectUrl = urlParams.get('bbva_redirect_url');
-        const bbvaDeepLink = urlParams.get('bbva_deep_link');
+        const redirectUrl = urlParams.get('redirect_url');
+        const deepLink = urlParams.get('deep_link');
         const autoRedirect = urlParams.get('auto_redirect');
         
-        if ((bbvaRedirectUrl || bbvaDeepLink) && autoRedirect === '1') {
+        if ((redirectUrl || deepLink) && autoRedirect === '1') {
             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-            const paymentUrl = isMobile ? bbvaDeepLink : bbvaRedirectUrl;
+            const paymentUrl = isMobile ? deepLink : redirectUrl;
             
             if (paymentUrl) {
-                urlParams.delete('bbva_redirect_url');
-                urlParams.delete('bbva_deep_link');
-                urlParams.delete('auto_redirect');
-                const cleanUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+                const decodedUrl = decodeURIComponent(paymentUrl);
+                window.open(decodedUrl, '_blank', 'noopener,noreferrer');
+                
+                ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
+                const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
                 window.history.replaceState({}, document.title, cleanUrl);
             }
         }
     };
     
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', handleBBVARedirect);
+        document.addEventListener('DOMContentLoaded', handleRedirect);
     } else {
-        handleBBVARedirect();
+        handleRedirect();
     }
 }
 

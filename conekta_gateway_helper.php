@@ -427,8 +427,7 @@ function get_expired_at(int $daysToAdd): int
  */
 function get_expired_at_minutes(int $minutesToAdd): int
 {
-    $timeZone = new DateTimeZone('America/Mexico_City');
-    $currentDate = new DateTime('now', $timeZone);
+    $currentDate = new DateTime('now', new DateTimeZone('UTC'));
     $currentDate->add(new DateInterval("PT{$minutesToAdd}M"));
     return $currentDate->getTimestamp();
 }

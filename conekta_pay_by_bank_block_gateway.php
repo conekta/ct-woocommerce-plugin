@@ -216,7 +216,7 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
             'webhook_url' => array(
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),
-                'description' => __('URL webhook)', 'woothemes'),
+                'description' => __('URL webhook', 'woothemes'),
                 'default' => __(get_site_url() . '/?wc-api=wc_conekta_pay_by_bank'),
                 'required' => true
             ),
@@ -361,8 +361,8 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
             // Add BBVA URLs as query parameters for JavaScript to intercept
             $thankYouUrl = add_query_arg(
                 array(
-                    'bbva_redirect_url' => urlencode($redirectUrl),
-                    'bbva_deep_link' => urlencode($deepLink),
+                    'redirect_url' => urlencode($redirectUrl),
+                    'deep_link' => urlencode($deepLink),
                     'auto_redirect' => '1'
                 ),
                 $this->get_return_url($order)
