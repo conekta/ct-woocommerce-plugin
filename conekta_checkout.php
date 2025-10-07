@@ -30,6 +30,7 @@ function ckpg_conekta_checkout_init_your_gateway()
         include_once('conekta_cash_block_gateway.php');
         include_once('conekta_bnpl_block_gateway.php');
         include_once('conekta_bank_transfer_block_gateway.php');
+        include_once('conekta_pay_by_bank_block_gateway.php');
 
     }
 }
