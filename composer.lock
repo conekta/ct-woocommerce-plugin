@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "812c557e12c14d32cd0b7469a1c020e8",
+    "content-hash": "9c7c7212bc66fbe3fbab146cfffc7f89",
     "packages": [
         {
             "name": "conekta/conekta-php",
-            "version": "7.0.5",
+            "version": "7.0.6",
             "source": {
                 "type": "git",
                 "url": "https://github.com/conekta/conekta-php.git",
-                "reference": "952e278be46e828cff910e746923189e9d926b02"
+                "reference": "a169febf31d22c7593656180eaf7bdaf13c813e3"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/952e278be46e828cff910e746923189e9d926b02",
-                "reference": "952e278be46e828cff910e746923189e9d926b02",
+                "url": "https://api.github.com/repos/conekta/conekta-php/zipball/a169febf31d22c7593656180eaf7bdaf13c813e3",
+                "reference": "a169febf31d22c7593656180eaf7bdaf13c813e3",
                 "shasum": ""
             },
             "require": {
@@ -60,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/conekta/conekta-php/issues",
-                "source": "https://github.com/conekta/conekta-php/tree/v7.0.5"
+                "source": "https://github.com/conekta/conekta-php/tree/v7.0.6"
             },
-            "time": "2025-09-15T16:39:25+00:00"
+            "time": "2025-10-03T15:49:18+00:00"
         },
         {
             "name": "guzzlehttp/guzzle",
