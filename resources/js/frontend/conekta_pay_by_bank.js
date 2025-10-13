@@ -64,7 +64,35 @@ if (typeof window !== 'undefined') {
             
             if (paymentUrl) {
                 const decodedUrl = decodeURIComponent(paymentUrl);
-                window.open(decodedUrl, '_blank', 'noopener,noreferrer');
+                
+                if (isMobile) {
+                    // Para CUALQUIER mobile: ejecutar inmediatamente sin timeout
+                    try {
+                        const newWindow = window.open(decodedUrl, '_blank');
+                        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                            // Si window.open falla, intentar con link.click()
+                            const link = document.createElement('a');
+                            link.href = decodedUrl;
+                            link.target = '_blank';
+                            link.rel = 'noopener noreferrer';
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }
+                    } catch(e) {
+                        // Si hay error, usar link como fallback
+                        const link = document.createElement('a');
+                        link.href = decodedUrl;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    }
+                } else {
+                    // Para desktop
+                    window.open(decodedUrl, '_blank', 'noopener,noreferrer');
+                }
                 
                 ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
                 const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;

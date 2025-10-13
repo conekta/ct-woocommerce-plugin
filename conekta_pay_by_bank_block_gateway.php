@@ -124,19 +124,24 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
             $paymentUrl = $isMobile ? $deepLink : $redirectUrl;
             
             echo '<div class="woocommerce-info" style="margin-bottom: 20px;" id="bbva-payment-info">';
+            
             echo '<p style="font-size: 16px; margin-bottom: 10px;"><strong>' . __('¡Estás a un paso de completar tu compra!', 'woothemes') . '</strong></p>';
-            echo '<p id="bbva-redirect-message">' . __('Debes completar tu pago en la ventana de BBVA que se abrió automáticamente.', 'woothemes') . '</p>';
+            
+            echo '<p id="bbva-redirect-message" style="margin-bottom: 15px;">' . __('Debes completar tu pago en la ventana de BBVA que se abrió automáticamente.', 'woothemes') . '</p>';
             
             if (!empty($paymentUrl)) {
                 echo '<div id="bbva-manual-redirect" style="display: none;">';
-                echo '<p>' . __('Si la ventana no se abrió, haz clic en el botón de abajo:', 'woothemes') . '</p>';
-                echo '<p style="text-align: center; margin-top: 15px;">';
-                echo '<a href="' . esc_url($paymentUrl) . '" target="_blank" rel="noopener noreferrer" class="button" style="font-size: 16px; padding: 12px 24px;" id="bbva-pay-button">';
+                echo '<a href="' . esc_url($paymentUrl) . '" target="_blank" rel="noopener noreferrer" class="button" style="display: inline-block; font-size: 16px; padding: 12px 24px; border: 1px solid; float: none; margin: 10px 0 !important;" id="bbva-pay-button">';
                 echo __('Ir a BBVA para Pagar', 'woothemes');
                 echo '</a>';
-                echo '</p>';
                 echo '</div>';
-                
+            }
+            
+            echo '<p style="margin-top: 15px;"><strong>' . __('Referencia de Pago', 'woothemes') . ':</strong> ' . esc_html($reference) . '</p>';
+            
+            echo '</div>';
+            
+            if (!empty($paymentUrl)) {
                 echo '<script type="text/javascript">
                     (function() {
                         var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -144,30 +149,54 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
                         var deepLink = ' . json_encode($deepLink) . ';
                         var paymentUrl = isMobile ? deepLink : redirectUrl;
                         
-                        if (paymentUrl) {
-                            setTimeout(function() {
-                                var newWindow = window.open(paymentUrl, "_blank", "noopener,noreferrer");
-                                
-                                if (!isMobile && (!newWindow || newWindow.closed || typeof newWindow.closed === "undefined")) {
-                                    var manualRedirect = document.getElementById("bbva-manual-redirect");
-                                    var redirectMessage = document.getElementById("bbva-redirect-message");
-                                    
-                                    if (manualRedirect) {
-                                        manualRedirect.style.display = "block";
-                                        if (redirectMessage) {
-                                            redirectMessage.style.display = "none";
-                                        }
-                                    }
+                        function showManualButton() {
+                            var manualRedirect = document.getElementById("bbva-manual-redirect");
+                            var redirectMessage = document.getElementById("bbva-redirect-message");
+                            
+                            if (manualRedirect) {
+                                manualRedirect.style.display = "block";
+                                if (redirectMessage) {
+                                    redirectMessage.style.display = "none";
                                 }
-                            }, 500);
+                            }
+                        }
+                        
+                        if (paymentUrl) {
+                            if (isMobile) {
+                                try {
+                                    var newWindow = window.open(paymentUrl, "_blank");
+                                    if (!newWindow || newWindow.closed || typeof newWindow.closed === "undefined") {
+                                        var link = document.createElement("a");
+                                        link.href = paymentUrl;
+                                        link.target = "_blank";
+                                        link.rel = "noopener noreferrer";
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                    }
+                                } catch(e) {
+                                    var link = document.createElement("a");
+                                    link.href = paymentUrl;
+                                    link.target = "_blank";
+                                    link.rel = "noopener noreferrer";
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                }
+                                setTimeout(showManualButton, 1000);
+                            } else {
+                                setTimeout(function() {
+                                    var newWindow = window.open(paymentUrl, "_blank", "noopener,noreferrer");
+                                    
+                                    if (!newWindow || newWindow.closed || typeof newWindow.closed === "undefined") {
+                                        showManualButton();
+                                    }
+                                }, 500);
+                            }
                         }
                     })();
                 </script>';
             }
-            
-            echo '<hr style="margin: 20px 0;">';
-            echo '<p><strong>' . __('Referencia de Pago', 'woothemes') . ':</strong> ' . esc_html($reference) . '</p>';
-            echo '</div>';
         }
     }
 
