@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.3
+Stable tag: 5.4.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,13 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.4 =
+* Fix: Resolved issue where classic checkout was not sending product names correctly in 3DS validation
+* Fix: Eliminated 'Temporary 3DS validation' placeholder appearing in classic checkout orders
+* Enhancement: Classic checkout now sends real cart item data (product names, quantities, totals) to Conekta API
+* Enhancement: Improved cart data handling consistency between WooCommerce Blocks and Classic checkout
+* Enhancement: Added fallback mechanism to retrieve cart data from WooCommerce session when not provided
+
 = 5.4.3 =
 * Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
 * Fix: Corrected double conversion to cents issue that caused incorrect shipping amounts

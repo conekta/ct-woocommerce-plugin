@@ -1,3 +1,10 @@
+## [5.4.4]() - 2025-10-13
+- Fix: Resolved issue where classic checkout was not sending product names correctly in 3DS validation
+- Fix: Eliminated 'Temporary 3DS validation' placeholder appearing in classic checkout orders
+- Enhancement: Classic checkout now sends real cart item data (product names, quantities, totals) to Conekta API
+- Enhancement: Improved cart data handling consistency between WooCommerce Blocks and Classic checkout
+- Enhancement: Added fallback mechanism to retrieve cart data from WooCommerce session when not provided
+
 ## [5.4.3]() - 2025-09-26
 - Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
 - Fix: Corrected double conversion to cents issue that caused incorrect shipping amounts
