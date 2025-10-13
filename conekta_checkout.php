@@ -98,7 +98,7 @@ function ckpg_enqueue_classic_checkout_script() {
                     $product = $cart_item['data'];
                     $cart_items[] = [
                         'id' => $cart_item['product_id'],
-                        'name' => $product->get_name(),
+                        'name' => $product->get_name() ?? '',
                         'quantity' => $cart_item['quantity'],
                         'total' => $cart_item['line_total'] * 100, // Convert to cents
                         'variation_id' => $cart_item['variation_id'] ?? null
