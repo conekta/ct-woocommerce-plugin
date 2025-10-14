@@ -140,7 +140,7 @@ class WC_Conekta_REST_API {
                         }
                         
                         // Add items from cart
-                        if (isset($cart_data['items']) && is_array($cart_data['items'])) {
+                        if (isset($cart_data['items']) && is_array($cart_data['items']) && !empty($cart_data['items'])) {
                             foreach ($cart_data['items'] as $item) {
                                 if (isset($item['id'], $item['quantity'])) {
                                     $product = wc_get_product($item['id']);
@@ -157,15 +157,36 @@ class WC_Conekta_REST_API {
                                 }
                             }
                         } else {
-                            // If no items provided, add a placeholder item
-                            $item = new WC_Order_Item_Product();
-                            $total = isset($cart_data['total']) ? ($cart_data['total'] / 100) : 1.00; // Convert from cents to currency units
-                            $item->set_props([
-                                'name' => 'Temporary 3DS validation',
-                                'quantity' => 1,
-                                'total' => $total,
-                            ]);
-                            $order->add_item($item);
+                            // If no items provided, try to get from current WooCommerce cart
+                            $cart_added = false;
+                            if (WC()->cart && !WC()->cart->is_empty()) {
+                                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
+                                    $product = $cart_item['data'];
+                                    if ($product) {
+                                        $item_id = $order->add_product(
+                                            $product, 
+                                            $cart_item['quantity'],
+                                            [
+                                                'variation' => isset($cart_item['variation_id']) ? wc_get_product($cart_item['variation_id']) : null,
+                                                'total' => $cart_item['line_total']
+                                            ]
+                                        );
+                                        $cart_added = true;
+                                    }
+                                }
+                            }
+                            
+                            // If still no items, add a placeholder item
+                            if (!$cart_added) {
+                                $item = new WC_Order_Item_Product();
+                                $total = isset($cart_data['total']) ? ($cart_data['total'] / 100) : 1.00; // Convert from cents to currency units
+                                $item->set_props([
+                                    'name' => 'Temporary 3DS validation',
+                                    'quantity' => 1,
+                                    'total' => $total,
+                                ]);
+                                $order->add_item($item);
+                            }
                         }
                         
                         // Set payment method

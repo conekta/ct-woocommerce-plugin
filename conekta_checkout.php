@@ -4,7 +4,7 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.
-Version: 5.4.3
+Version: 5.4.4
 Requires at least: 6.6.2
 Requires PHP: 7.4
 Author: Conekta.io
@@ -91,11 +91,28 @@ function ckpg_enqueue_classic_checkout_script() {
             $short_locale = substr($locale, 0, 2);
             $gateway = $available_gateways['conekta'];
 
+            // Get cart items for classic checkout
+            $cart_items = [];
+            if (WC()->cart && !WC()->cart->is_empty()) {
+                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
+                    $product = $cart_item['data'];
+                    $cart_items[] = [
+                        'id' => $cart_item['product_id'],
+                        'name' => $product->get_name() ?? '',
+                        'quantity' => $cart_item['quantity'],
+                        'total' => $cart_item['line_total'] * 100, // Convert to cents
+                        'variation_id' => $cart_item['variation_id'] ?? null
+                    ];
+                }
+            }
+
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
                 'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
                 'amount' => WC()->cart->get_total('edit') * 100,
+                'currency' => get_woocommerce_currency(),
+                'cart_items' => $cart_items,
                 'locale' => $short_locale,
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode

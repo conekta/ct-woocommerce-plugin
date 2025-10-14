@@ -203,10 +203,17 @@ const threeDsHandler = {
 
         // Add cart data from available settings
         if (conekta_settings.amount) {
-          requestData.cart_data = {
-            total: Number(conekta_settings.amount), // Convert to cents for Conekta API
+          const cartData = {
+            total: Number(conekta_settings.amount), // Already in cents from PHP
             currency: conekta_settings.currency || 'MXN'
-          };  
+          };
+          
+          // Add cart items if available
+          if (conekta_settings.cart_items && conekta_settings.cart_items.length > 0) {
+            cartData.items = conekta_settings.cart_items;
+          }
+          
+          requestData.cart_data = cartData;
         }
       }
       
