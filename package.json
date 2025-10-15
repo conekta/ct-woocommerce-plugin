@@ -1,6 +1,6 @@
 {
   "name": "conekta-payment-gateway",
-  "version": "5.4.4",
+  "version": "5.4.5",
   "description": "<div align=\"center\">",
   "main": "index.js",
   "directories": {

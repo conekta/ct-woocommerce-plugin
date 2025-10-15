@@ -1,16 +1,16 @@
+## [5.4.5]() - 2025-10-15
+- Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
+- Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
+- Feature: Added order expiration configuration in minutes (10-1440 min) for Pay by Bank
+- Enhancement: Automatic payment window opening with intelligent fallback for blocked popups
+- Enhancement: Improved user experience with seamless BBVA payment flow
+
 ## [5.4.4]() - 2025-10-13
 - Fix: Resolved issue where classic checkout was not sending product names correctly in 3DS validation
 - Fix: Eliminated 'Temporary 3DS validation' placeholder appearing in classic checkout orders
 - Enhancement: Classic checkout now sends real cart item data (product names, quantities, totals) to Conekta API
 - Enhancement: Improved cart data handling consistency between WooCommerce Blocks and Classic checkout
 - Enhancement: Added fallback mechanism to retrieve cart data from WooCommerce session when not provided
-
-## [5.4.4]() - 2025-10-07
-- Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
-- Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
-- Feature: Added order expiration configuration in minutes (10-1440 min) for Pay by Bank
-- Enhancement: Automatic payment window opening with intelligent fallback for blocked popups
-- Enhancement: Improved user experience with seamless BBVA payment flow
 
 ## [5.4.3]() - 2025-09-26
 - Fix: Resolved shipping_lines amount not being sent correctly for credit card payments
