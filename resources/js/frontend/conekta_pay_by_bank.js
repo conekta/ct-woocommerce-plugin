@@ -103,19 +103,15 @@ if (typeof window !== 'undefined') {
             if (paymentUrl) {
                 const decodedUrl = decodeURIComponent(paymentUrl);
 
-                // Validate decodedUrl before navigation.
                 if (!isAllowedRedirectUrl(decodedUrl)) {
-                    // Optionally show error, alert, or just silently ignore
                     console.warn('Blocked untrusted redirect URL:', decodedUrl);
                     return;
                 }
 
                 if (isMobile) {
-                    // Para CUALQUIER mobile: ejecutar inmediatamente sin timeout
                     try {
                         const newWindow = window.open(decodedUrl, '_blank');
                         if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-                            // Si window.open falla, intentar con link.click()
                             const link = document.createElement('a');
                             link.href = decodedUrl;
                             link.target = '_blank';
@@ -125,7 +121,6 @@ if (typeof window !== 'undefined') {
                             document.body.removeChild(link);
                         }
                     } catch(e) {
-                        // Si hay error, usar link como fallback
                         const link = document.createElement('a');
                         link.href = decodedUrl;
                         link.target = '_blank';
@@ -135,17 +130,12 @@ if (typeof window !== 'undefined') {
                         document.body.removeChild(link);
                     }
                 } else {
-                    // Para desktop
-            } else {
-                // Optionally, inform the user if a redirect was blocked
-                // alert('Untrusted or unsupported redirect URL. Please contact support if you believe this is an error.');
                     window.open(decodedUrl, '_blank', 'noopener,noreferrer');
                 }
-                
-                ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
-                const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
-                window.history.replaceState({}, document.title, cleanUrl);
-            }
+
+            ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
+            const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+            window.history.replaceState({}, document.title, cleanUrl);
         }
     };
     
