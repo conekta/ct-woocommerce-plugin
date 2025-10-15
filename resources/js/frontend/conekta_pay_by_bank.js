@@ -52,25 +52,38 @@ const conekta_pay_by_bank = {
 registerPaymentMethod(conekta_pay_by_bank);
 
 if (typeof window !== 'undefined') {
-    // Helper to validate allowed redirect URLs.
-    // Only allow specific schemes (https, http, app-specific deep links), or relative URLs.
+    // Explicit whitelist of allowed redirect URI paths/names for security.
+    // Example: only allow redirects to these internal routes or official deep links.
+    const ALLOWED_REDIRECT_URIS = [
+        '/order-received/', // Internal success page
+        '/checkout/order-received/', // WooCommerce typical page
+        '/thank-you/', // Internal
+        // You can add more allowed internal paths here.
+    ];
+    const ALLOWED_DEEP_LINK_PREFIXES = [
+        'bankapp://',
+        'intent://'
+        // Add any additional trusted deep-link prefixes here.
+    ];
+
     function isAllowedRedirectUrl(url) {
         try {
-            // Allow (a) absolute URLs with http/https, pointing to the same origin, or (b) specific deep-link schemes
-            const allowedSchemes = ['https:', 'http:', 'bankapp:', 'intent:'];
-            // URLs like bankapp://..., intent://..., or https://<current-host>/...
+            // Only allow relative URLs that exactly match known safe endpoints.
             if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(url)) {
-                // Has a protocol, check if it is allowed
-                const parsed = new URL(url, window.location.origin);
-                // If http(s), ensure it's current origin; if deep-link, allow if in allowedSchemes
-                if (['https:', 'http:'].includes(parsed.protocol)) {
-                    return parsed.origin === window.location.origin;
-                } else {
-                    return allowedSchemes.includes(parsed.protocol);
+                // URI with protocol: allow deep links only if prefix matches whitelist
+                for (const prefix of ALLOWED_DEEP_LINK_PREFIXES) {
+                    if (url.startsWith(prefix)) return true;
                 }
+                // Absolute http(s), allow *only* same-origin AND only if pathname matches allowed list
+                const parsed = new URL(url, window.location.origin);
+                if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.origin === window.location.origin) {
+                    // Check if path starts with an allowed entry
+                    return ALLOWED_REDIRECT_URIS.some((allowed) => parsed.pathname.startsWith(allowed));
+                }
+                return false;
             } else {
-                // No scheme = relative URL, consider safe (optional: further restrict if desired)
-                return true;
+                // Relative URL, allow only if starts with allowed redirect entries
+                return ALLOWED_REDIRECT_URIS.some((allowed) => url.startsWith(allowed));
             }
         } catch (e) {
             return false;
@@ -123,6 +136,9 @@ if (typeof window !== 'undefined') {
                     }
                 } else {
                     // Para desktop
+            } else {
+                // Optionally, inform the user if a redirect was blocked
+                // alert('Untrusted or unsupported redirect URL. Please contact support if you believe this is an error.');
                     window.open(decodedUrl, '_blank', 'noopener,noreferrer');
                 }
                 
