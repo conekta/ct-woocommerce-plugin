@@ -52,6 +52,31 @@ const conekta_pay_by_bank = {
 registerPaymentMethod(conekta_pay_by_bank);
 
 if (typeof window !== 'undefined') {
+    // Helper to validate allowed redirect URLs.
+    // Only allow specific schemes (https, http, app-specific deep links), or relative URLs.
+    function isAllowedRedirectUrl(url) {
+        try {
+            // Allow (a) absolute URLs with http/https, pointing to the same origin, or (b) specific deep-link schemes
+            const allowedSchemes = ['https:', 'http:', 'bankapp:', 'intent:'];
+            // URLs like bankapp://..., intent://..., or https://<current-host>/...
+            if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(url)) {
+                // Has a protocol, check if it is allowed
+                const parsed = new URL(url, window.location.origin);
+                // If http(s), ensure it's current origin; if deep-link, allow if in allowedSchemes
+                if (['https:', 'http:'].includes(parsed.protocol)) {
+                    return parsed.origin === window.location.origin;
+                } else {
+                    return allowedSchemes.includes(parsed.protocol);
+                }
+            } else {
+                // No scheme = relative URL, consider safe (optional: further restrict if desired)
+                return true;
+            }
+        } catch (e) {
+            return false;
+        }
+    }
+    
     const handleRedirect = () => {
         const urlParams = new URLSearchParams(window.location.search);
         const redirectUrl = urlParams.get('redirect_url');
@@ -64,7 +89,14 @@ if (typeof window !== 'undefined') {
             
             if (paymentUrl) {
                 const decodedUrl = decodeURIComponent(paymentUrl);
-                
+
+                // Validate decodedUrl before navigation.
+                if (!isAllowedRedirectUrl(decodedUrl)) {
+                    // Optionally show error, alert, or just silently ignore
+                    console.warn('Blocked untrusted redirect URL:', decodedUrl);
+                    return;
+                }
+
                 if (isMobile) {
                     // Para CUALQUIER mobile: ejecutar inmediatamente sin timeout
                     try {
