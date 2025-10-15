@@ -133,9 +133,10 @@ if (typeof window !== 'undefined') {
                     window.open(decodedUrl, '_blank', 'noopener,noreferrer');
                 }
 
-            ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
-            const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
-            window.history.replaceState({}, document.title, cleanUrl);
+                ['redirect_url', 'deep_link', 'auto_redirect'].forEach(param => urlParams.delete(param));
+                const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
         }
     };
     
