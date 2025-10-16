@@ -147,7 +147,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
             'webhook_url' => array(
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),
-                'description' => __('URL webhook)', 'woothemes'),
+                'description' => __('URL webhook', 'woothemes'),
                 'default' => __(get_site_url() . '/?wc-api=wc_conekta_bnpl'),
                 'required' => true
             ),

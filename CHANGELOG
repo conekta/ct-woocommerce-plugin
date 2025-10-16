@@ -1,3 +1,11 @@
+5.4.5, 2025-10-15
+-------------------------------------
+- Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
+- Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
+- Feature: Added order expiration configuration in minutes (10-1440 min) for Pay by Bank
+- Enhancement: Automatic payment window opening with intelligent fallback for blocked popups
+- Enhancement: Improved user experience with seamless BBVA payment flow
+
 5.4.4, 2025-10-13
 - Fix: Resolved issue where classic checkout was not sending product names correctly in 3DS validation
 - Fix: Eliminated 'Temporary 3DS validation' placeholder appearing in classic checkout orders
