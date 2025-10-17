@@ -1,3 +1,6 @@
+## [5.4.6]() - 2025-10-17
+- Feature: Updated version
+
 ## [5.4.5]() - 2025-10-15
 - Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
 - Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
