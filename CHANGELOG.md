@@ -1,5 +1,5 @@
 ## [5.4.6]() - 2025-10-17
-- Feature: Updated version
+- Chore: Re-release of the plugin to address deployment configuration
 
 ## [5.4.5]() - 2025-10-15
 - Feature: Added BBVA Pay by Bank (Pago Directo) payment method support

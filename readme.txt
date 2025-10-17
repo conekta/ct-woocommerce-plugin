@@ -48,7 +48,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 5.4.6 =
-* Feature: Updated version
+* Chore: Re-release of the plugin to address deployment configuration
 = 5.4.5 =
 * Feature: Added BBVA Pay by Bank (Pago Directo) payment method support
 * Feature: Automatic device detection for payment redirect (desktop uses web URL, mobile uses deep link)
