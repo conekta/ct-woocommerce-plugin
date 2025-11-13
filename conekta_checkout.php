@@ -114,8 +114,7 @@ function ckpg_enqueue_classic_checkout_script() {
             
             if (WC()->cart && !WC()->cart->is_empty()) {
                 // Get shipping total (already calculated by WooCommerce)
-                $shipping_cost = WC()->cart->get_shipping_total() * 100; // Convert to cents
-                
+                $shipping_cost = (int) round(WC()->cart->get_shipping_total() * 100); // Convert to cents
                 // Get chosen shipping method
                 $chosen_methods = WC()->session->get('chosen_shipping_methods');
                 if (!empty($chosen_methods) && is_array($chosen_methods)) {
