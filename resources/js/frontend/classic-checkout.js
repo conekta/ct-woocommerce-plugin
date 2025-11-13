@@ -190,7 +190,7 @@ const threeDsHandler = {
               const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
               if (costElement) {
                 const costText = costElement.textContent.replace(/[^\d.,]/g, '');
-                methodCost = parseFloat(costText.replace(',', '.')) * 100 || 0; // Convert to cents
+                methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0; // Convert to cents
               }
             }
             
@@ -198,7 +198,7 @@ const threeDsHandler = {
             if (methodCost === 0 && methodLabel) {
               const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
               if (costMatch) {
-                methodCost = parseFloat(costMatch[1].replace(',', '.')) * 100 || 0; // Convert to cents
+                methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0; // Convert to cents
               }
             }
             
@@ -634,7 +634,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
           if (costElement) {
             const costText = costElement.textContent.replace(/[^\d.,]/g, '');
-            methodCost = parseFloat(costText.replace(',', '.')) * 100 || 0; // Convert to cents
+            methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0; // Convert to cents
           }
         }
         
@@ -642,7 +642,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (methodCost === 0 && methodLabel) {
           const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
           if (costMatch) {
-            methodCost = parseFloat(costMatch[1].replace(',', '.')) * 100 || 0; // Convert to cents
+            methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0; // Convert to cents
           }
         }
         
