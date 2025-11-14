@@ -4,7 +4,7 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.
-Version: 5.4.6
+Version: 5.4.7
 Requires at least: 6.6.2
 Requires PHP: 7.4
 Author: Conekta.io
@@ -107,6 +107,31 @@ function ckpg_enqueue_classic_checkout_script() {
                 }
             }
 
+            // Get shipping information
+            $shipping_cost = 0;
+            $shipping_method_id = '';
+            $shipping_method_label = '';
+            
+            if (WC()->cart && !WC()->cart->is_empty()) {
+                // Get shipping total (already calculated by WooCommerce)
+                $shipping_cost = (int) round(WC()->cart->get_shipping_total() * 100); // Convert to cents
+                // Get chosen shipping method
+                $chosen_methods = WC()->session->get('chosen_shipping_methods');
+                if (!empty($chosen_methods) && is_array($chosen_methods)) {
+                    $shipping_method_id = $chosen_methods[0];
+                    
+                    // Get shipping packages to find the label
+                    $packages = WC()->shipping()->get_packages();
+                    foreach ($packages as $package_key => $package) {
+                        if (isset($package['rates'][$shipping_method_id])) {
+                            $rate = $package['rates'][$shipping_method_id];
+                            $shipping_method_label = $rate->get_label();
+                            break;
+                        }
+                    }
+                }
+            }
+
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
@@ -114,6 +139,9 @@ function ckpg_enqueue_classic_checkout_script() {
                 'amount' => WC()->cart->get_total('edit') * 100,
                 'currency' => get_woocommerce_currency(),
                 'cart_items' => $cart_items,
+                'shipping_cost' => $shipping_cost,
+                'shipping_method_id' => $shipping_method_id,
+                'shipping_method_label' => $shipping_method_label,
                 'locale' => $short_locale,
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode

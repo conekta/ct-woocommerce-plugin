@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.6
+Stable tag: 5.4.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,10 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.7 =
+* Fix: Improved shipping method handling in classic checkout by prioritizing conekta_settings
+* Fix: Enhanced fallback logic for label and cost extraction in shipping information
+* Enhancement: Added shipping information handling in classic checkout script
 = 5.4.6 =
 * Chore: Re-release of the plugin to address deployment configuration
 = 5.4.5 =
