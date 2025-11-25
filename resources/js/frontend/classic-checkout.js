@@ -210,6 +210,11 @@ const threeDsHandler = {
           }
         }
 
+        // Add discount_lines from conekta_settings
+        if (conekta_settings.discount_lines && conekta_settings.discount_lines.length > 0) {
+          requestData.discount_lines = conekta_settings.discount_lines;
+        }
+
         // Add cart data from available settings
         if (conekta_settings.amount) {
           const cartData = {
