@@ -89,6 +89,7 @@ class WC_Conekta_REST_API {
                 $billing_data = isset($params['billing_data']) ? $params['billing_data'] : null;
                 $shipping_data = isset($params['shipping_data']) ? $params['shipping_data'] : null;
                 $shipping_method = isset($params['shipping_method']) ? $params['shipping_method'] : null;
+                $discount_lines = isset($params['discount_lines']) ? $params['discount_lines'] : null;
                 
                 if (($cart_data || $billing_data) && ($is_blocks_context || $is_classic_context)) {
                     // Create an order from the cart and billing data provided by blocks or classic checkout
@@ -137,6 +138,44 @@ class WC_Conekta_REST_API {
                                 'total' => $shipping_cost
                             ]);
                             $order->add_item($shipping_item);
+                        }
+                        
+                        // Add discount_lines (coupons) from provided data
+                        if ($discount_lines && is_array($discount_lines)) {
+                            foreach ($discount_lines as $discount) {
+                                if (isset($discount['code']) && isset($discount['amount'])) {
+                                    $coupon_item = new WC_Order_Item_Coupon();
+                                    $discount_amount = floatval($discount['amount']) / 100; // Convert from cents to currency units
+                                    $coupon_item->set_props([
+                                        'code' => sanitize_text_field($discount['code']),
+                                        'discount' => $discount_amount,
+                                        'discount_tax' => 0
+                                    ]);
+                                    $order->add_item($coupon_item);
+                                }
+                            }
+                        } else {
+                            // If discount_lines not provided, try to get from WooCommerce cart
+                            if (WC()->cart && !WC()->cart->is_empty()) {
+                                $applied_coupons = WC()->cart->get_applied_coupons();
+                                if (!empty($applied_coupons)) {
+                                    foreach ($applied_coupons as $coupon_code) {
+                                        $coupon = new WC_Coupon($coupon_code);
+                                        if ($coupon->is_valid()) {
+                                            $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+                                            $discount_tax = WC()->cart->get_coupon_discount_tax_amount($coupon_code);
+                                            
+                                            $coupon_item = new WC_Order_Item_Coupon();
+                                            $coupon_item->set_props([
+                                                'code' => $coupon_code,
+                                                'discount' => $discount_amount,
+                                                'discount_tax' => $discount_tax
+                                            ]);
+                                            $order->add_item($coupon_item);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         
                         // Add items from cart
