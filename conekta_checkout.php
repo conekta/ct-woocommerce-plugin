@@ -132,6 +132,25 @@ function ckpg_enqueue_classic_checkout_script() {
                 }
             }
 
+            // Get discount lines (coupons)
+            $discount_lines = [];
+            if (WC()->cart && !WC()->cart->is_empty()) {
+                $applied_coupons = WC()->cart->get_applied_coupons();
+                if (!empty($applied_coupons)) {
+                    foreach ($applied_coupons as $coupon_code) {
+                        $coupon = new WC_Coupon($coupon_code);
+                        if ($coupon->is_valid()) {
+                            $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+                            $discount_lines[] = [
+                                'code' => $coupon_code,
+                                'amount' => (int) round($discount_amount * 100), // Convert to cents
+                                'type' => 'coupon'
+                            ];
+                        }
+                    }
+                }
+            }
+
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
@@ -142,6 +161,7 @@ function ckpg_enqueue_classic_checkout_script() {
                 'shipping_cost' => $shipping_cost,
                 'shipping_method_id' => $shipping_method_id,
                 'shipping_method_label' => $shipping_method_label,
+                'discount_lines' => $discount_lines,
                 'locale' => $short_locale,
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode
