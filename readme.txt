@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.7
+Stable tag: 5.4.8
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,12 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.8 =
+* Fix: Resolved critical issue where discount_lines were not being sent to Conekta in 3DS orders
+* Fix: Coupons now correctly apply to orders created during 3DS authentication flow
+* Enhancement: Added automatic coupon detection and application from WooCommerce cart for both Classic and Blocks checkout
+* Enhancement: Implemented intelligent fallback mechanism to capture discounts when frontend data is unavailable
+* Enhancement: Improved discount handling consistency between WooCommerce Blocks and Classic checkout with 3DS enabled
 = 5.4.7 =
 * Fix: Improved shipping method handling in classic checkout by prioritizing conekta_settings
 * Fix: Enhanced fallback logic for label and cost extraction in shipping information
