@@ -1,3 +1,7 @@
+## [5.4.9]() - 2026-03-25
+- Fix: Resolved 404 errors on checkout and 3DS endpoints when WordPress is installed in a subdirectory
+- Fix: Replaced hardcoded URLs with dynamic WordPress functions (WC_AJAX::get_endpoint and rest_url) for Classic and Blocks checkout
+
 ## [5.4.8]() - 2025-11-25
 - Fix: Resolved critical issue where discount_lines were not being sent to Conekta in 3DS orders
 - Fix: Coupons now correctly apply to orders created during 3DS authentication flow
