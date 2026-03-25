@@ -203,7 +203,7 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             }
         }
         
-        const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {
+        const response = await fetch(settings.rest_url + 'create-3ds-order', {
             method: 'POST',
             headers,
             body: JSON.stringify(requestData),

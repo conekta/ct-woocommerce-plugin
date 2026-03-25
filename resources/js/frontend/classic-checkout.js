@@ -231,7 +231,7 @@ const threeDsHandler = {
         }
       }
       
-      const response = await fetch('/wp-json/conekta/v1/create-3ds-order', {
+      const response = await fetch(conekta_settings.rest_url + 'create-3ds-order', {
         method: 'POST',
         headers,
         body: JSON.stringify(requestData),
@@ -332,7 +332,7 @@ const formHandler = {
     try {
       utils.setLoading(true);
       const response = await fetch(
-        window.location.origin + wc_checkout_params.checkout_url,
+        conekta_settings.checkout_url,
         {
           method: "POST",
           body: formData,
