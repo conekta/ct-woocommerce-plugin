@@ -464,6 +464,10 @@ const ContentConekta = (props) => {
     const locale = settings.locale ?? 'es';
     const { eventRegistration, emitResponse } = props;
     const conektaSubmitFunction = useRef(null);
+    // Always keep a reference to the latest props so that the onPaymentSetup
+    // callback (registered once with [] deps) never reads stale coupon / cart data.
+    const propsRef = useRef(props);
+    propsRef.current = props;
     const { onPaymentSetup } = eventRegistration;
     const { loadScript } = useComponentScript();
     const [processing, setProcessing] = useState(false);
@@ -513,7 +517,9 @@ const ContentConekta = (props) => {
                         try {
                             const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
                             
-                            const orderResponse = await create3dsOrder(token, null, msiOption, props);
+                            // Use propsRef.current so we always have the latest cart/coupon
+                            // data at submission time, not the stale snapshot from mount.
+                            const orderResponse = await create3dsOrder(token, null, msiOption, propsRef.current);
                             
                             if (orderResponse.next_action) {
                                 const redirectUrl = orderResponse.next_action.redirect_url;
