@@ -51,23 +51,23 @@ add_action('wp_enqueue_scripts', 'ckpg_enqueue_classic_checkout_script');
 add_filter('woocommerce_update_order_review_fragments', 'ckpg_add_conekta_cart_fragments');
 
 /**
- * Inject discount_lines and cart_total into WooCommerce checkout AJAX fragments.
- * This allows the classic checkout JS to read updated coupon data
- * when a discount is applied directly on the checkout page.
+ * Returns the applied coupon discount lines from the current WooCommerce cart,
+ * formatted for the Conekta API (amounts in cents).
  */
-function ckpg_add_conekta_cart_fragments($fragments) {
+function ckpg_get_cart_discount_lines(): array {
+    $discount_lines  = [];
+
     if (!WC()->cart) {
-        return $fragments;
+        return $discount_lines;
     }
 
-    $discount_lines = [];
     $applied_coupons = WC()->cart->get_applied_coupons();
 
     if (!empty($applied_coupons)) {
         foreach ($applied_coupons as $coupon_code) {
             $coupon = new WC_Coupon($coupon_code);
             if ($coupon->is_valid()) {
-                $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+                $discount_amount  = WC()->cart->get_coupon_discount_amount($coupon_code);
                 $discount_lines[] = [
                     'code'   => $coupon_code,
                     'amount' => (int) round($discount_amount * 100),
@@ -77,7 +77,20 @@ function ckpg_add_conekta_cart_fragments($fragments) {
         }
     }
 
-    $fragments['conekta_discount_lines'] = wp_json_encode($discount_lines);
+    return $discount_lines;
+}
+
+/**
+ * Inject discount_lines and cart_total into WooCommerce checkout AJAX fragments.
+ * This allows the classic checkout JS to read updated coupon data
+ * when a discount is applied directly on the checkout page.
+ */
+function ckpg_add_conekta_cart_fragments($fragments) {
+    if (!WC()->cart) {
+        return $fragments;
+    }
+
+    $fragments['conekta_discount_lines'] = wp_json_encode(ckpg_get_cart_discount_lines());
     $fragments['conekta_cart_total']     = (int) round(WC()->cart->get_total('edit') * 100);
 
     return $fragments;
@@ -167,23 +180,7 @@ function ckpg_enqueue_classic_checkout_script() {
             }
 
             // Get discount lines (coupons)
-            $discount_lines = [];
-            if (WC()->cart && !WC()->cart->is_empty()) {
-                $applied_coupons = WC()->cart->get_applied_coupons();
-                if (!empty($applied_coupons)) {
-                    foreach ($applied_coupons as $coupon_code) {
-                        $coupon = new WC_Coupon($coupon_code);
-                        if ($coupon->is_valid()) {
-                            $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
-                            $discount_lines[] = [
-                                'code' => $coupon_code,
-                                'amount' => (int) round($discount_amount * 100), // Convert to cents
-                                'type' => 'coupon'
-                            ];
-                        }
-                    }
-                }
-            }
+            $discount_lines = ckpg_get_cart_discount_lines();
 
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
