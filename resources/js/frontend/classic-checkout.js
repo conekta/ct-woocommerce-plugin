@@ -618,46 +618,68 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  document.body.addEventListener("updated_checkout", () => {
-    // Update shipping information from the updated checkout
-    const form = document.querySelector(FORM_SELECTOR);
-    if (form) {
-      const shippingMethodInput = form.querySelector('input[name^="shipping_method"]:checked');
-      if (shippingMethodInput) {
-        const methodValue = shippingMethodInput.value;
-        let methodLabel = methodValue;
-        let methodCost = 0;
-        
-        // Try to get label and cost from the DOM
-        const methodRow = shippingMethodInput.closest('tr, li, .wc-shipping-row');
-        if (methodRow) {
-          const labelElement = methodRow.querySelector('label, .shipping-method-label, .shipping-name');
-          if (labelElement) {
-            methodLabel = labelElement.textContent.trim();
-          }
-          
-          const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
-          if (costElement) {
-            const costText = costElement.textContent.replace(/[^\d.,]/g, '');
-            methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0; // Convert to cents
+  // WooCommerce fires `updated_checkout` as a jQuery event. Native addEventListener
+  // does NOT receive jQuery events, so we must use jQuery here.
+  if (typeof jQuery !== 'undefined') {
+    jQuery(document.body).on('updated_checkout', function (event, data) {
+      // --- Update discount lines and cart total from WC fragments ---
+      // WooCommerce passes the AJAX response as `data`. The PHP filter
+      // `woocommerce_update_order_review_fragments` injects conekta_discount_lines
+      // and conekta_cart_total so we always have fresh values.
+      if (data && data.fragments) {
+        if (data.fragments.conekta_discount_lines !== undefined) {
+          try {
+            conekta_settings.discount_lines = JSON.parse(data.fragments.conekta_discount_lines);
+          } catch (e) {
+            conekta_settings.discount_lines = [];
           }
         }
-        
-        // If we still don't have cost, try to extract from label
-        if (methodCost === 0 && methodLabel) {
-          const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
-          if (costMatch) {
-            methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0; // Convert to cents
+
+        if (data.fragments.conekta_cart_total !== undefined) {
+          const newAmount = parseInt(data.fragments.conekta_cart_total, 10);
+          if (!isNaN(newAmount)) {
+            conekta_settings.amount = newAmount;
           }
         }
-        
-        // Update conekta_settings with the new shipping information
-        conekta_settings.shipping_method_id = methodValue;
-        conekta_settings.shipping_method_label = methodLabel;
-        conekta_settings.shipping_cost = methodCost;
       }
-    }
-    
-    setTimeout(conektaInitializer.initialize, POLLING_INTERVAL);
-  });
+
+      // --- Update shipping information from the updated checkout ---
+      const form = document.querySelector(FORM_SELECTOR);
+      if (form) {
+        const shippingMethodInput = form.querySelector('input[name^="shipping_method"]:checked');
+        if (shippingMethodInput) {
+          const methodValue = shippingMethodInput.value;
+          let methodLabel = methodValue;
+          let methodCost = 0;
+
+          const methodRow = shippingMethodInput.closest('tr, li, .wc-shipping-row');
+          if (methodRow) {
+            const labelElement = methodRow.querySelector('label, .shipping-method-label, .shipping-name');
+            if (labelElement) {
+              methodLabel = labelElement.textContent.trim();
+            }
+
+            const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
+            if (costElement) {
+              const costText = costElement.textContent.replace(/[^\d.,]/g, '');
+              methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0;
+            }
+          }
+
+          if (methodCost === 0 && methodLabel) {
+            const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
+            if (costMatch) {
+              methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0;
+            }
+          }
+
+          conekta_settings.shipping_method_id    = methodValue;
+          conekta_settings.shipping_method_label = methodLabel;
+          conekta_settings.shipping_cost         = methodCost;
+        }
+      }
+
+      setTimeout(conektaInitializer.initialize, POLLING_INTERVAL);
+    });
+  }
 });
