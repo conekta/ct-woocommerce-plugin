@@ -631,6 +631,7 @@ document.addEventListener("DOMContentLoaded", () => {
           try {
             conekta_settings.discount_lines = JSON.parse(data.fragments.conekta_discount_lines);
           } catch (e) {
+            console.error('Conekta: Error parsing conekta_discount_lines:', e);
             conekta_settings.discount_lines = [];
           }
         }
