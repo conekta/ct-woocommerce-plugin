@@ -48,6 +48,40 @@ function plugin_action_links( $links  ): array
 }
 
 add_action('wp_enqueue_scripts', 'ckpg_enqueue_classic_checkout_script');
+add_filter('woocommerce_update_order_review_fragments', 'ckpg_add_conekta_cart_fragments');
+
+/**
+ * Inject discount_lines and cart_total into WooCommerce checkout AJAX fragments.
+ * This allows the classic checkout JS to read updated coupon data
+ * when a discount is applied directly on the checkout page.
+ */
+function ckpg_add_conekta_cart_fragments($fragments) {
+    if (!WC()->cart) {
+        return $fragments;
+    }
+
+    $discount_lines = [];
+    $applied_coupons = WC()->cart->get_applied_coupons();
+
+    if (!empty($applied_coupons)) {
+        foreach ($applied_coupons as $coupon_code) {
+            $coupon = new WC_Coupon($coupon_code);
+            if ($coupon->is_valid()) {
+                $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+                $discount_lines[] = [
+                    'code'   => $coupon_code,
+                    'amount' => (int) round($discount_amount * 100),
+                    'type'   => 'coupon',
+                ];
+            }
+        }
+    }
+
+    $fragments['conekta_discount_lines'] = wp_json_encode($discount_lines);
+    $fragments['conekta_cart_total']     = (int) round(WC()->cart->get_total('edit') * 100);
+
+    return $fragments;
+}
 
 function ckpg_enqueue_classic_checkout_script() {
     if (is_checkout() && ! is_wc_endpoint_url()) {
