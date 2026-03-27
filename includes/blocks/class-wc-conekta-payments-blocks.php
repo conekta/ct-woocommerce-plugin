@@ -88,6 +88,7 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
             'three_ds_mode'                  => $this->gateway->three_ds_mode,
             'rest_url'                       => esc_url_raw(rest_url('conekta/v1/')),
             'create_3ds_order_url'           => \WC_AJAX::get_endpoint('conekta_create_3ds_order'),
+            'nonce'                          => wp_create_nonce('conekta-create-3ds-order'),
         ];
     }
 }

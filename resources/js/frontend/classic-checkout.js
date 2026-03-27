@@ -82,18 +82,14 @@ const threeDsHandler = {
         'Content-Type': 'application/json',
       };
       
-      // Add nonce if available
-      if (conekta_settings.wpApiNonce) {
-        headers['X-WP-Nonce'] = conekta_settings.wpApiNonce;
-      }
-      
       // Get order_id from the checkout form if available
       const form = document.querySelector(FORM_SELECTOR);
       const orderId = form.querySelector('#order_id')?.value;
       
       const requestData = {
         token,
-        msi_option: msiOption
+        msi_option: msiOption,
+        nonce: conekta_settings.nonce,
       };
       
       // Add order_id if available

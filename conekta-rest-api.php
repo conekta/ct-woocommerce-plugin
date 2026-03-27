@@ -467,8 +467,19 @@ class WC_Conekta_REST_API {
         $json = file_get_contents('php://input');
         $params = json_decode($json, true) ?: [];
 
+        if (empty($params['nonce']) || !wp_verify_nonce(sanitize_text_field($params['nonce']), 'conekta-create-3ds-order')) {
+            wp_send_json([
+                'success' => false,
+                'message' => 'Invalid nonce',
+            ], 403);
+            return;
+        }
+
         $request = new WP_REST_Request('POST');
         foreach ($params as $key => $value) {
+            if ($key === 'nonce') {
+                continue;
+            }
             $request->set_param($key, $value);
         }
 

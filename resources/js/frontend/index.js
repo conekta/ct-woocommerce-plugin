@@ -40,14 +40,10 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             'Content-Type': 'application/json',
         };
         
-        // Add nonce if available
-        if (settings.wpApiNonce) {
-            headers['X-WP-Nonce'] = settings.wpApiNonce;
-        }
-        
         const requestData = {
             token,
-            msi_option: msiOption
+            msi_option: msiOption,
+            nonce: settings.nonce,
         };
         
         // Add order_id if provided
