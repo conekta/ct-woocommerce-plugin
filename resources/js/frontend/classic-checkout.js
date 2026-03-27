@@ -231,7 +231,7 @@ const threeDsHandler = {
         }
       }
       
-      const response = await fetch(conekta_settings.rest_url + 'create-3ds-order', {
+      const response = await fetch(conekta_settings.create_3ds_order_url, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestData),

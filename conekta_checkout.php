@@ -166,7 +166,8 @@ function ckpg_enqueue_classic_checkout_script() {
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode,
                 'checkout_url' => \WC_AJAX::get_endpoint('checkout'),
-                'rest_url' => esc_url_raw(rest_url('conekta/v1/'))
+                'rest_url' => esc_url_raw(rest_url('conekta/v1/')),
+                'create_3ds_order_url' => \WC_AJAX::get_endpoint('conekta_create_3ds_order')
             ]);
         }
     }

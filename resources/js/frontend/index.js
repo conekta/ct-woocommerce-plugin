@@ -203,7 +203,7 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             }
         }
         
-        const response = await fetch(settings.rest_url + 'create-3ds-order', {
+        const response = await fetch(settings.create_3ds_order_url, {
             method: 'POST',
             headers,
             body: JSON.stringify(requestData),
