@@ -86,6 +86,7 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
 			'available_msi_options' 		 => array_map('intval', (array)$this->get_setting('months')),
             'three_ds_enabled'               => $this->gateway->three_ds_enabled,
             'three_ds_mode'                  => $this->gateway->three_ds_mode,
+            'rest_url'                       => esc_url_raw(rest_url('conekta/v1/')),
         ];
     }
 }
