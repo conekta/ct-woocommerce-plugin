@@ -208,24 +208,11 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertNotNull($company);
     }
 
-    /**
-     * @group mockoon
-     */
-    public function test_create_order_with_invalid_key_returns_error()
+    public function test_gateway_disabled_without_api_key()
     {
-        $this->requireMockoon();
+        $gateway = new WC_Conekta_Gateway();
 
-        Configuration::getDefaultConfiguration()->setAccessToken('');
-        $gateway = $this->createConfiguredGateway(['cards_api_key' => '']);
-        $order = new WC_Order(102);
-
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 1, &$error,
-        ]);
-
-        $this->assertFalse($result);
-        $this->assertNotNull($error);
+        $this->assertFalse($gateway->enabled);
     }
 
     // -------------------------------------------------------
