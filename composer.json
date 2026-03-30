@@ -15,5 +15,9 @@
         "php": ">=7.4",
         "conekta/conekta-php": "7.0.6",
         "symfony/deprecation-contracts": "^2.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.0",
+        "brain/monkey": "^2.6"
     }
 }
