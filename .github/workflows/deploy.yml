@@ -9,12 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout código fuente
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Configurar PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.4'
+          php-version-file: '.php-version'
           extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, soap, bcmath, gd, exif, opcache, zip
           ini-values: post_max_size=256M, max_execution_time=180
           coverage: none
@@ -23,7 +23,7 @@ jobs:
         run: composer install --no-interaction --no-progress
 
       - name: Instalar Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
 
