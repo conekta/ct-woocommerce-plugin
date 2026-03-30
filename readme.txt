@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 5.4.10
+Stable tag: 5.4.11
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,8 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.11 =
+* Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard
 = 5.4.10 =
 * Security: Added CSRF protection to the WC AJAX 3DS order endpoint via nonce verification
 * Security: Nonce is now generated in PHP and passed to Classic and Blocks checkout scripts, then verified server-side before processing

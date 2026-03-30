@@ -62,6 +62,14 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $this->enabled = false;
         }
         if (!empty($this->api_key)) {
+            try {
+                $companies_api = $this->get_companies_api_instance($this->api_key, $this->version);
+                $company = $companies_api->getCurrentCompany($this->get_user_locale());
+                $this->three_ds_enabled = $company->getThreeDsEnabled();
+                $this->three_ds_mode = $company->getThreeDsMode();
+            } catch (\Exception $e) {
+                error_log('Conekta - Error fetching company info: ' . $e->getMessage());
+            }
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
         }
         add_action('woocommerce_rest_checkout_process_payment_with_context', [$this, 'process_payment_api'], 10, 2);
