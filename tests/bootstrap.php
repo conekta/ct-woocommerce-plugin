@@ -227,37 +227,35 @@ if (!class_exists('WP_REST_Response')) {
 global $test_conekta_gateway;
 $test_conekta_gateway = null;
 
-// WC() function stub
+// WC() function stub (singleton, like real WooCommerce)
 if (!function_exists('WC')) {
     function WC() {
-        global $test_conekta_gateway;
-        return new class($test_conekta_gateway) {
-            public $version = '9.0.0';
-            public $session;
-            public $payment_gateways;
-            public $cart;
+        static $instance = null;
+        if (null === $instance) {
+            $instance = new class {
+                public $version = '9.0.0';
+                public $session;
+                public $payment_gateways;
+                public $cart;
 
-            public function __construct($gateway) {
-                $this->session = new class {
-                    private $data = [];
-                    public function get($key) { return $this->data[$key] ?? null; }
-                    public function set($key, $value) { $this->data[$key] = $value; }
-                    public function __unset($key) { unset($this->data[$key]); }
-                };
-                $this->cart = null;
-                $gw = $gateway;
-                $this->payment_gateways = new class($gw) {
-                    private $gateway;
-                    public function __construct($gw) { $this->gateway = $gw; }
-                    public function get_available_payment_gateways() {
-                        if ($this->gateway) {
-                            return ['conekta' => $this->gateway];
+                public function __construct() {
+                    $this->session = new class {
+                        private $data = [];
+                        public function get($key) { return $this->data[$key] ?? null; }
+                        public function set($key, $value) { $this->data[$key] = $value; }
+                        public function __unset($key) { unset($this->data[$key]); }
+                    };
+                    $this->cart = null;
+                    $this->payment_gateways = new class {
+                        public function get_available_payment_gateways() {
+                            global $test_conekta_gateway;
+                            return $test_conekta_gateway ? ['conekta' => $test_conekta_gateway] : [];
                         }
-                        return [];
-                    }
-                };
-            }
-        };
+                    };
+                }
+            };
+        }
+        return $instance;
     }
 }
 
