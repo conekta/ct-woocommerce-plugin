@@ -40,14 +40,10 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             'Content-Type': 'application/json',
         };
         
-        // Add nonce if available
-        if (settings.wpApiNonce) {
-            headers['X-WP-Nonce'] = settings.wpApiNonce;
-        }
-        
         const requestData = {
             token,
-            msi_option: msiOption
+            msi_option: msiOption,
+            nonce: settings.nonce,
         };
         
         // Add order_id if provided
@@ -63,27 +59,6 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             // Extract cart total from props.billing
             const cartTotal = props?.billing?.cartTotal?.value || 0;
             const currencyCode = props?.billing?.currency?.code || 'MXN';
-            
-            // Extract coupons/discount_lines - try multiple possible locations
-            let discount_lines = [];
-            
-            // Option 1: Try props.cartData.coupons
-            if (props?.cartData?.coupons && Array.isArray(props.cartData.coupons)) {
-                discount_lines = props.cartData.coupons.map(coupon => ({
-                    code: coupon.code || '',
-                    amount: parseInt(coupon.totals?.total_discount || 0, 10),
-                    type: 'coupon'
-                })).filter(discount => discount.amount > 0);
-            }
-            
-            // Option 2: Try props.billing.appliedCoupons
-            if (discount_lines.length === 0 && props?.billing?.appliedCoupons && Array.isArray(props.billing.appliedCoupons)) {
-                discount_lines = props.billing.appliedCoupons.map(coupon => ({
-                    code: coupon.code || coupon,
-                    amount: parseInt(coupon.totals?.total_discount || coupon.discount || 0, 10),
-                    type: 'coupon'
-                })).filter(discount => discount.amount > 0);
-            }
             
             // Process cart data
             const cartData = {
@@ -115,11 +90,6 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             }
             
             requestData.cart_data = cartData;
-            
-            // Add discount_lines if available
-            if (discount_lines.length > 0) {
-                requestData.discount_lines = discount_lines;
-            }
             
             // Process billing data - use billingAddress or billingData
             const billingData = props?.billing?.billingAddress || props?.billing?.billingData;
@@ -203,7 +173,7 @@ const create3dsOrder = async (token, orderId, msiOption, props) => {
             }
         }
         
-        const response = await fetch(settings.rest_url + 'create-3ds-order', {
+        const response = await fetch(settings.create_3ds_order_url, {
             method: 'POST',
             headers,
             body: JSON.stringify(requestData),
