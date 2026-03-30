@@ -158,7 +158,7 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $error = null;
         $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 3, &$error,
+            $order, 'tok_test_visa_4242', 6, &$error,
         ]);
 
         $this->assertTrue($result, 'MSI order creation should succeed. Error: ' . ($error ?? 'none'));

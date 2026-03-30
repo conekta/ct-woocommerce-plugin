@@ -12,6 +12,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['7.4', '8.1', '8.2', '8.3']
+    name: Build (PHP ${{ matrix.php-version }})
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -19,7 +23,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.4'
+          php-version: ${{ matrix.php-version }}
           tools: composer
 
       - name: Install PHP dependencies
@@ -38,6 +42,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version: ['7.4', '8.1', '8.2', '8.3']
+    name: Test (PHP ${{ matrix.php-version }})
     services:
       mockoon:
         image: mockoon/cli:latest
@@ -55,7 +63,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.4'
+          php-version: ${{ matrix.php-version }}
           tools: composer
           extensions: curl, json
 
