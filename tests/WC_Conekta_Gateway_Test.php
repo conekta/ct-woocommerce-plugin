@@ -490,27 +490,74 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEmpty($discounts);
     }
 
+    public function test_order_request_includes_discount_lines()
+    {
+        $order = new WC_Order(502);
+        $order->set_coupons([
+            ['name' => 'DESC10', 'type' => 'percent', 'discount_amount' => 10.00],
+            ['name' => 'PROMO50', 'type' => 'fixed_cart', 'discount_amount' => 50.00],
+        ]);
+
+        // Build the request data exactly as process_conekta_payment_for_order does
+        $data = ckpg_get_request_data($order);
+        $fees_formatted = ckpg_build_get_fees($order->get_fees());
+        $discount_lines = ckpg_build_discount_lines($data);
+        $discount_lines = array_merge($discount_lines, $fees_formatted['discounts']);
+
+        $rq = new \Conekta\Model\OrderRequest([
+            'currency' => $data['currency'],
+            'discount_lines' => $discount_lines,
+            'line_items' => [],
+            'shipping_lines' => ckpg_build_shipping_lines($data),
+            'tax_lines' => [],
+            'customer_info' => ckpg_build_customer_info($data),
+        ]);
+
+        // Validate the OrderRequest has the discount lines
+        $requestBody = json_decode($rq->__toString(), true);
+
+        $this->assertNotEmpty($requestBody['discount_lines']);
+        $this->assertCount(2, $requestBody['discount_lines']);
+
+        $this->assertEquals('DESC10', $requestBody['discount_lines'][0]['code']);
+        $this->assertEquals(1000, $requestBody['discount_lines'][0]['amount']);
+        $this->assertEquals('coupon', $requestBody['discount_lines'][0]['type']);
+
+        $this->assertEquals('PROMO50', $requestBody['discount_lines'][1]['code']);
+        $this->assertEquals(5000, $requestBody['discount_lines'][1]['amount']);
+        $this->assertEquals('coupon', $requestBody['discount_lines'][1]['type']);
+    }
+
     /**
      * @group mockoon
      */
-    public function test_create_order_with_discount_succeeds()
+    public function test_create_order_with_discount_and_verify_discount_lines()
     {
         $this->requireMockoon();
 
         $gateway = $this->createConfiguredGateway();
-
-        $order = new WC_Order(502);
+        $order = new WC_Order(503);
         $order->set_coupons([
             ['name' => 'DESC10', 'type' => 'percent', 'discount_amount' => 10.00],
         ]);
 
+        // Create order via the plugin
         $error = null;
         $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
             $order, 'tok_test_visa_4242', 1, &$error,
         ]);
-
         $this->assertTrue($result, 'Order with discount should succeed. Error: ' . ($error ?? 'none'));
-        $this->assertNull($error);
+
+        // Fetch the order and verify discount_lines exist
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
+        $conektaOrder = $api->getOrderById('ord_2znsF4cv7L8s3452');
+
+        $discountLines = $conektaOrder->getDiscountLines();
+        $this->assertNotNull($discountLines, 'Order should have discount_lines');
+        $this->assertNotEmpty($discountLines->getData(), 'discount_lines should not be empty');
+
+        $firstDiscount = $discountLines->getData()[0];
+        $this->assertEquals(1000, $firstDiscount->getAmount());
     }
 
     // -------------------------------------------------------
