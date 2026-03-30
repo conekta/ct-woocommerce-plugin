@@ -105,16 +105,26 @@ if (!class_exists('WC_Order')) {
         private $id;
         private $status = 'pending';
         private $meta = [];
+        private $coupons = [];
 
         public function __construct($id = 0) {
             $this->id = $id;
+        }
+
+        public function set_coupons(array $coupons) {
+            $this->coupons = $coupons;
         }
 
         public function get_id() { return $this->id; }
         public function get_status() { return $this->status; }
 
         // Items
-        public function get_items($type = '') { return []; }
+        public function get_items($type = '') {
+            if ($type === 'coupon') {
+                return $this->coupons;
+            }
+            return [];
+        }
         public function get_taxes() { return []; }
         public function get_fees() { return []; }
 

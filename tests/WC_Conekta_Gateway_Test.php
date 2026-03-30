@@ -281,6 +281,80 @@ class WC_Conekta_Gateway_Test extends TestCase
         $result = $gateway->process_payment(300);
 
         $this->assertEquals('success', $result['result']);
+        $this->assertArrayHasKey('redirect', $result);
+        $this->assertStringContainsString('order-received', $result['redirect']);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_process_payment_3ds_already_paid_skips_capture()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        // ord_2znsJ8YNbNoDDsN3p returns paid — no capture needed
+        $_POST = [
+            'conekta_token' => 'tok_test_visa_4242',
+            'conekta_order_id' => 'ord_2znsJ8YNbNoDDsN3p',
+            'conekta_3ds_completed' => 'true',
+            'conekta_payment_status' => 'paid',
+        ];
+
+        $result = $gateway->process_payment(301);
+
+        $this->assertEquals('success', $result['result']);
+        $this->assertArrayHasKey('redirect', $result);
+        $this->assertStringContainsString('order-received', $result['redirect']);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_process_payment_3ds_failed_order_returns_failure()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        // ord_2znsJ8YNbNoDDsNes returns expired — payment cannot be processed
+        $_POST = [
+            'conekta_token' => 'tok_test_visa_4242',
+            'conekta_order_id' => 'ord_2znsJ8YNbNoDDsNes',
+            'conekta_3ds_completed' => 'false',
+            'conekta_payment_status' => '',
+        ];
+
+        $result = $gateway->process_payment(302);
+
+        $this->assertEquals('failure', $result['result']);
+        $this->assertArrayNotHasKey('redirect', $result);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_process_payment_3ds_with_temp_order_transfers_meta()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        // Simulate 3DS with a temporary WooCommerce order
+        $_POST = [
+            'conekta_token' => 'tok_test_visa_4242',
+            'conekta_order_id' => 'ord_test_123',
+            'conekta_woo_order_id' => '999',
+            'conekta_3ds_completed' => 'true',
+            'conekta_payment_status' => 'paid',
+        ];
+
+        $result = $gateway->process_payment(303);
+
+        $this->assertEquals('success', $result['result']);
+        $this->assertArrayHasKey('redirect', $result);
+        $this->assertStringContainsString('order-received', $result['redirect']);
     }
 
     public function test_process_payment_returns_failure_on_empty_post()
@@ -381,6 +455,62 @@ class WC_Conekta_Gateway_Test extends TestCase
         // So we just verify no exception is thrown
         WC_Conekta_Plugin::check_if_payment_payment_method_webhook('WC_Conekta_Gateway', $event);
         $this->assertTrue(true);
+    }
+
+    // -------------------------------------------------------
+    // Discount / Coupon handling
+    // -------------------------------------------------------
+
+    public function test_discount_lines_built_from_coupons()
+    {
+        $order = new WC_Order(500);
+        $order->set_coupons([
+            ['name' => 'VERANO20', 'type' => 'percent', 'discount_amount' => 50.00],
+            ['name' => 'ENVIOGRATIS', 'type' => 'fixed_cart', 'discount_amount' => 100.00],
+        ]);
+
+        $data = ckpg_get_request_data($order);
+
+        $this->assertNotEmpty($data['discount_lines']);
+        $this->assertCount(2, $data['discount_lines']);
+
+        $this->assertEquals('VERANO20', $data['discount_lines'][0]['code']);
+        $this->assertEquals(5000, $data['discount_lines'][0]['amount']);
+
+        $this->assertEquals('ENVIOGRATIS', $data['discount_lines'][1]['code']);
+        $this->assertEquals(10000, $data['discount_lines'][1]['amount']);
+    }
+
+    public function test_discount_lines_empty_without_coupons()
+    {
+        $order = new WC_Order(501);
+        $data = ckpg_get_request_data($order);
+
+        $discounts = $data['discount_lines'] ?? [];
+        $this->assertEmpty($discounts);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_create_order_with_discount_succeeds()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        $order = new WC_Order(502);
+        $order->set_coupons([
+            ['name' => 'DESC10', 'type' => 'percent', 'discount_amount' => 10.00],
+        ]);
+
+        $error = null;
+        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
+            $order, 'tok_test_visa_4242', 1, &$error,
+        ]);
+
+        $this->assertTrue($result, 'Order with discount should succeed. Error: ' . ($error ?? 'none'));
+        $this->assertNull($error);
     }
 
     // -------------------------------------------------------
