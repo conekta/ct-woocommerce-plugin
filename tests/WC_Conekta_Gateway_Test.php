@@ -171,8 +171,7 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $this->requireMockoon();
 
-        $gateway = $this->createConfiguredGateway();
-        $api = $gateway->get_api_instance('key_test_123', '5.4.11');
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
 
         $order = $api->getOrderById('ord_test_123');
         $this->assertNotNull($order);
@@ -186,8 +185,7 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $this->requireMockoon();
 
-        $gateway = $this->createConfiguredGateway();
-        $api = $gateway->get_api_instance('key_test_123', '5.4.11');
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
 
         $captured = $api->ordersCreateCapture('ord_test_123');
         $this->assertNotNull($captured);
@@ -201,8 +199,7 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $this->requireMockoon();
 
-        $gateway = $this->createConfiguredGateway();
-        $companiesApi = $gateway->get_companies_api_instance('key_test_123', '5.4.11');
+        $companiesApi = WC_Conekta_Plugin::get_companies_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
 
         $company = $companiesApi->getCurrentCompany('es');
         $this->assertNotNull($company);
