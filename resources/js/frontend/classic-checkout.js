@@ -407,25 +407,23 @@ const conektaConfig = {
       
       try {
         const orderResponse = await threeDsHandler.create3dsOrder(token.id, msiOption);
+        const formData = new FormData(form);
+        formData.append("wc-ajax", "checkout");
+
+        if (orderResponse.order_id) {
+          formData.append("conekta_order_id", String(orderResponse.order_id));
+        }
+        if (orderResponse.woo_order_id) {
+          formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
+        }
 
         // If next_action is present, 3DS authentication is required
         if (orderResponse.next_action) {
           const redirectUrl = orderResponse.next_action.redirect_url;
 
           try {
-            // Show 3DS iframe and wait for result
             const authResult = await threeDsHandler.show3dsIframe(redirectUrl);
 
-            // After successful 3DS authentication, add order data to form
-            const formData = new FormData(form);
-            formData.append("wc-ajax", "checkout");
-
-            if (orderResponse.order_id) {
-              formData.append("conekta_order_id", String(orderResponse.order_id));
-            }
-            if (orderResponse.woo_order_id) {
-              formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
-            }
             if (authResult.payment_status) {
               formData.append("conekta_payment_status", String(authResult.payment_status));
             }
@@ -438,15 +436,6 @@ const conektaConfig = {
           }
         } else {
           // No 3DS authentication required, submit with order data
-          const formData = new FormData(form);
-          formData.append("wc-ajax", "checkout");
-
-          if (orderResponse.order_id) {
-            formData.append("conekta_order_id", String(orderResponse.order_id));
-          }
-          if (orderResponse.woo_order_id) {
-            formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
-          }
           if (orderResponse.payment_status) {
             formData.append("conekta_payment_status", String(orderResponse.payment_status));
           }

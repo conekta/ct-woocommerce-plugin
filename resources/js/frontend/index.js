@@ -480,47 +480,34 @@ const ContentConekta = (props) => {
 
                         const orderResponse = await create3dsOrder(token, null, msiOption, props);
 
+                        const paymentMethodData = {
+                            conekta_token: token,
+                            conekta_msi_option: String(msiOption),
+                            conekta_order_id: String(orderResponse.order_id),
+                            conekta_woo_order_id: String(orderResponse.woo_order_id),
+                        };
+
                         if (orderResponse.next_action) {
                             const redirectUrl = orderResponse.next_action.redirect_url;
                             const authResult = await create3dsIframe(redirectUrl);
 
-                            // Verify order status
                             if (authResult.payment_status === 'paid') {
-                                return {
-                                    type: emitResponse.responseTypes.SUCCESS,
-                                    meta: {
-                                        paymentMethodData: {
-                                            conekta_token: token,
-                                            conekta_msi_option: String(msiOption),
-                                            conekta_order_id: String(orderResponse.order_id),
-                                            conekta_woo_order_id: String(orderResponse.woo_order_id),
-                                            conekta_3ds_completed: true
-                                        },
-                                    }
-                                };
+                                paymentMethodData.conekta_3ds_completed = true;
                             } else {
                                 throw new Error('3DS authentication failed');
                             }
                         }
 
-                        // Order was created but no 3DS needed
                         return {
                             type: emitResponse.responseTypes.SUCCESS,
-                            meta: {
-                                paymentMethodData: {
-                                    conekta_token: token,
-                                    conekta_msi_option: String(msiOption),
-                                    conekta_order_id: String(orderResponse.order_id),
-                                    conekta_woo_order_id: String(orderResponse.woo_order_id)
-                                },
-                            }
+                            meta: { paymentMethodData },
                         };
                     } catch (error) {
                         console.error('Order creation error:', error);
                         setErrorMessage(error.message || 'Error al crear la orden');
                         return {
                             type: emitResponse.responseTypes.ERROR,
-                            message: "Error al crear la orden: " + (error.message || 'Error desconocido')
+                            message: "Error al crear la orden: " + (error.message || 'Error desconocido'),
                         };
                     }
                 } catch (error) {
