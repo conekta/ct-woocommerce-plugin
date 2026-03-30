@@ -30,8 +30,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $api_key;
     public $public_api_key;
     public $webhook_url;
-    public $three_ds_enabled;
-    public $three_ds_mode;
 
     /**
      * @throws ApiException|Exception
@@ -52,18 +50,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->api_key = $this->settings['cards_api_key'];
         $this->public_api_key = $this->settings['cards_public_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
-
-        $this->three_ds_enabled = false;
-        $this->three_ds_mode    = '';
-
-        try {
-            $companies_api = $this->get_companies_api_instance($this->api_key, $this->version);
-            $company = $companies_api->getCurrentCompany($this->get_user_locale());
-            $this->three_ds_enabled = $company->getThreeDsEnabled();
-            $this->three_ds_mode = $company->getThreeDsMode();
-        } catch (\Exception $e) {
-            error_log('Conekta - Error fetching company info: ' . $e->getMessage());
-        }
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);

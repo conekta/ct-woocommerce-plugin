@@ -84,8 +84,6 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
             'locale' 						 => $this->gateway->get_user_locale(),
 			'msi_enabled'					 => $this->get_setting('is_msi_enabled') === 'yes',
 			'available_msi_options' 		 => array_map('intval', (array)$this->get_setting('months')),
-            'three_ds_enabled'               => $this->gateway->three_ds_enabled,
-            'three_ds_mode'                  => $this->gateway->three_ds_mode,
             'rest_url'                       => esc_url_raw(rest_url('conekta/v1/')),
             'create_3ds_order_url'           => \WC_AJAX::get_endpoint('conekta_create_3ds_order'),
             'nonce'                          => wp_create_nonce('conekta-create-3ds-order'),

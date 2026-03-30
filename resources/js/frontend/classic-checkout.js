@@ -8,9 +8,6 @@ const DEFAULT_MSI = "1";
 const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
 
-// 3DS configuration
-const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes" || conekta_settings.three_ds_enabled === "1";
-
 // Utilities
 const utils = {
   getSelectedPaymentMethod: () =>
@@ -408,68 +405,57 @@ const conektaConfig = {
       form.querySelector('[name="conekta_token"]').value = token.id;
       form.querySelector('[name="conekta_msi_option"]').value = msiOption;
       
-      // If 3DS is enabled, create order with 3DS
-      if (is3dsEnabled) {
-        try {
-          const orderResponse = await threeDsHandler.create3dsOrder(token.id, msiOption);
-          
-          // If next_action is present, authentication is required
-          if (orderResponse.next_action) {
-            // Show 3DS iframe
-            const redirectUrl = orderResponse.next_action.redirect_url;
-            
-            try {
-              // Show 3DS iframe and wait for result
-              const authResult = await threeDsHandler.show3dsIframe(redirectUrl);
-              
-              // After successful 3DS authentication, add order data to form
-              const formData = new FormData(form);
-              formData.append("wc-ajax", "checkout");
-              
-              // Add 3DS order data to the form submission
-              if (orderResponse.order_id) {
-                formData.append("conekta_order_id", String(orderResponse.order_id));
-              }
-              if (orderResponse.woo_order_id) {
-                formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
-              }
-              if (authResult.payment_status) {
-                formData.append("conekta_payment_status", String(authResult.payment_status));
-              }
-              formData.append("conekta_3ds_completed", "true");
-              
-              formHandler.submitForm(formData);
-            } catch (error) {
-              utils.setLoading(false);
-              utils.showErrorMessage(utils.getTranslation("3ds_error") || "3D Secure authentication failed");
-            }
-          } else {
-            // No 3DS authentication required, but add order data if available
+      try {
+        const orderResponse = await threeDsHandler.create3dsOrder(token.id, msiOption);
+
+        // If next_action is present, 3DS authentication is required
+        if (orderResponse.next_action) {
+          const redirectUrl = orderResponse.next_action.redirect_url;
+
+          try {
+            // Show 3DS iframe and wait for result
+            const authResult = await threeDsHandler.show3dsIframe(redirectUrl);
+
+            // After successful 3DS authentication, add order data to form
             const formData = new FormData(form);
             formData.append("wc-ajax", "checkout");
-            
-            // Add order data to form submission
+
             if (orderResponse.order_id) {
               formData.append("conekta_order_id", String(orderResponse.order_id));
             }
             if (orderResponse.woo_order_id) {
               formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
             }
-            if (orderResponse.payment_status) {
-              formData.append("conekta_payment_status", String(orderResponse.payment_status));
+            if (authResult.payment_status) {
+              formData.append("conekta_payment_status", String(authResult.payment_status));
             }
-            
+            formData.append("conekta_3ds_completed", "true");
+
             formHandler.submitForm(formData);
+          } catch (error) {
+            utils.setLoading(false);
+            utils.showErrorMessage(utils.getTranslation("3ds_error") || "3D Secure authentication failed");
           }
-        } catch (error) {
-          utils.setLoading(false);
-          utils.showErrorMessage(error.message || utils.getTranslation("token_error"));
+        } else {
+          // No 3DS authentication required, submit with order data
+          const formData = new FormData(form);
+          formData.append("wc-ajax", "checkout");
+
+          if (orderResponse.order_id) {
+            formData.append("conekta_order_id", String(orderResponse.order_id));
+          }
+          if (orderResponse.woo_order_id) {
+            formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
+          }
+          if (orderResponse.payment_status) {
+            formData.append("conekta_payment_status", String(orderResponse.payment_status));
+          }
+
+          formHandler.submitForm(formData);
         }
-      } else {
-        // Standard non-3DS flow
-        const formData = new FormData(form);
-        formData.append("wc-ajax", "checkout");
-        formHandler.submitForm(formData);
+      } catch (error) {
+        utils.setLoading(false);
+        utils.showErrorMessage(error.message || utils.getTranslation("token_error"));
       }
     },
 
