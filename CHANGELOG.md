@@ -1,3 +1,6 @@
+## [5.4.11]() - 2026-03-30
+- Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard
+
 ## [5.4.10]() - 2026-03-27
 - Security: Added CSRF protection to the WC AJAX 3DS order endpoint via nonce verification
 - Security: Nonce is now generated in PHP and passed to Classic and Blocks checkout scripts, then verified server-side before processing
