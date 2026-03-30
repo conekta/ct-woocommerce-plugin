@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 5.4.9
+Stable tag: 5.4.10
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.10 =
+* Security: Added CSRF protection to the WC AJAX 3DS order endpoint via nonce verification
+* Security: Nonce is now generated in PHP and passed to Classic and Blocks checkout scripts, then verified server-side before processing
 = 5.4.9 =
 * Fix: Resolved 404 errors on checkout and 3DS endpoints when WordPress is installed in a subdirectory
 * Fix: Replaced hardcoded URLs with dynamic WordPress functions (WC_AJAX::get_endpoint and rest_url) for Classic and Blocks checkout

@@ -1,3 +1,8 @@
+5.4.10, 2026-03-27
+-------------------------------------
+- Security: Added CSRF protection to the WC AJAX 3DS order endpoint via nonce verification
+- Security: Nonce is now generated in PHP and passed to Classic and Blocks checkout scripts, then verified server-side before processing
+
 5.4.9, 2026-03-25
 -------------------------------------
 - Fix: Resolved 404 errors on checkout and 3DS endpoints when WordPress is installed in a subdirectory
