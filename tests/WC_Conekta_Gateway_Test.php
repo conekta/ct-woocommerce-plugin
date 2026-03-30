@@ -173,9 +173,22 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
 
-        $order = $api->getOrderById('ord_test_123');
+        $order = $api->getOrderById('ord_2znsJ8YNbNoDDsN3p');
         $this->assertNotNull($order);
         $this->assertNotEmpty($order->getId());
+        $this->assertEquals('MXN', $order->getCurrency());
+        $this->assertEquals('paid', $order->getPaymentStatus());
+        $this->assertGreaterThan(0, $order->getAmount());
+        $this->assertNotNull($order->getCustomerInfo());
+        $this->assertNotEmpty($order->getCustomerInfo()->getEmail());
+        $this->assertNotNull($order->getCharges());
+        $this->assertTrue($order->getIsRefundable());
+        $this->assertNotEmpty($order->getLineItems());
+
+        // Validate charge is card type
+        $charge = $order->getCharges()->getData()[0];
+        $this->assertEquals('card_payment', $charge->getPaymentMethod()->getObject());
+        $this->assertNotEmpty($charge->getPaymentMethod()->getAuthCode());
     }
 
     /**
@@ -210,6 +223,164 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway = new WC_Conekta_Gateway();
 
         $this->assertFalse($gateway->enabled);
+    }
+
+    // -------------------------------------------------------
+    // process_payment — Classic Checkout (no Mockoon needed for some)
+    // -------------------------------------------------------
+
+    public function test_process_payment_fails_without_token_and_order_id()
+    {
+        $gateway = $this->createConfiguredGateway();
+
+        $_POST = [];
+
+        $result = $gateway->process_payment(100);
+
+        $this->assertEquals('failure', $result['result']);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_process_payment_standard_card_flow()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        $_POST = [
+            'conekta_token' => 'tok_test_visa_4242',
+            'conekta_msi_option' => '1',
+        ];
+
+        $result = $gateway->process_payment(200);
+
+        $this->assertEquals('success', $result['result']);
+        $this->assertArrayHasKey('redirect', $result);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_process_payment_3ds_flow_with_paid_order()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+
+        // Mockoon GET /orders/:id returns pending_payment by default
+        // Simulate 3DS completed with capture flow
+        $_POST = [
+            'conekta_token' => 'tok_test_visa_4242',
+            'conekta_order_id' => 'ord_test_123',
+            'conekta_3ds_completed' => 'true',
+            'conekta_payment_status' => 'paid',
+        ];
+
+        $result = $gateway->process_payment(300);
+
+        $this->assertEquals('success', $result['result']);
+    }
+
+    public function test_process_payment_returns_failure_on_empty_post()
+    {
+        $gateway = $this->createConfiguredGateway();
+
+        $_POST = [
+            'conekta_token' => '',
+            'conekta_order_id' => '',
+        ];
+
+        $result = $gateway->process_payment(400);
+
+        $this->assertEquals('failure', $result['result']);
+    }
+
+    // -------------------------------------------------------
+    // check_order_status (via Mockoon)
+    // -------------------------------------------------------
+
+    // -------------------------------------------------------
+    // Webhook order.paid reconfirmation (case 4)
+    // -------------------------------------------------------
+
+    /**
+     * @group mockoon
+     */
+    public function test_webhook_reconfirm_order_paid()
+    {
+        $this->requireMockoon();
+
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
+
+        // Simulates webhook flow: Conekta sends order.paid, plugin reconfirms via API
+        $result = WC_Conekta_Plugin::check_order_status($api, 'ord_2znsJ8YNbNoDDsN3p', ['paid']);
+        $this->assertTrue($result);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_webhook_reconfirm_order_status_mismatch()
+    {
+        $this->requireMockoon();
+
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
+
+        // Webhook says paid but API returns a different status — should reject
+        $result = WC_Conekta_Plugin::check_order_status($api, 'ord_2znsJ8YNbNoDDsN3p', ['expired']);
+        $this->assertFalse($result);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_webhook_reconfirm_order_expired()
+    {
+        $this->requireMockoon();
+
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
+
+        $result = WC_Conekta_Plugin::check_order_status($api, 'ord_2znsJ8YNbNoDDsNes', ['expired', 'canceled']);
+        $this->assertTrue($result);
+    }
+
+    /**
+     * @group mockoon
+     */
+    public function test_webhook_reconfirm_expired_rejects_paid()
+    {
+        $this->requireMockoon();
+
+        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
+
+        // Order is expired but we check for paid — should reject
+        $result = WC_Conekta_Plugin::check_order_status($api, 'ord_2znsJ8YNbNoDDsNes', ['paid']);
+        $this->assertFalse($result);
+    }
+
+    // -------------------------------------------------------
+    // check_if_payment_payment_method_webhook
+    // -------------------------------------------------------
+
+    public function test_webhook_payment_method_matches()
+    {
+        $event = [
+            'data' => [
+                'object' => [
+                    'metadata' => [
+                        'payment_method' => 'WC_Conekta_Gateway',
+                    ],
+                ],
+            ],
+        ];
+
+        // Should not exit — payment method matches
+        // If it doesn't match, the method calls exit() which would kill the test
+        // So we just verify no exception is thrown
+        WC_Conekta_Plugin::check_if_payment_payment_method_webhook('WC_Conekta_Gateway', $event);
+        $this->assertTrue(true);
     }
 
     // -------------------------------------------------------
