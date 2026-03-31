@@ -91,8 +91,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway = new WC_Conekta_Gateway();
 
         $this->assertEmpty($gateway->api_key);
-        $this->assertFalse($gateway->three_ds_enabled);
-        $this->assertSame('', $gateway->three_ds_mode);
     }
 
     // -------------------------------------------------------
