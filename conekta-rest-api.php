@@ -372,8 +372,6 @@ class WC_Conekta_REST_API {
 
             // Create OrderRequest
             try {
-                info_log('Creating OrderRequest');
-
                 // Base request with required fields
                 $request_data = [
                     'currency' => isset($data['currency']) ? $data['currency'] : 'MXN',
