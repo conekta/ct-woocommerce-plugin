@@ -1,34 +1,35 @@
 {
-  "name": "conekta-payment-gateway",
-  "version": "5.4.11",
-  "description": "<div align=\"center\">",
-  "main": "index.js",
-  "directories": {
-    "lib": "lib"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@woocommerce/dependency-extraction-webpack-plugin": "^3.1.0",
-    "@wordpress/scripts": "^30.13.0",
-    "cross-env": "7.0.3"
-  },
-  "scripts": {
-    "start": "wp-scripts start",
-    "build": "wp-scripts build ",
-    "i18n": "npm run i18n:build",
-    "i18n:build": "npm run i18n:pot && ./bin/build_i18n.sh",
-    "i18n:pot": "php -d xdebug.max_nesting_level=512 $(which wp) i18n make-pot --exclude=\"node_modules/,languages/,assets/\" --headers='{\"Report-Msgid-Bugs-To\":\"https://woocommerce.com/my-account/create-a-ticket/\", \"language-team\":\"LANGUAGE <EMAIL@ADDRESS>\"}' . languages/woocommerce-gateway-dummy.pot",
-    "i18n:json": "$(which wp) i18n make-json languages --no-purge",
-    "packages-update": "wp-scripts packages-update",
-    "check-engines": "wp-scripts check-engines",
-    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*'"
-  },
-  "dependencies": {
-    "@woocommerce/settings": "^1.0.0",
-    "@wordpress/html-entities": "^3.48.0"
-  }
+	"name": "conekta-payment-gateway",
+	"version": "5.4.11",
+	"description": "<div align=\"center\">",
+	"main": "index.js",
+	"directories": {
+		"lib": "lib"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {
+		"@woocommerce/dependency-extraction-webpack-plugin": "^3.1.0",
+		"@wordpress/scripts": "^31.7.0",
+		"cross-env": "7.0.3"
+	},
+	"scripts": {
+		"start": "wp-scripts start",
+		"build": "wp-scripts build ",
+		"i18n": "npm run i18n:build",
+		"i18n:build": "npm run i18n:pot && ./bin/build_i18n.sh",
+		"i18n:pot": "php -d xdebug.max_nesting_level=512 $(which wp) i18n make-pot --exclude=\"node_modules/,languages/,assets/\" --headers='{\"Report-Msgid-Bugs-To\":\"https://woocommerce.com/my-account/create-a-ticket/\", \"language-team\":\"LANGUAGE <EMAIL@ADDRESS>\"}' . languages/woocommerce-gateway-dummy.pot",
+		"i18n:json": "$(which wp) i18n make-json languages --no-purge",
+		"packages-update": "wp-scripts packages-update",
+		"format": "wp-scripts format",
+		"check-engines": "wp-scripts check-engines",
+		"zip": "wp-scripts plugin-zip"
+	},
+	"dependencies": {
+		"@woocommerce/settings": "^1.0.0",
+		"@wordpress/html-entities": "^3.48.0"
+	}
 }

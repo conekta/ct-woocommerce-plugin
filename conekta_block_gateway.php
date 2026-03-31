@@ -30,8 +30,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $api_key;
     public $public_api_key;
     public $webhook_url;
-    public $three_ds_enabled;
-    public $three_ds_mode;
 
     /**
      * @throws ApiException|Exception
@@ -52,9 +50,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->api_key = $this->settings['cards_api_key'];
         $this->public_api_key = $this->settings['cards_public_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
-
-        $this->three_ds_enabled = false;
-        $this->three_ds_mode    = '';
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);

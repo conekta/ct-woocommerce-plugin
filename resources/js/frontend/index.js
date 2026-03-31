@@ -10,9 +10,6 @@ const settings = getSetting('conekta_data', {});
 const labelConekta = decodeEntities(settings.title);
 const tokenEmitter = new TokenEmitter();
 
-// Process 3DS if enabled
-const is3dsEnabled = settings.three_ds_enabled === true || settings.three_ds_enabled === "yes" || settings.three_ds_enabled === "1";
-
 const waitGetToken = () => {
     return new Promise((resolve, reject) => {
         tokenEmitter.resetStates();
@@ -478,68 +475,41 @@ const ContentConekta = (props) => {
                     conektaSubmitFunction.current();
                     const token = await waitGetToken();
                     
-                    // If 3DS is enabled, create 3DS order
-                    if (is3dsEnabled) {
-                        try {
-                            const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
-                            
-                            const orderResponse = await create3dsOrder(token, null, msiOption, props);
-                            
-                            if (orderResponse.next_action) {
-                                const redirectUrl = orderResponse.next_action.redirect_url;
-                                const authResult = await create3dsIframe(redirectUrl);
-                                
-                                // Verify order status
-                                if (authResult.payment_status === 'paid') {
-                                    return {
-                                        type: emitResponse.responseTypes.SUCCESS,
-                                        meta: {
-                                            paymentMethodData: {
-                                                conekta_token: token,
-                                                conekta_msi_option: String(msiOption),
-                                                conekta_order_id: String(orderResponse.order_id),
-                                                conekta_woo_order_id: String(orderResponse.woo_order_id),
-                                                conekta_3ds_completed: true
-                                            },
-                                        }
-                                    };
-                                } else {
-                                    throw new Error('3DS authentication failed');
-                                }
+                    try {
+                        const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
+
+                        const orderResponse = await create3dsOrder(token, null, msiOption, props);
+
+                        const paymentMethodData = {
+                            conekta_token: token,
+                            conekta_msi_option: String(msiOption),
+                            conekta_order_id: String(orderResponse.order_id),
+                            conekta_woo_order_id: String(orderResponse.woo_order_id),
+                        };
+
+                        if (orderResponse.next_action) {
+                            const redirectUrl = orderResponse.next_action.redirect_url;
+                            const authResult = await create3dsIframe(redirectUrl);
+
+                            if (authResult.payment_status === 'paid') {
+                                paymentMethodData.conekta_3ds_completed = true;
+                            } else {
+                                throw new Error('3DS authentication failed');
                             }
-                            
-                            // If we get here, order was created but no 3DS needed
-                            return {
-                                type: emitResponse.responseTypes.SUCCESS,
-                                meta: {
-                                    paymentMethodData: {
-                                        conekta_token: token,
-                                        conekta_msi_option: String(msiOption),
-                                        conekta_order_id: String(orderResponse.order_id),
-                                        conekta_woo_order_id: String(orderResponse.woo_order_id)
-                                    },
-                                }
-                            };
-                        } catch (error) {
-                            console.error('3DS error:', error);
-                            setErrorMessage(error.message || 'Error en la autenticación 3DS');
-                            return { 
-                                type: emitResponse.responseTypes.ERROR,
-                                message: "Error en autenticación 3DS: " + (error.message || 'Error desconocido')
-                            };
                         }
+
+                        return {
+                            type: emitResponse.responseTypes.SUCCESS,
+                            meta: { paymentMethodData },
+                        };
+                    } catch (error) {
+                        console.error('Order creation error:', error);
+                        setErrorMessage(error.message || 'Error al crear la orden');
+                        return {
+                            type: emitResponse.responseTypes.ERROR,
+                            message: "Error al crear la orden: " + (error.message || 'Error desconocido'),
+                        };
                     }
-                    
-                    // Standard non-3DS flow
-                    return {
-                        type: emitResponse.responseTypes.SUCCESS,
-                        meta: {
-                            paymentMethodData: {
-                                conekta_token: token,
-                                conekta_msi_option: String(sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION),
-                            },
-                        }
-                    };
                 } catch (error) {
                     console.error("Error en el pago:", error);
                     setErrorMessage(error.message || 'Error procesando el pago');

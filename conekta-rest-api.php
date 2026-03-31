@@ -358,18 +358,31 @@ class WC_Conekta_REST_API {
                 ], 500);
             }
             
+            // Fetch 3DS settings from company info
+            $three_ds_mode = '';
+            try {
+                $companies_api = $gateway->get_companies_api_instance($gateway->settings['cards_api_key'], $gateway->version);
+                $company = $companies_api->getCurrentCompany($gateway->get_user_locale());
+                if ($company->getThreeDsEnabled()) {
+                    $three_ds_mode = $company->getThreeDsMode();
+                }
+            } catch (\Exception $e) {
+                error_log('Conekta - Error fetching company info, proceeding without 3DS: ' . $e->getMessage());
+            }
+
             // Create OrderRequest
             try {
-                info_log('Creating OrderRequest');
-                
                 // Base request with required fields
                 $request_data = [
                     'currency' => isset($data['currency']) ? $data['currency'] : 'MXN',
                     'line_items' => $line_items,
                     'metadata' => $order_metadata,
-                    'three_ds_mode' => $gateway->three_ds_mode,
                     'return_url' => get_site_url() . '/?wc-api=conekta_3ds_callback&woo_order_id=' . $order->get_id()
                 ];
+
+                if (!empty($three_ds_mode)) {
+                    $request_data['three_ds_mode'] = $three_ds_mode;
+                }
                 
                 // Add customer_info if available
                 if (!empty($customer_info)) {
