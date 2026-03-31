@@ -10,42 +10,12 @@ on:
       - master
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         php-version: ['7.4', '8.1', '8.2', '8.3']
-    name: Build (PHP ${{ matrix.php-version }})
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php-version }}
-          tools: composer
-
-      - name: Install PHP dependencies
-        run: composer install --no-interaction --no-progress
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
-
-      - name: Install Node dependencies and build
-        run: |
-          npm ci
-          npm run build
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        php-version: ['7.4', '8.1', '8.2', '8.3']
-    name: Test (PHP ${{ matrix.php-version }})
+    name: Build & Test (PHP ${{ matrix.php-version }})
     services:
       mockoon:
         image: mockoon/cli:latest
@@ -69,6 +39,17 @@ jobs:
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --no-progress
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install Node dependencies and build
+        run: |
+          npm ci
+          npm run build
 
       - name: Wait for Mockoon to be ready
         run: |

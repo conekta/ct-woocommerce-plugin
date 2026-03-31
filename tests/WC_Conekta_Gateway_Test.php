@@ -561,6 +561,44 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // 3DS Smart mode — next_action may not have redirect_to_url
+    // -------------------------------------------------------
+
+    /**
+     * @group mockoon
+     */
+    public function test_create_3ds_order_smart_mode_without_redirect()
+    {
+        $this->requireMockoon();
+
+        // Configure gateway with 3DS smart mode
+        $gateway = $this->createConfiguredGateway();
+        $gateway->three_ds_mode = 'smart';
+
+        // Register gateway in WC() so create_3ds_order can find it
+        global $test_conekta_gateway;
+        $test_conekta_gateway = $gateway;
+
+        // Simulate REST request to create-3ds-order
+        $request = new WP_REST_Request('POST');
+        $request->set_params([
+            'token' => 'tok_test_visa_4242',
+            'order_id' => '600',
+            'msi_option' => 1,
+        ]);
+
+        $response = WC_Conekta_REST_API::create_3ds_order($request);
+        $data = $response->get_data();
+
+        // In smart mode without 3DS, should succeed without next_action
+        $this->assertEquals(200, $response->get_status(), 'Response should be 200. Got: ' . json_encode($data));
+        $this->assertTrue($data['success']);
+        $this->assertNotEmpty($data['order_id']);
+        $this->assertEquals('paid', $data['payment_status']);
+        $this->assertArrayNotHasKey('next_action', $data, 'Smart mode should not require 3DS redirect');
+    }
+
+    // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------
 

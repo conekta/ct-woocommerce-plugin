@@ -192,22 +192,70 @@ if (!class_exists('WC_Geolocation')) {
     }
 }
 
-// WC() function stub
+// WP_REST_Request stub
+if (!class_exists('WP_REST_Request')) {
+    class WP_REST_Request {
+        private $params = [];
+        private $method;
+
+        public function __construct($method = 'GET') {
+            $this->method = $method;
+        }
+        public function get_params() { return $this->params; }
+        public function get_param($key) { return $this->params[$key] ?? null; }
+        public function set_param($key, $value) { $this->params[$key] = $value; }
+        public function set_params(array $params) { $this->params = $params; }
+    }
+}
+
+// WP_REST_Response stub
+if (!class_exists('WP_REST_Response')) {
+    class WP_REST_Response {
+        private $data;
+        private $status;
+
+        public function __construct($data = null, $status = 200) {
+            $this->data = $data;
+            $this->status = $status;
+        }
+        public function get_data() { return $this->data; }
+        public function get_status() { return $this->status; }
+    }
+}
+
+// Global gateway instance for WC() stub
+global $test_conekta_gateway;
+$test_conekta_gateway = null;
+
+// WC() function stub (singleton, like real WooCommerce)
 if (!function_exists('WC')) {
     function WC() {
-        return new class {
-            public $version = '9.0.0';
-            public $session;
+        static $instance = null;
+        if (null === $instance) {
+            $instance = new class {
+                public $version = '9.0.0';
+                public $session;
+                public $payment_gateways;
+                public $cart;
 
-            public function __construct() {
-                $this->session = new class {
-                    private $data = [];
-                    public function get($key) { return $this->data[$key] ?? null; }
-                    public function set($key, $value) { $this->data[$key] = $value; }
-                    public function __unset($key) { unset($this->data[$key]); }
-                };
-            }
-        };
+                public function __construct() {
+                    $this->session = new class {
+                        private $data = [];
+                        public function get($key) { return $this->data[$key] ?? null; }
+                        public function set($key, $value) { $this->data[$key] = $value; }
+                        public function __unset($key) { unset($this->data[$key]); }
+                    };
+                    $this->cart = null;
+                    $this->payment_gateways = new class {
+                        public function get_available_payment_gateways() {
+                            global $test_conekta_gateway;
+                            return $test_conekta_gateway ? ['conekta' => $test_conekta_gateway] : [];
+                        }
+                    };
+                }
+            };
+        }
+        return $instance;
     }
 }
 
