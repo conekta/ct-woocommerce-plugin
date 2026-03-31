@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b9e181ce958f392617bcd088a9183704",
+    "content-hash": "94b09eb263a190260a80b59c6b1134af",
     "packages": [
         {
             "name": "conekta/conekta-php",
@@ -2715,15 +2715,12 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": [],
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
         "php": ">=7.4"
     },
-    "platform-dev": {},
-    "platform-overrides": {
-        "php": "7.4.33"
-    },
-    "plugin-api-version": "2.9.0"
+    "platform-dev": [],
+    "plugin-api-version": "2.3.0"
 }
