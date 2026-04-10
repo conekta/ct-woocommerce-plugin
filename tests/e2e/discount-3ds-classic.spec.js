@@ -13,7 +13,7 @@ h.run('Classic Checkout — Discount + 3DS', async ({ page, assert, config, coup
   await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
   await page.waitForTimeout(2000);
 
-  // --- conekta_settings ---
+  // --- conekta_settings (before coupon) ---
   console.log('--- conekta_settings ---');
   const settings = await page.evaluate(() => window.conekta_settings);
   assert(settings !== undefined, 'conekta_settings exists');
@@ -21,29 +21,35 @@ h.run('Classic Checkout — Discount + 3DS', async ({ page, assert, config, coup
   assert(settings.three_ds_enabled == 1 || settings.three_ds_enabled === 'yes', `3DS enabled = ${settings.three_ds_enabled}`);
   assert(settings.cart_items.length > 0, `cart_items count = ${settings.cart_items.length}`);
 
-  // --- discount_lines ---
+  // --- Apply coupon on checkout page (same session, no race condition) ---
+  console.log('\n--- Apply coupon ---');
+  await h.applyCheckoutCoupon(couponCode);
+
+  // --- discount_lines (read from the PHP fragment — the authoritative source) ---
   console.log('\n--- discount_lines ---');
-  const dl = settings.discount_lines;
-  assert(dl.length >= 1, `discount_lines count = ${dl.length}`);
+  const fragment = await page.$('#conekta-cart-data');
+  assert(fragment !== null, '#conekta-cart-data exists');
+  const fragData = JSON.parse(await fragment.evaluate(el => el.textContent));
+  const dl = fragData.discount_lines;
+  assert(dl.length >= 2, `discount_lines count = ${dl.length}`);
   assert(dl.find(d => d.code === 'dynamic_pricing')?.type === 'campaign', `dynamic_pricing type = campaign`);
 
   const couponEntry = dl.find(d => d.code === couponCode);
   assert(couponEntry?.type === 'coupon', `coupon type = ${couponEntry?.type || 'NOT APPLIED'}`);
+  assert(couponEntry?.amount > 0, `coupon amount = ${couponEntry?.amount}`);
 
   // --- Double-counting guard ---
   console.log('\n--- Guard ---');
   assert(dl.filter(d => d.code === 'dynamic_pricing').length === 1, 'no duplicate dynamic_pricing');
-  assert(dl.filter(d => d.code === couponCode).length <= 1, `coupon entries = ${dl.filter(d => d.code === couponCode).length}`);
+  assert(dl.filter(d => d.code === couponCode).length === 1, `coupon entries = ${dl.filter(d => d.code === couponCode).length}`);
 
-  // --- Fragment element ---
-  console.log('\n--- Fragment ---');
-  const fragment = await page.$('#conekta-cart-data');
-  assert(fragment !== null, '#conekta-cart-data exists');
-  const fragData = JSON.parse(await fragment.evaluate(el => el.textContent));
-  assert(fragData.discount_lines.filter(d => d.code === 'dynamic_pricing').length === 1, 'fragment: 1 dynamic_pricing');
+  // --- JS sync: conekta_settings should match fragment after updated_checkout ---
+  console.log('\n--- JS sync ---');
+  const synced = await page.evaluate(() => window.conekta_settings);
+  assert(synced.discount_lines.length === dl.length, `conekta_settings synced = ${synced.discount_lines.length} discount_lines`);
 
   // --- Billing form ---
-  console.log('\n--- Billing + sync ---');
+  console.log('\n--- Billing ---');
   await page.fill('#billing_first_name', BILLING.first_name);
   await page.fill('#billing_last_name', BILLING.last_name);
   await page.fill('#billing_address_1', BILLING.address_1);
@@ -53,9 +59,6 @@ h.run('Classic Checkout — Discount + 3DS', async ({ page, assert, config, coup
   await page.fill('#billing_phone', BILLING.phone);
   await page.fill('#billing_email', BILLING.email);
   await page.waitForTimeout(4000);
-
-  const updated = await page.evaluate(() => window.conekta_settings);
-  assert(updated.discount_lines.length >= 1, `post-sync discount_lines = ${updated.discount_lines.length}`);
 
   // --- Tokenizer + pay ---
   console.log('\n--- Card + Place Order ---');
