@@ -103,7 +103,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: e2e-failure-artifacts
-          path: |
-            /tmp/e2e-*.png
-            /tmp/e2e-videos/*.webm
+          path: test-results/
           retention-days: 3

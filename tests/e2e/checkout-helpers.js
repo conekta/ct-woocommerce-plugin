@@ -2,7 +2,11 @@
  * Shared helpers for E2E checkout tests (classic + blocks).
  */
 const { chromium } = require('playwright');
+const { mkdirSync } = require('fs');
 const config = require('./e2e.config');
+
+mkdirSync(config.video.dir, { recursive: true });
+mkdirSync(config.screenshot.dir, { recursive: true });
 
 const STORE_URL = process.env.STORE_URL || 'http://localhost';
 const CONEKTA_API_KEY = process.env.CONEKTA_API_KEY;
