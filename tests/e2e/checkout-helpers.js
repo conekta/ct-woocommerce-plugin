@@ -206,10 +206,12 @@ async function testOrderStatus() {
 
 async function test3dsFlow() {
   console.log('\n--- 3DS authentication ---');
-  await page.waitForSelector('#conekta3dsContainer iframe', { timeout: config.timeouts.threeDs });
+  // Classic uses #conekta3dsContainer, Blocks uses #conektaIThreeDsframeContainer
+  const threeDsSelector = '#conekta3dsContainer iframe, #conektaIThreeDsframeContainer iframe, #conekta3dsIframe';
+  await page.waitForSelector(threeDsSelector, { timeout: config.timeouts.threeDs });
   assert(true, '3DS challenge iframe appeared');
 
-  const threeDsFrame = page.frameLocator('#conekta3dsContainer iframe');
+  const threeDsFrame = page.frameLocator(threeDsSelector);
   const challengeFrame = threeDsFrame.frameLocator('#Cardinal-CCA-IFrame');
   await challengeFrame.locator('input[name="challengeDataEntry"]').waitFor({ state: 'visible', timeout: config.timeouts.threeDs });
   await challengeFrame.locator('input[name="challengeDataEntry"]').fill('1234');
