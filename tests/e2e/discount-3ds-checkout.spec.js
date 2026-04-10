@@ -60,16 +60,8 @@ async function wcApi(method, endpoint, body) {
 }
 
 // -------------------------------------------------------
-// ADP Rule helpers — verify existing rules via admin page
+// WC REST API helper
 // -------------------------------------------------------
-
-async function getAdpRuleProductIds() {
-  await page.goto(`${STORE_URL}/wp-admin/admin.php?page=wdp_settings`);
-  await page.waitForLoadState('networkidle');
-  const data = await page.evaluate(() => window.wdp_data);
-  const rules = (data?.rules || []).filter(r => r.enabled === 'on');
-  return rules.flatMap(r => r.filters?.[0]?.value || []);
-}
 
 // -------------------------------------------------------
 // Setup & Teardown
@@ -90,17 +82,23 @@ async function setup() {
   await page.click('#wp-submit');
   await page.waitForLoadState('networkidle');
 
-  // Navigate to admin to establish session
+  // Navigate to admin to establish session for WC REST API
   await page.goto(`${STORE_URL}/wp-admin/`);
   await page.waitForLoadState('networkidle');
 
-  // Find a product that already has an ADP pricing rule
-  console.log('Setup: Finding product with ADP discount rule...');
-  const adpProductIds = await getAdpRuleProductIds();
-  productId = Number(adpProductIds[0]);
-  console.log(`Setup: Using product ${productId} (has active ADP rule)`);
+  // Create product with sale_price (triggers same price-level discount detection as ADP)
+  console.log(`Setup: Creating product (regular=$${REGULAR_PRICE}, sale=$${DISCOUNT_AMOUNT})...`);
+  const product = await wcApi('POST', 'wc/v3/products', {
+    name: 'E2E Discount Test',
+    type: 'simple',
+    regular_price: REGULAR_PRICE,
+    sale_price: DISCOUNT_AMOUNT,
+    status: 'publish',
+  });
+  productId = product.id;
+  console.log(`Setup: Product created (ID: ${productId})`);
 
-  // Add product to cart
+  // Add to cart
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
   await page.waitForLoadState('networkidle');
   console.log('Setup: Product added to cart\n');
@@ -108,7 +106,8 @@ async function setup() {
 
 async function teardown() {
   console.log('\nTeardown...');
-  try { await browser.close(); } catch (_) { /* browser never launched */ }
+  try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
+  try { await browser.close(); } catch (_) {}
 }
 
 // -------------------------------------------------------
@@ -292,10 +291,10 @@ async function testOrderStatus() {
     await testFillCardAndPlaceOrder();
     await testOrderStatus();
   } catch (error) {
+    counters.failed++;
     console.error(`\n\x1b[31mError: ${error.message}\x1b[0m`);
     const screenshotPath = `${config.screenshot.dir}${config.screenshot.prefix}checkout-error.png`;
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    console.log(`Screenshot: ${screenshotPath}`);
+    try { await page.screenshot({ path: screenshotPath, fullPage: true }); console.log(`Screenshot: ${screenshotPath}`); } catch (_) {}
   } finally {
     await teardown();
   }
