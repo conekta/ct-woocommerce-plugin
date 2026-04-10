@@ -22,7 +22,7 @@ require_once(__DIR__ . '/conekta-rest-api.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.4.13";
+	public $version  = "5.4.14";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit, debit, cash, and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -104,24 +104,30 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             echo json_encode(['error' => 'Invalid order id']);
             exit;
         }
-        $order_id = $conekta_order['metadata']['reference_id'];
 
         if (!self::check_order_status($ordersApi, $conekta_order['id'], array('paid'))) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status', 'order_id' => $order_id]);
+            echo json_encode(['error' => 'Invalid order status']);
             exit;
         }
 
-        $order = new WC_Order($order_id);
+        $order = self::find_order_for_webhook($conekta_order);
+        if (!$order) {
+            http_response_code(404);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            exit;
+        }
+
         $charge = $conekta_order['charges']['data'][0];
         $paid_at = date("Y-m-d", $charge['paid_at']);
-        update_post_meta($order->get_id(), 'conekta-paid-at', $paid_at);
+        self::update_conekta_order_meta($order, $paid_at, 'conekta-paid-at');
         $order->payment_complete();
         $order->add_order_note("Payment completed in Conekta and notification of payment received");
 
         header('Content-Type: application/json');
-        echo json_encode(['message' => 'OK', 'order_id' => $order_id]);
+        echo json_encode(['message' => 'OK', 'order_id' => $order->get_id()]);
         exit;
     }
     
@@ -137,17 +143,25 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             echo json_encode(['error' => 'Invalid order id']);
             exit;
         }
-        $order_id = $conekta_order['metadata']['reference_id'];
+
         if (!self::check_order_status($ordersApi, $conekta_order['id'], array('expired', 'canceled'))) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status', 'order_id' => $order_id]);
+            echo json_encode(['error' => 'Invalid order status']);
             exit;
         }
-        $order = new WC_Order($order_id);
+
+        $order = self::find_order_for_webhook($conekta_order);
+        if (!$order) {
+            http_response_code(404);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            exit;
+        }
+
         $order->update_status('cancelled', 'Order expired/cancelled in Conekta.');
         header('Content-Type: application/json');
-        echo json_encode(['cancelled' => 'OK', 'order_id' => $order_id]);
+        echo json_encode(['cancelled' => 'OK', 'order_id' => $order->get_id()]);
         exit;
     }
     
@@ -163,7 +177,45 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     
     public static function validate_reference_id(array $conekta_order): bool
     {
-        return isset($conekta_order['metadata']) && array_key_exists('reference_id', $conekta_order['metadata']);
+        return isset($conekta_order['metadata'])
+            && array_key_exists('reference_id', $conekta_order['metadata'])
+            && is_numeric($conekta_order['metadata']['reference_id'])
+            && (int) $conekta_order['metadata']['reference_id'] > 0;
+    }
+
+    /**
+     * Finds the WooCommerce order for a Conekta webhook event.
+     * First tries metadata.reference_id, then falls back to searching
+     * by conekta-order-id meta (covers 3DS temp order scenario).
+     *
+     * @return WC_Order|false
+     */
+    public static function find_order_for_webhook(array $conekta_order)
+    {
+        $order_id = $conekta_order['metadata']['reference_id'] ?? null;
+
+        if ($order_id) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                return $order;
+            }
+        }
+
+        // Fallback: temp order was deleted after 3DS transfer,
+        // find the real order by conekta-order-id meta.
+        $conekta_id = $conekta_order['id'] ?? null;
+        if ($conekta_id) {
+            $orders = wc_get_orders([
+                'meta_key'   => 'conekta-order-id',
+                'meta_value' => $conekta_id,
+                'limit'      => 1,
+            ]);
+            if (!empty($orders)) {
+                return $orders[0];
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -2,8 +2,13 @@
  * Shared helpers for E2E checkout tests (classic + blocks).
  */
 const { chromium } = require('playwright');
-const { mkdirSync } = require('fs');
+const { mkdirSync, readFileSync } = require('fs');
+const { join } = require('path');
 const config = require('./e2e.config');
+
+const EXPECTED_VERSION = JSON.parse(
+  readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')
+).version;
 
 mkdirSync(config.video.dir, { recursive: true });
 mkdirSync(config.screenshot.dir, { recursive: true });
@@ -96,13 +101,25 @@ async function setup() {
 
   console.log('Setup: Login...');
   await page.goto(`${STORE_URL}/wp-login.php`);
+  await page.waitForSelector('#user_login', { state: 'visible' });
   await page.fill('#user_login', WP_USER);
   await page.fill('#user_pass', WP_PASS);
   await page.click('#wp-submit');
   await page.waitForLoadState('networkidle');
 
   await page.goto(`${STORE_URL}/wp-admin/`);
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
+
+  // Version gate: ensure the staging store runs the same plugin version as this branch
+  const sysStatus = await wcApi('GET', 'wc/v3/system_status');
+  const conektaPlugin = sysStatus?.active_plugins?.find(p => p.name === 'Conekta Payment Gateway');
+  const storeVersion = conektaPlugin?.version;
+  if (storeVersion !== EXPECTED_VERSION) {
+    throw new Error(
+      `Plugin version mismatch: store has ${storeVersion || 'NOT FOUND'}, expected ${EXPECTED_VERSION}. Deploy the plugin before running E2E tests.`
+    );
+  }
+  console.log(`Setup: plugin version OK (${storeVersion})`);
 
   // Cleanup orphaned e2e resources from previous crashed runs
   const staleProducts = await wcApi('GET', 'wc/v3/products?search=E2E+Discount+Test&per_page=50');
@@ -138,27 +155,53 @@ async function setup() {
 
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
   await page.waitForLoadState('networkidle');
+}
 
-  await page.goto(`${STORE_URL}/cart/`);
-  await page.waitForLoadState('networkidle');
-  const couponApplied = await page.evaluate(async ({ code }) => {
-    // Try multiple nonce sources
+/**
+ * Apply a coupon on the classic checkout page using the native WC coupon form.
+ * This avoids Store API session-sync race conditions because the coupon is
+ * applied in the same PHP session context as the checkout page itself.
+ */
+async function applyCheckoutCoupon(code) {
+  // Show the coupon form (hidden by default on classic checkout)
+  const toggle = await page.$('.woocommerce-form-coupon-toggle .showcoupon');
+  if (toggle) await toggle.click();
+
+  await page.waitForSelector('.checkout_coupon #coupon_code', { state: 'visible', timeout: 5000 });
+  await page.fill('.checkout_coupon #coupon_code', code);
+
+  // Set up listeners BEFORE clicking so we catch both AJAX responses:
+  // 1) apply_coupon — applies the coupon to the cart
+  // 2) update_order_review — WC rebuilds fragments (includes discount_lines)
+  const applyDone = page.waitForResponse(
+    r => r.url().includes('wc-ajax=apply_coupon'), { timeout: 10000 }
+  );
+  const updateDone = page.waitForResponse(
+    r => r.url().includes('wc-ajax=update_order_review'), { timeout: 15000 }
+  );
+
+  await page.click('.checkout_coupon button[name="apply_coupon"]');
+  await applyDone;
+  await updateDone;
+  await page.waitForTimeout(500); // Let the updated_checkout JS event propagate
+}
+
+/**
+ * Apply a coupon on the blocks checkout page via the Store API.
+ * No race condition here because blocks reads from the Store API directly.
+ */
+async function applyBlocksCoupon(code) {
+  await page.evaluate(async ({ code }) => {
     const cartRes = await fetch('/wp-json/wc/store/v1/cart', { credentials: 'same-origin' });
-    const nonce = cartRes.headers.get('Nonce')
-      || cartRes.headers.get('X-WC-Store-API-Nonce')
-      || (typeof wcBlocksMiddlewareConfig !== 'undefined' ? wcBlocksMiddlewareConfig.storeApiNonce : '')
-      || '';
-
-    const res = await fetch('/wp-json/wc/store/v1/cart/apply-coupon', {
+    const nonce = cartRes.headers.get('Nonce') || cartRes.headers.get('X-WC-Store-API-Nonce') || '';
+    await fetch('/wp-json/wc/store/v1/cart/apply-coupon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Nonce': nonce },
       credentials: 'same-origin',
       body: JSON.stringify({ code }),
     });
-    const data = await res.json();
-    return { status: res.status, coupons: data.coupons?.length || 0 };
-  }, { code: couponCode });
-  console.log(`Setup: Coupon apply status=${couponApplied.status} coupons=${couponApplied.coupons}`);
+  }, { code });
+  await page.waitForTimeout(2000); // Let the blocks UI update
 }
 
 async function teardown() {
@@ -259,5 +302,6 @@ module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT,
   TEST_CARD, BILLING,
   assert, getPage, getCounters, wcApi, setCheckoutType,
+  applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, test3dsFlow, run,
 };

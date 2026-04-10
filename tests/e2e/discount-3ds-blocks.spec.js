@@ -11,7 +11,10 @@ h.run('Blocks Checkout — Discount + 3DS', async ({ page, assert, config, coupo
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');
   await page.waitForSelector('.wc-block-checkout', { timeout: config.timeouts.selector });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(2000);
+
+  // Apply coupon on the blocks checkout page
+  await h.applyBlocksCoupon(couponCode);
 
   // --- Order summary shows product + discount ---
   console.log('--- Order summary ---');

@@ -49,8 +49,39 @@ if (!function_exists('get_user_meta')) {
 if (!function_exists('wc_add_notice')) {
     function wc_add_notice($message, $type = 'notice') {}
 }
+// Global order registry — allows tests to pre-register orders so that
+// wc_get_order() can return false for deleted orders and wc_get_orders()
+// can search by meta.
+global $test_order_registry;
+$test_order_registry = null; // null = not active (legacy), array = active registry
+
 if (!function_exists('wc_get_order')) {
-    function wc_get_order($order_id) { return new WC_Order($order_id); }
+    function wc_get_order($order_id) {
+        global $test_order_registry;
+        if (is_array($test_order_registry)) {
+            return $test_order_registry[$order_id] ?? false;
+        }
+        return new WC_Order($order_id);
+    }
+}
+if (!function_exists('wc_get_orders')) {
+    function wc_get_orders($args = []) {
+        global $test_order_registry;
+        $results = [];
+        $meta_key = $args['meta_key'] ?? null;
+        $meta_value = $args['meta_value'] ?? null;
+        $limit = $args['limit'] ?? -1;
+
+        foreach ($test_order_registry as $order) {
+            if ($meta_key && $meta_value && $order->get_meta($meta_key) === $meta_value) {
+                $results[] = $order;
+            }
+            if ($limit > 0 && count($results) >= $limit) {
+                break;
+            }
+        }
+        return $results;
+    }
 }
 if (!function_exists('wpautop')) {
     function wpautop($text) { return $text; }

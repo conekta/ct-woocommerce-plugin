@@ -1,3 +1,13 @@
+5.4.14, 2026-04-10
+-------------------------------------
+- Fix: Webhook order.paid/order.expired now uses wc_get_order() with fallback lookup by conekta-order-id meta, fixing HPOS compatibility and 3DS temp order mismatch
+- Fix: validate_reference_id now rejects empty, non-numeric, zero, and negative values
+- Enhancement: Optimized WordPress.org SVN deployment — exclude dev files, add --delete for clean sync, use --no-dev for composer, and shallow SVN checkout to skip historical tags
+- Enhancement: Reduced CI log noise with quiet flags on svn, rsync, and apt-get commands
+
+## [5.4.13]() - 2026-04-10
+- Enhancement: Optimize WordPress.org SVN deployment — exclude dev files, add `--delete` for clean sync, use `--no-dev` for composer, and shallow SVN checkout to skip historical tags
+- Enhancement: Reduce CI log noise with quiet flags on svn, rsync, and apt-get commands
 5.4.12, 2026-04-10
 -------------------------------------
 - Feature: Full support for dynamic pricing plugins (Advanced Dynamic Pricing and Discount Rules)

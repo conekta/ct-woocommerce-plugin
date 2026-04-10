@@ -37,9 +37,10 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     protected function tearDown(): void
     {
-        global $test_product_registry;
+        global $test_product_registry, $test_order_registry;
         WC()->cart = null;
         $test_product_registry = [];
+        $test_order_registry = null;
         parent::tearDown();
     }
 
@@ -134,6 +135,170 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $result = WC_Conekta_Plugin::validate_reference_id([]);
         $this->assertFalse($result);
+    }
+
+    public function test_validate_reference_id_with_empty_string()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => ''],
+        ]);
+        $this->assertFalse($result, 'Empty string reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_with_zero()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => '0'],
+        ]);
+        $this->assertFalse($result, 'Zero reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_with_non_numeric()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => 'abc'],
+        ]);
+        $this->assertFalse($result, 'Non-numeric reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_with_negative()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => '-1'],
+        ]);
+        $this->assertFalse($result, 'Negative reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_with_integer()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => 1285],
+        ]);
+        $this->assertTrue($result, 'Integer reference_id should be valid');
+    }
+
+    public function test_validate_reference_id_with_null()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['reference_id' => null],
+        ]);
+        $this->assertFalse($result, 'Null reference_id should be invalid');
+    }
+
+    // -------------------------------------------------------
+    // Webhook order lookup — find_order_for_webhook()
+    // -------------------------------------------------------
+
+    /**
+     * When reference_id points to a valid order, return it directly.
+     */
+    public function test_find_order_for_webhook_by_reference_id()
+    {
+        global $test_order_registry;
+        $order = new WC_Order(1308);
+        $test_order_registry[1308] = $order;
+
+        $conekta_order = [
+            'id' => 'ord_abc123',
+            'metadata' => ['reference_id' => '1308'],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertNotFalse($found);
+        $this->assertEquals(1308, $found->get_id());
+    }
+
+    /**
+     * When reference_id points to a deleted temp order but a real order
+     * holds the conekta-order-id meta, the fallback should find it.
+     */
+    public function test_find_order_for_webhook_fallback_by_conekta_meta()
+    {
+        global $test_order_registry;
+
+        // Real order 1308 has the conekta-order-id meta
+        $real_order = new WC_Order(1308);
+        $real_order->update_meta_data('conekta-order-id', 'ord_abc123');
+        $test_order_registry[1308] = $real_order;
+
+        // Temp order 1309 was deleted — NOT in registry
+
+        $conekta_order = [
+            'id' => 'ord_abc123',
+            'metadata' => ['reference_id' => '1309'],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertNotFalse($found, 'Should find order by conekta-order-id meta when reference_id order is deleted');
+        $this->assertEquals(1308, $found->get_id());
+    }
+
+    /**
+     * When neither reference_id nor conekta-order-id meta match, return false.
+     */
+    public function test_find_order_for_webhook_returns_false_when_not_found()
+    {
+        global $test_order_registry;
+        // Registry is empty — no orders at all
+        $test_order_registry = [];
+
+        $conekta_order = [
+            'id' => 'ord_ghost',
+            'metadata' => ['reference_id' => '9999'],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertFalse($found);
+    }
+
+    /**
+     * When reference_id arrives as integer (observed in production),
+     * lookup should still work.
+     */
+    public function test_find_order_for_webhook_with_integer_reference_id()
+    {
+        global $test_order_registry;
+        $order = new WC_Order(1285);
+        $test_order_registry[1285] = $order;
+
+        $conekta_order = [
+            'id' => 'ord_int123',
+            'metadata' => ['reference_id' => 1285],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertNotFalse($found);
+        $this->assertEquals(1285, $found->get_id());
+    }
+
+    // -------------------------------------------------------
+    // update_conekta_order_meta — writes to WC_Order meta
+    // -------------------------------------------------------
+
+    public function test_update_conekta_order_meta_stores_value_in_order_meta()
+    {
+        $order = new WC_Order(500);
+        WC_Conekta_Plugin::update_conekta_order_meta($order, 'ord_abc123', 'conekta-order-id');
+
+        $this->assertEquals('ord_abc123', $order->get_meta('conekta-order-id'));
+    }
+
+    public function test_update_conekta_order_meta_paid_at()
+    {
+        $order = new WC_Order(501);
+        $paid_at = date("Y-m-d", 1712700000);
+        WC_Conekta_Plugin::update_conekta_order_meta($order, $paid_at, 'conekta-paid-at');
+
+        $this->assertEquals($paid_at, $order->get_meta('conekta-paid-at'));
+    }
+
+    public function test_update_conekta_order_meta_overwrites_previous_value()
+    {
+        $order = new WC_Order(502);
+        WC_Conekta_Plugin::update_conekta_order_meta($order, 'old_value', 'conekta-order-id');
+        WC_Conekta_Plugin::update_conekta_order_meta($order, 'new_value', 'conekta-order-id');
+
+        $this->assertEquals('new_value', $order->get_meta('conekta-order-id'));
     }
 
     // -------------------------------------------------------
