@@ -78,7 +78,7 @@ jobs:
           
           # Agrega nuevos archivos y elimina los eliminados
           svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add -q x
-          svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete -q x
+          svn status | grep '^!' | awk '{print $2}' | sort -r | xargs -I x svn delete --force -q x
 
           # Resumen de cambios
           echo "=== Resumen de cambios SVN ==="
