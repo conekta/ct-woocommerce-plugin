@@ -1,3 +1,7 @@
+## [5.4.13]() - 2026-04-10
+- Enhancement: Optimize WordPress.org SVN deployment — exclude dev files, add `--delete` for clean sync, use `--no-dev` for composer, and shallow SVN checkout to skip historical tags
+- Enhancement: Reduce CI log noise with quiet flags on svn, rsync, and apt-get commands
+
 ## [5.4.12]() - 2026-04-10
 - Feature: Full support for "Advanced Dynamic Pricing and Discount Rules" plugin and similar dynamic pricing plugins
 - Feature: Three discount detection sources for Conekta discount_lines: native WC coupons (`coupon`), fee-based discounts (`campaign`), and price-level discounts (`campaign`)

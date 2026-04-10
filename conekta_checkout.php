@@ -4,7 +4,7 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.
-Version: 5.4.12
+Version: 5.4.13
 Requires at least: 6.6.2
 Requires PHP: 7.4
 Author: Conekta.io
@@ -152,8 +152,16 @@ function ckpg_build_conekta_discount_lines(): array {
         return $discount_lines;
     }
 
+    // When called from wp_enqueue_scripts, cart totals may not have been
+    // calculated yet (checkout shortcode triggers calculate_totals() later).
+    // Without totals, get_coupon_discount_amount() returns 0.
+    $applied_coupons = WC()->cart->get_applied_coupons();
+    if (!empty($applied_coupons) && empty(WC()->cart->get_coupon_discount_totals())) {
+        WC()->cart->calculate_totals();
+    }
+
     // Native WooCommerce coupons
-    foreach (WC()->cart->get_applied_coupons() as $coupon_code) {
+    foreach ($applied_coupons as $coupon_code) {
         $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
         if ($discount_amount > 0) {
             $discount_lines[] = [
