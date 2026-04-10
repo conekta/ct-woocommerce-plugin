@@ -5,8 +5,10 @@ const STORE_URL = process.env.STORE_URL || 'http://localhost';
 const CONEKTA_API_KEY = process.env.CONEKTA_API_KEY;
 const WP_USER = process.env.WP_USER || 'user';
 const WP_PASS = process.env.WP_PASS || 'bitnami';
-const REGULAR_PRICE = '1000';
-const DISCOUNT_AMOUNT = '500';
+
+// Random price between 100.00 and 1000.00 with cents
+const REGULAR_PRICE = (Math.random() * 900 + 100).toFixed(2);
+const DISCOUNT_AMOUNT = (parseFloat(REGULAR_PRICE) / 2).toFixed(2);
 const TEST_CARD = {
   number: '5200000000001096',
   name: 'Test User',
@@ -31,7 +33,7 @@ const BILLING = {
   email: 'test-e2e@example.com',
 };
 
-let browser, page, wpNonce, productId;
+let browser, page, wpNonce, productId, couponId, couponCode;
 const STATUS = { true: '\x1b[32m✓\x1b[0m', false: '\x1b[31m✗\x1b[0m' };
 const COUNTER = { true: 'passed', false: 'failed' };
 const counters = { passed: 0, failed: 0 };
@@ -42,21 +44,21 @@ function assert(condition, label) {
   counters[COUNTER[key]]++;
 }
 
-async function refreshNonce() {
-  wpNonce = await page.evaluate(async () => {
-    const res = await fetch('/wp-admin/admin-ajax.php?action=rest-nonce');
-    return res.text();
-  });
-}
-
 async function wcApi(method, endpoint, body) {
-  await refreshNonce();
-  return page.evaluate(async ({ url, method, body, nonce }) => {
+  // Ensure we're on a WP admin page for cookie auth
+  const currentUrl = page.url();
+  const isAdmin = currentUrl.includes('/wp-admin');
+  const target = isAdmin ? currentUrl : `${STORE_URL}/wp-admin/`;
+  await (isAdmin ? Promise.resolve() : page.goto(target).then(() => page.waitForLoadState('networkidle')));
+
+  return page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
+    // Fresh nonce for every call
+    const nonce = await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text();
     const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
+    const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
     return res.json();
-  }, { url: `${STORE_URL}/wp-json/${endpoint}`, method, body, nonce: wpNonce });
+  }, { baseUrl: STORE_URL, method, endpoint, body });
 }
 
 // -------------------------------------------------------
@@ -86,8 +88,9 @@ async function setup() {
   await page.goto(`${STORE_URL}/wp-admin/`);
   await page.waitForLoadState('networkidle');
 
-  // Create product with sale_price (triggers same price-level discount detection as ADP)
-  console.log(`Setup: Creating product (regular=$${REGULAR_PRICE}, sale=$${DISCOUNT_AMOUNT})...`);
+  console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}`);
+
+  // Create product with sale_price (triggers price-level discount detection)
   const product = await wcApi('POST', 'wc/v3/products', {
     name: 'E2E Discount Test',
     type: 'simple',
@@ -98,14 +101,41 @@ async function setup() {
   productId = product.id;
   console.log(`Setup: Product created (ID: ${productId})`);
 
+  // Create coupon for additional $50 off (tests coupon + price-level together)
+  couponCode = 'e2e_' + Date.now();
+  const coupon = await wcApi('POST', 'wc/v3/coupons', {
+    code: couponCode,
+    discount_type: 'fixed_product',
+    amount: '50',
+    product_ids: [productId],
+  });
+  couponId = coupon.id;
+  console.log(`Setup: Coupon created (${couponCode})`);
+
   // Add to cart
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
   await page.waitForLoadState('networkidle');
-  console.log('Setup: Product added to cart\n');
+
+  // Apply coupon via WC Store API
+  await page.goto(`${STORE_URL}/cart/`);
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(async ({ code }) => {
+    const cartRes = await fetch('/wp-json/wc/store/v1/cart', { credentials: 'same-origin' });
+    const nonce = cartRes.headers.get('Nonce') || '';
+    await fetch('/wp-json/wc/store/v1/cart/apply-coupon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Nonce': nonce },
+      credentials: 'same-origin',
+      body: JSON.stringify({ code }),
+    });
+  }, { code: couponCode });
+  console.log('Setup: Coupon applied');
+  console.log('Setup: Ready\n');
 }
 
 async function teardown() {
   console.log('\nTeardown...');
+  try { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } catch (_) {}
   try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
   try { await browser.close(); } catch (_) {}
 }
@@ -137,8 +167,15 @@ async function testDiscountLines(settings) {
   const discountLines = settings.discount_lines;
 
   assert(Array.isArray(discountLines), 'discount_lines is array');
-  assert(discountLines.length > 0, `discount_lines count = ${discountLines.length}`);
+  assert(discountLines.length >= 2, `discount_lines count = ${discountLines.length} (coupon + price-level)`);
 
+  // Coupon discount
+  const couponEntry = discountLines.find(d => d.code === couponCode);
+  assert(couponEntry !== undefined, `coupon entry present (${couponCode})`);
+  assert(couponEntry.amount === 5000, `coupon amount = ${couponEntry.amount} (expected 5000)`);
+  assert(couponEntry.type === 'coupon', `coupon type = ${couponEntry.type}`);
+
+  // Price-level discount (sale_price triggers this)
   const dynamicEntry = discountLines.find(d => d.code === 'dynamic_pricing');
   assert(dynamicEntry !== undefined, 'dynamic_pricing entry present');
   assert(dynamicEntry.amount > 0, `dynamic_pricing amount = ${dynamicEntry.amount}`);
@@ -149,6 +186,8 @@ async function testNoDoubleCounting(settings) {
   console.log('\n--- Double-counting guard ---');
   const dynamicCount = settings.discount_lines.filter(d => d.code === 'dynamic_pricing').length;
   assert(dynamicCount === 1, `dynamic_pricing entries = ${dynamicCount} (expected 1)`);
+  const couponCount = settings.discount_lines.filter(d => d.code === couponCode).length;
+  assert(couponCount === 1, `coupon entries = ${couponCount} (expected 1)`);
 }
 
 async function testFragmentElement() {
