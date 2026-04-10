@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php-version: ['7.4', '8.1', '8.2', '8.3']
+        php-version: ['7.4', '8.1', '8.2', '8.3', '8.4', '8.5']
     name: Build & Test (PHP ${{ matrix.php-version }})
     services:
       mockoon:
@@ -68,3 +68,40 @@ jobs:
         env:
           CONEKTA_HOST: http://localhost:3000
         run: vendor/bin/phpunit --testdox
+
+      - name: Run JS tests
+        run: npm test
+
+  e2e-checkout:
+    runs-on: ubuntu-latest
+    name: E2E Checkout
+    needs: build-and-test
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run E2E tests
+        env:
+          CONEKTA_API_KEY: ${{ secrets.CONEKTA_API_KEY }}
+          STORE_URL: https://woocommerce.stg.conekta.io
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASS: ${{ secrets.WP_PASS }}
+        run: npm run test:e2e
+
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-failure-artifacts
+          path: test-results/
+          retention-days: 3

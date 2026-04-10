@@ -61,9 +61,70 @@ if (!function_exists('wp_kses_post')) {
 if (!function_exists('sanitize_text_field')) {
     function sanitize_text_field($str) { return $str; }
 }
+if (!function_exists('esc_html')) {
+    function esc_html($text) { return htmlspecialchars((string) $text, ENT_QUOTES, 'UTF-8'); }
+}
+if (!function_exists('wp_json_encode')) {
+    function wp_json_encode($data, $options = 0, $depth = 512) { return json_encode($data, $options, $depth); }
+}
+if (!function_exists('wp_get_post_terms')) {
+    function wp_get_post_terms($post_id, $taxonomy, $args = []) { return []; }
+}
+if (!function_exists('wc_get_product')) {
+    function wc_get_product($id) {
+        return new WC_Product($id); // picks up data from $test_product_registry
+    }
+}
+
 // info_log is defined in conekta_gateway_helper.php — no stub needed
 
 // get_expired_at is defined in conekta_gateway_helper.php — no stub needed
+
+// Global product registry — allows tests to pre-configure products so that
+// both `new WC_Product($id)` and `wc_get_product($id)` return the same data.
+global $test_product_registry;
+$test_product_registry = [];
+
+// WC_Product stub — picks up pre-registered data from global registry
+if (!class_exists('WC_Product')) {
+    class WC_Product {
+        private $id;
+        private $name;
+        private $regular_price = 0;
+        private $price = 0;
+        public function __construct($id = 0) {
+            global $test_product_registry;
+            $this->id = $id;
+            $this->name = 'Test Product ' . $id;
+            if (isset($test_product_registry[$id])) {
+                $src = $test_product_registry[$id];
+                $this->regular_price = $src['regular_price'] ?? 0;
+                $this->price         = $src['price'] ?? 0;
+                $this->name          = $src['name'] ?? $this->name;
+            }
+        }
+        public function get_id() { return $this->id; }
+        public function get_name() { return $this->name; }
+        public function set_name($name) { $this->name = $name; return $this; }
+        public function get_sku() { return ''; }
+        public function get_price() { return $this->price; }
+        public function set_price($price) { $this->price = $price; return $this; }
+        public function get_regular_price() { return $this->regular_price; }
+        public function set_regular_price($price) { $this->regular_price = $price; return $this; }
+        public function get_description() { return ''; }
+        public function get_gallery_image_ids() { return []; }
+    }
+}
+
+// WC_Coupon stub
+if (!class_exists('WC_Coupon')) {
+    class WC_Coupon {
+        private $code;
+        public function __construct($code = '') { $this->code = $code; }
+        public function get_data() { return ['code' => $this->code]; }
+        public function is_valid() { return true; }
+    }
+}
 
 // WC_Payment_Gateway stub
 if (!class_exists('WC_Payment_Gateway')) {
@@ -192,6 +253,84 @@ if (!class_exists('WC_Geolocation')) {
     }
 }
 
+// Configurable cart stub for testing cart/discount functions
+if (!class_exists('WC_Cart_Test_Helper')) {
+    class WC_Cart_Test_Helper {
+        private array $items = [];
+        private array $coupons = [];
+        private array $coupon_amounts = [];
+        private array $coupon_tax_amounts = [];
+        private array $fees = [];
+        private float $total = 0.0;
+
+        public static function create(): self { return new self(); }
+
+        /**
+         * @param float $regular_price  If > 0, sets the product regular_price (for price-level discount detection)
+         */
+        public function withItem(int $product_id, int $quantity, float $line_subtotal, float $line_total, int $variation_id = 0, float $regular_price = 0): self {
+            $product = new WC_Product($product_id);
+            if ($regular_price > 0) {
+                $product->set_regular_price($regular_price);
+            }
+            $this->items['item_' . count($this->items)] = [
+                'data'           => $product,
+                'product_id'     => $product_id,
+                'quantity'       => $quantity,
+                'line_subtotal'  => $line_subtotal,
+                'line_total'     => $line_total,
+                'variation_id'   => $variation_id,
+            ];
+            return $this;
+        }
+
+        public function withCoupon(string $code, float $amount, float $tax = 0.0): self {
+            $this->coupons[] = $code;
+            $this->coupon_amounts[$code] = $amount;
+            $this->coupon_tax_amounts[$code] = $tax;
+            return $this;
+        }
+
+        public function withFee(string $name, float $total, bool $taxable = false): self {
+            $this->fees[] = (object) [
+                'name'      => $name,
+                'total'     => $total,
+                'amount'    => $total,
+                'tax'       => 0.0,
+                'taxable'   => $taxable,
+                'tax_class' => '',
+            ];
+            return $this;
+        }
+
+        public function withTotal(float $total): self {
+            $this->total = $total;
+            return $this;
+        }
+
+        // --- WC_Cart interface ---
+        public function is_empty(): bool { return empty($this->items); }
+        public function get_cart(): array { return $this->items; }
+        public function get_applied_coupons(): array { return $this->coupons; }
+        public function get_coupon_discount_amount(string $code, bool $ex_tax = true): float {
+            return $this->coupon_amounts[$code] ?? 0.0;
+        }
+        public function get_coupon_discount_tax_amount(string $code): float {
+            return $this->coupon_tax_amounts[$code] ?? 0.0;
+        }
+        public function get_fees(): array { return $this->fees; }
+        public function get_total(string $context = ''): float { return $this->total; }
+        public function get_coupons(): array {
+            $result = [];
+            foreach ($this->coupons as $code) {
+                $result[$code] = new WC_Coupon($code);
+            }
+            return $result;
+        }
+        public function calculate_totals(): void { /* no-op in tests */ }
+    }
+}
+
 // WP_REST_Request stub
 if (!class_exists('WP_REST_Request')) {
     class WP_REST_Request {
@@ -291,3 +430,4 @@ if (!function_exists('wp_localize_script')) {
 require_once dirname(__DIR__) . '/conekta_gateway_helper.php';
 require_once dirname(__DIR__) . '/conekta_plugin.php';
 require_once dirname(__DIR__) . '/conekta_block_gateway.php';
+require_once dirname(__DIR__) . '/conekta_checkout.php';

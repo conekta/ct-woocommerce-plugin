@@ -1,3 +1,16 @@
+5.4.12, 2026-04-10
+-------------------------------------
+- Feature: Full support for dynamic pricing plugins (Advanced Dynamic Pricing and Discount Rules)
+- Feature: Three discount sources for Conekta: native coupons (coupon), fee-based (campaign), price-level (campaign)
+- Feature: line_items use original regular_price; dynamic discounts go to discount_lines for visibility
+- Fix: 3DS classic checkout recalculates cart so dynamic pricing hooks fire before order creation
+- Fix: 3DS order uses cart subtotal/total instead of catalog prices
+- Fix: Cart fees (negative fees from dynamic pricing) copied to 3DS WC order
+- Enhancement: Fragment system keeps JS conekta_settings in sync after checkout AJAX refreshes
+- Enhancement: Classic checkout JS sends discount_lines in 3DS request
+- Enhancement: Price-level discount detection across all 6 payment gateways
+- Tests: 40 PHPUnit tests, 127 assertions
+
 5.4.11, 2026-03-30
 -------------------------------------
 - Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard
