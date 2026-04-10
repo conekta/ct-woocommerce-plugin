@@ -90,7 +90,9 @@ jobs:
         run: npm ci
 
       - name: Install Playwright Chromium
-        run: ./node_modules/.bin/playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: 0
+        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         env:
@@ -98,6 +100,7 @@ jobs:
           STORE_URL: https://woocommerce.stg.conekta.io
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
+          PLAYWRIGHT_BROWSERS_PATH: 0
         run: npm run test:e2e
 
       - name: Upload E2E failure screenshots
