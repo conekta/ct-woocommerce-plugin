@@ -1,5 +1,14 @@
-## [5.4.12]() - 2026-04-09
-- Feature: Add support to dynamic pricing rules
+## [5.4.12]() - 2026-04-10
+- Feature: Full support for "Advanced Dynamic Pricing and Discount Rules" plugin and similar dynamic pricing plugins
+- Feature: Three discount detection sources for Conekta discount_lines: native WC coupons (`coupon`), fee-based discounts (`campaign`), and price-level discounts (`campaign`)
+- Feature: Conekta line_items now use the original `regular_price` as `unit_price`, with the dynamic discount sent separately in `discount_lines` for full visibility
+- Fix: 3DS classic checkout now recalculates cart via `WC()->cart->calculate_totals()` so dynamic pricing hooks fire before order creation
+- Fix: 3DS order creation uses explicit `subtotal`/`total` from the cart instead of catalog prices, preserving all plugin-applied discounts
+- Fix: Cart fees (negative fees from dynamic pricing) are now copied to the 3DS WC order
+- Enhancement: New fragment system (`woocommerce_update_order_review_fragments`) keeps JS-side `conekta_settings` in sync after every checkout AJAX refresh
+- Enhancement: Classic checkout JS now sends `discount_lines` in the 3DS request and updates cart data from fragments on `updated_checkout`
+- Enhancement: Price-level discount detection applied consistently across all 6 payment gateways (card, cash, BNPL, bank transfer, pay by bank, 3DS REST API)
+- Tests: 40 PHPUnit tests with 127 assertions covering discount detection, cart snapshots, fee handling, balance verification, and edge cases
 
 ## [5.4.11]() - 2026-03-30
 - Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard
