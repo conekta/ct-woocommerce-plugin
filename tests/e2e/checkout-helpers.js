@@ -127,17 +127,24 @@ async function setup() {
 
   await page.goto(`${STORE_URL}/cart/`);
   await page.waitForLoadState('networkidle');
-  await page.evaluate(async ({ code }) => {
+  const couponApplied = await page.evaluate(async ({ code }) => {
+    // Try multiple nonce sources
     const cartRes = await fetch('/wp-json/wc/store/v1/cart', { credentials: 'same-origin' });
-    const nonce = cartRes.headers.get('Nonce') || '';
-    await fetch('/wp-json/wc/store/v1/cart/apply-coupon', {
+    const nonce = cartRes.headers.get('Nonce')
+      || cartRes.headers.get('X-WC-Store-API-Nonce')
+      || (typeof wcBlocksMiddlewareConfig !== 'undefined' ? wcBlocksMiddlewareConfig.storeApiNonce : '')
+      || '';
+
+    const res = await fetch('/wp-json/wc/store/v1/cart/apply-coupon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Nonce': nonce },
       credentials: 'same-origin',
       body: JSON.stringify({ code }),
     });
+    const data = await res.json();
+    return { status: res.status, coupons: data.coupons?.length || 0 };
   }, { code: couponCode });
-  console.log('Setup: Coupon applied');
+  console.log(`Setup: Coupon apply status=${couponApplied.status} coupons=${couponApplied.coupons}`);
 }
 
 async function teardown() {

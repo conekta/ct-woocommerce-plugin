@@ -74,7 +74,7 @@ jobs:
 
   e2e-checkout:
     runs-on: ubuntu-latest
-    name: E2E Classic Checkout
+    name: E2E Checkout
     needs: build-and-test
     container:
       image: mcr.microsoft.com/playwright:v1.59.1-noble
