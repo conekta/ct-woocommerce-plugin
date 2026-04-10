@@ -47,6 +47,25 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.14 =
+* Fix: Webhook `order.paid`/`order.expired` now uses `wc_get_order()` with fallback lookup by `conekta-order-id` meta, fixing HPOS compatibility and 3DS temp order mismatch
+* Fix: `validate_reference_id` now rejects empty, non-numeric, zero, and negative values
+* Enhancement: Optimized WordPress.org SVN deployment — exclude dev files, add `--delete` for clean sync, use `--no-dev` for composer, and shallow SVN checkout to skip historical tags
+* Enhancement: Reduced CI log noise with quiet flags on svn, rsync, and apt-get commands
+= 5.4.13 =
+* Enhancement: Optimize WordPress.org SVN deployment — exclude dev files, add `--delete` for clean sync, use `--no-dev` for composer, and shallow SVN checkout to skip historical tags
+* Enhancement: Reduce CI log noise with quiet flags on svn, rsync, and apt-get commands
+= 5.4.12 =
+* Feature: Full support for "Advanced Dynamic Pricing and Discount Rules" plugin and similar dynamic pricing plugins
+* Feature: Three discount detection sources for Conekta discount_lines: native WC coupons, fee-based discounts, and price-level discounts
+* Feature: Conekta line_items now use the original regular_price as unit_price, with the dynamic discount sent separately in discount_lines
+* Fix: 3DS classic checkout now recalculates cart via calculate_totals() so dynamic pricing hooks fire before order creation
+* Fix: 3DS order creation uses explicit subtotal/total from the cart instead of catalog prices, preserving all plugin-applied discounts
+* Fix: Cart fees (negative fees from dynamic pricing) are now copied to the 3DS WC order
+* Enhancement: New fragment system keeps JS-side conekta_settings in sync after every checkout AJAX refresh
+* Enhancement: Classic checkout JS now sends discount_lines in the 3DS request and updates cart data from fragments
+* Enhancement: Price-level discount detection applied consistently across all 6 payment gateways
+* Tests: 40 PHPUnit tests with 127 assertions covering discount detection, cart snapshots, fee handling, balance verification, and edge cases
 = 5.4.11 =
 * Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard
 = 5.4.10 =

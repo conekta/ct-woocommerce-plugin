@@ -61,6 +61,13 @@ NEW_VERSION, YYYY-MM-DD
 ```
 (Keep existing entries below.)
 
+**readme.txt** — Add a new entry right after the `== Changelog ==` line (before the first existing `= x.y.z =` block):
+```
+= NEW_VERSION =
+* <changelog entries>
+```
+(Keep existing entries below. Use `*` bullets to match the existing readme.txt style.)
+
 ### 5. Report
 
 Show the user a summary:
