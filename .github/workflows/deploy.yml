@@ -38,15 +38,15 @@ jobs:
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
         run: |
           # Instalar SVN
-          sudo apt-get -y install subversion
-          
+          sudo apt-get -yq install subversion
+
           # Checkout del repositorio SVN de WordPress.org (solo trunk, sin descargar tags históricos)
-          svn checkout --depth immediates https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
-          svn update --set-depth infinity svn-dir/trunk
-          svn update --set-depth immediates svn-dir/tags
-          
+          svn checkout -q --depth immediates https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+          svn update -q --set-depth infinity svn-dir/trunk
+          svn update -q --set-depth immediates svn-dir/tags
+
           # Sincroniza los archivos
-          rsync -av --delete \
+          rsync -a --delete \
             --exclude=".git" \
             --exclude=".github" \
             --exclude=".claude" \
@@ -77,11 +77,18 @@ jobs:
           cd svn-dir
           
           # Agrega nuevos archivos y elimina los eliminados
-          svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add x
-          svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete x
-          
+          svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add -q x
+          svn status | grep '^!' | awk '{print $2}' | sort -r | xargs -I x svn delete --force -q x
+
+          # Resumen de cambios
+          echo "=== Resumen de cambios SVN ==="
+          svn status | head -30
+          TOTAL=$(svn status | wc -l | tr -d ' ')
+          echo "Total de cambios: $TOTAL"
+
           # Crea una copia en la carpeta tags
           svn cp trunk tags/${{ github.ref_name }}
-          
+
           # Commit a SVN
-          svn commit -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
+          svn commit -q -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
+          echo "✓ Versión ${{ github.ref_name }} desplegada en WordPress.org"
