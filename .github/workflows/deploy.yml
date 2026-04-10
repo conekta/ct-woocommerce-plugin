@@ -20,7 +20,7 @@ jobs:
           coverage: none
 
       - name: Instalar dependencias de Composer
-        run: composer install --no-interaction --no-progress
+        run: composer install --no-dev --no-interaction --no-progress
 
       - name: Instalar Node.js
         uses: actions/setup-node@v6
@@ -38,23 +38,57 @@ jobs:
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
         run: |
           # Instalar SVN
-          sudo apt-get -y install subversion
-          
-          # Checkout del repositorio SVN de WordPress.org
-          svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
-          
+          sudo apt-get -yq install subversion
+
+          # Checkout del repositorio SVN de WordPress.org (solo trunk, sin descargar tags históricos)
+          svn checkout -q --depth immediates https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+          svn update -q --set-depth infinity svn-dir/trunk
+          svn update -q --set-depth immediates svn-dir/tags
+
           # Sincroniza los archivos
-          rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude=".claude" --exclude="tests" --exclude="svn-dir" --exclude="vendor/squizlabs/php_codesniffer" . svn-dir/trunk/
+          rsync -a --delete \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude=".claude" \
+            --exclude=".devcontainer" \
+            --exclude=".idea" \
+            --exclude=".gitignore" \
+            --exclude=".gitattributes" \
+            --exclude=".nvmrc" \
+            --exclude=".DS_Store" \
+            --exclude=".phpunit.result.cache" \
+            --exclude="node_modules" \
+            --exclude="tests" \
+            --exclude="svn-dir" \
+            --exclude="vendor/squizlabs/php_codesniffer" \
+            --exclude="composer.json" \
+            --exclude="composer.lock" \
+            --exclude="package.json" \
+            --exclude="package-lock.json" \
+            --exclude="webpack.config.js" \
+            --exclude="phpunit.xml" \
+            --exclude="Dockerfile" \
+            --exclude="*.zip" \
+            --exclude="readme_files" \
+            --exclude="CLAUDE.md" \
+            . svn-dir/trunk/
           
           # Cambia al directorio SVN
           cd svn-dir
           
           # Agrega nuevos archivos y elimina los eliminados
-          svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add x
-          svn status | grep '^!' | awk '{print $2}' | xargs -I x svn delete x
-          
+          svn status | grep '^?' | awk '{print $2}' | xargs -I x svn add -q x
+          svn status | grep '^!' | awk '{print $2}' | sort -r | xargs -I x svn delete --force -q x
+
+          # Resumen de cambios
+          echo "=== Resumen de cambios SVN ==="
+          svn status | head -30
+          TOTAL=$(svn status | wc -l | tr -d ' ')
+          echo "Total de cambios: $TOTAL"
+
           # Crea una copia en la carpeta tags
           svn cp trunk tags/${{ github.ref_name }}
-          
+
           # Commit a SVN
-          svn commit -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
+          svn commit -q -m "Despliegue de la versión ${{ github.ref_name }}" --username $SVN_USERNAME --password $SVN_PASSWORD
+          echo "✓ Versión ${{ github.ref_name }} desplegada en WordPress.org"
