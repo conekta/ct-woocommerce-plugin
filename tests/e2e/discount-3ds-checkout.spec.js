@@ -1,4 +1,5 @@
 const { chromium } = require('playwright');
+const config = require('./e2e.config');
 
 const STORE_URL = process.env.STORE_URL || 'http://localhost';
 const CONEKTA_API_KEY = process.env.CONEKTA_API_KEY;
@@ -75,8 +76,10 @@ async function getAdpRuleProductIds() {
 // -------------------------------------------------------
 
 async function setup() {
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  browser = await chromium.launch({ headless: config.headless });
+  const context = await browser.newContext({
+    recordVideo: config.video,
+  });
   page = await context.newPage();
 
   // Login
@@ -116,7 +119,7 @@ async function testConektaSettings() {
   console.log('--- conekta_settings ---');
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');
-  await page.waitForSelector('form.checkout', { timeout: 10000 });
+  await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
   await page.waitForTimeout(2000);
 
   const settings = await page.evaluate(() => window.conekta_settings);
@@ -212,20 +215,20 @@ async function testFillCardAndPlaceOrder() {
   await page.waitForTimeout(5000);
 
   // Wait for 3DS challenge iframe
-  await page.waitForSelector('#conekta3dsContainer iframe', { timeout: 15000 });
+  await page.waitForSelector('#conekta3dsContainer iframe', { timeout: config.timeouts.threeDs });
   assert(true, '3DS challenge iframe appeared');
 
   // The 3DS form is in a nested iframe: conekta3dsContainer > conekta iframe > Cardinal iframe
   // Wait for the Cardinal challenge form to render (nested iframe with OTP input)
   const threeDsFrame = page.frameLocator('#conekta3dsContainer iframe');
   const challengeFrame = threeDsFrame.frameLocator('#Cardinal-CCA-IFrame');
-  await challengeFrame.locator('input[name="challengeDataEntry"]').waitFor({ state: 'visible', timeout: 30000 });
+  await challengeFrame.locator('input[name="challengeDataEntry"]').waitFor({ state: 'visible', timeout: config.timeouts.threeDs });
   await challengeFrame.locator('input[name="challengeDataEntry"]').fill('1234');
   await challengeFrame.locator('input[value="SUBMIT"]').click();
   assert(true, '3DS token 1234 submitted');
 
   // Wait for redirect to order-received
-  await page.waitForURL('**/order-received/**', { timeout: 60000 });
+  await page.waitForURL('**/order-received/**', { timeout: config.timeouts.navigation });
   assert(true, 'redirected to order-received');
 }
 
@@ -290,8 +293,9 @@ async function testOrderStatus() {
     await testOrderStatus();
   } catch (error) {
     console.error(`\n\x1b[31mError: ${error.message}\x1b[0m`);
-    await page.screenshot({ path: '/tmp/e2e-checkout-error.png', fullPage: true });
-    console.log('Screenshot: /tmp/e2e-checkout-error.png');
+    const screenshotPath = `${config.screenshot.dir}${config.screenshot.prefix}checkout-error.png`;
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    console.log(`Screenshot: ${screenshotPath}`);
   } finally {
     await teardown();
   }

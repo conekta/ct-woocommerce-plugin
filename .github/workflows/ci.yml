@@ -76,6 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     name: E2E Classic Checkout
     needs: build-and-test
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -84,15 +86,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Install Playwright Chromium
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: 0
-        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         env:
@@ -100,13 +96,14 @@ jobs:
           STORE_URL: https://woocommerce.stg.conekta.io
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
-          PLAYWRIGHT_BROWSERS_PATH: 0
         run: npm run test:e2e
 
-      - name: Upload E2E failure screenshots
+      - name: Upload E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-failure-screenshots
-          path: /tmp/e2e-*.png
+          name: e2e-failure-artifacts
+          path: |
+            /tmp/e2e-*.png
+            /tmp/e2e-videos/*.webm
           retention-days: 3
