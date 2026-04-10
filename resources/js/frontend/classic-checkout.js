@@ -41,20 +41,20 @@ const utils = {
   },
   setLoading: (isLoading) => {
     const form = document.querySelector(FORM_SELECTOR);
-    if (!form || typeof jQuery === "undefined") return;
-
-    const $form = jQuery(form);
+    if (!form) return;
 
     if (isLoading) {
-      $form.block({
-        message: null,
-        overlayCSS: {
-          background: "#fff",
-        },
-      });
+      if (!form.querySelector('.conekta-loading-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'conekta-loading-overlay';
+        overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.6);z-index:1000;';
+        form.style.position = 'relative';
+        form.appendChild(overlay);
+      }
       form.classList.add('three-ds-process');
     } else {
-      $form.unblock();
+      const overlay = form.querySelector('.conekta-loading-overlay');
+      if (overlay) overlay.remove();
       form.classList.remove('three-ds-process');
     }
   },
@@ -614,7 +614,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  jQuery(document.body).on("updated_checkout", () => {
+  const onUpdatedCheckout = () => {
     // Sync conekta_settings with the latest cart data from the PHP fragment
     // (covers dynamic pricing, coupons, and any cart change after page load)
     const cartDataEl = document.getElementById('conekta-cart-data');
@@ -667,5 +667,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     setTimeout(conektaInitializer.initialize, POLLING_INTERVAL);
-  });
+  };
+
+  // Detect WooCommerce checkout refreshes: WC replaces DOM fragments
+  // after AJAX; #conekta-cart-data lives outside the form, so we
+  // observe document.body and fire onUpdatedCheckout when it's added.
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.id === 'conekta-cart-data' ||
+            (node.querySelector && node.querySelector('#conekta-cart-data'))) {
+          onUpdatedCheckout();
+          return;
+        }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  // Also support native event dispatch (used by tests)
+  document.body.addEventListener("updated_checkout", onUpdatedCheckout);
 });
