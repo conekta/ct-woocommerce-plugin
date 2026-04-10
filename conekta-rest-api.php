@@ -143,43 +143,48 @@ class WC_Conekta_REST_API {
                             $order->add_item($shipping_item);
                         }
                         
-                        // Add items from cart
-                        if (isset($cart_data['items']) && is_array($cart_data['items']) && !empty($cart_data['items'])) {
-                            foreach ($cart_data['items'] as $item) {
-                                if (isset($item['id'], $item['quantity'])) {
-                                    $product = wc_get_product($item['id']);
-                                    if ($product) {
-                                        $order->add_product(
-                                            $product,
-                                            $item['quantity'],
-                                            [
-                                                'variation' => isset($item['variation_id']) ? wc_get_product($item['variation_id']) : null,
-                                            ]
-                                        );
-                                    }
-                                }
-                            }
-                        } else {
-                            // If no items provided, try to get from current WooCommerce cart
-                            $cart_added = false;
-                            if (WC()->cart && !WC()->cart->is_empty()) {
-                                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
-                                    $product = $cart_item['data'];
-                                    if ($product) {
-                                        $order->add_product(
-                                            $product,
-                                            $cart_item['quantity'],
-                                            [
-                                                'variation' => isset($cart_item['variation_id']) ? wc_get_product($cart_item['variation_id']) : null,
-                                            ]
-                                        );
-                                        $cart_added = true;
-                                    }
-                                }
-                            }
+                        // Add items from cart — prefer WC()->cart when available
+                        // so that dynamic pricing / discount plugins are respected.
+                        $cart_used = false;
+                        if (WC()->cart && !WC()->cart->is_empty()) {
+                            // Recalculate so dynamic-pricing hooks fire
+                            WC()->cart->calculate_totals();
 
-                            // If still no items, add a placeholder item
-                            if (!$cart_added) {
+                            foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
+                                $product = $cart_item['data'];
+                                if ($product) {
+                                    $order->add_product(
+                                        $product,
+                                        $cart_item['quantity'],
+                                        [
+                                            'subtotal' => $cart_item['line_subtotal'],
+                                            'total'    => $cart_item['line_total'],
+                                        ]
+                                    );
+                                    $cart_used = true;
+                                }
+                            }
+                        }
+
+                        // Fallback: use items sent from the JS payload
+                        if (!$cart_used) {
+                            if (isset($cart_data['items']) && is_array($cart_data['items']) && !empty($cart_data['items'])) {
+                                foreach ($cart_data['items'] as $item) {
+                                    if (isset($item['id'], $item['quantity'])) {
+                                        $product = wc_get_product($item['id']);
+                                        if ($product) {
+                                            $order->add_product(
+                                                $product,
+                                                $item['quantity'],
+                                                [
+                                                    'variation' => isset($item['variation_id']) ? wc_get_product($item['variation_id']) : null,
+                                                ]
+                                            );
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Last resort: placeholder item
                                 $item = new WC_Order_Item_Product();
                                 $total = isset($cart_data['total']) ? ($cart_data['total'] / 100) : 1.00;
                                 $item->set_props([
@@ -194,10 +199,34 @@ class WC_Conekta_REST_API {
                         // Set payment method
                         $order->set_payment_method('conekta');
 
-                        // Apply coupons from the WooCommerce cart (available in WC AJAX context)
+                        // Apply coupons from the WooCommerce cart
                         if (WC()->cart) {
                             foreach (WC()->cart->get_applied_coupons() as $coupon_code) {
-                                $order->apply_coupon($coupon_code);
+                                $coupon = new \WC_Coupon($coupon_code);
+                                $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code, false);
+                                $discount_tax    = WC()->cart->get_coupon_discount_tax_amount($coupon_code);
+
+                                $coupon_item = new \WC_Order_Item_Coupon();
+                                $coupon_item->set_props([
+                                    'code'         => $coupon_code,
+                                    'discount'     => $discount_amount,
+                                    'discount_tax' => $discount_tax,
+                                ]);
+                                $coupon_item->add_meta_data('coupon_data', $coupon->get_data());
+                                $order->add_item($coupon_item);
+                            }
+
+                            // Copy cart fees (negative fees are discounts from dynamic pricing plugins)
+                            foreach (WC()->cart->get_fees() as $fee) {
+                                $item_fee = new \WC_Order_Item_Fee();
+                                $item_fee->set_props([
+                                    'name'      => $fee->name,
+                                    'tax_class' => $fee->taxable ? $fee->tax_class : '',
+                                    'amount'    => $fee->amount,
+                                    'total'     => $fee->total,
+                                    'total_tax' => $fee->tax,
+                                ]);
+                                $order->add_item($item_fee);
                             }
                         }
 
@@ -323,7 +352,9 @@ class WC_Conekta_REST_API {
                 $tax_lines = array_merge($tax_lines, $fees_data);
                 $discount_lines = ckpg_build_discount_lines($data);
                 $discount_lines = array_merge($discount_lines, $discounts_data);
-                $line_items = ckpg_build_line_items($items, $gateway->version);
+                $price_level_discount = 0;
+                $line_items = ckpg_build_line_items($items, $gateway->version, $price_level_discount);
+                ckpg_add_price_level_discount($discount_lines, $price_level_discount);
                 $shipping_lines = ckpg_build_shipping_lines($data);
                 $shipping_contact = ckpg_build_shipping_contact($data);
                 $customer_info = isset($data['customer_info']) ? $data['customer_info'] : [];

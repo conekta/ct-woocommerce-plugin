@@ -8,3 +8,4 @@ vendor/
 plan.txt
 .cache/
 *.cache
+test-results/

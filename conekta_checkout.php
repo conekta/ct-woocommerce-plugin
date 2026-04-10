@@ -4,11 +4,11 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.
-Version: 5.4.11
+Version: 5.4.12
 Requires at least: 6.6.2
 Requires PHP: 7.4
 Author: Conekta.io
-Author URI: https://www.conekta.io
+Author URI: https://www.conekta.com
 License: GNU General Public License v3.0
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
 */
@@ -92,35 +92,20 @@ function ckpg_enqueue_classic_checkout_script() {
             $short_locale = substr($locale, 0, 2);
             $gateway = $available_gateways['conekta'];
 
-            // Get cart items for classic checkout
-            $cart_items = [];
-            if (WC()->cart && !WC()->cart->is_empty()) {
-                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
-                    $product = $cart_item['data'];
-                    $cart_items[] = [
-                        'id' => $cart_item['product_id'],
-                        'name' => $product->get_name() ?? '',
-                        'quantity' => $cart_item['quantity'],
-                        'total' => $cart_item['line_total'] * 100, // Convert to cents
-                        'variation_id' => $cart_item['variation_id'] ?? null
-                    ];
-                }
-            }
+            // Cart snapshot (same structure used by the fragment update)
+            $cart_snapshot = ckpg_build_conekta_cart_snapshot();
 
             // Get shipping information
             $shipping_cost = 0;
             $shipping_method_id = '';
             $shipping_method_label = '';
-            
+
             if (WC()->cart && !WC()->cart->is_empty()) {
-                // Get shipping total (already calculated by WooCommerce)
-                $shipping_cost = (int) round(WC()->cart->get_shipping_total() * 100); // Convert to cents
-                // Get chosen shipping method
+                $shipping_cost = amount_validation(WC()->cart->get_shipping_total());
                 $chosen_methods = WC()->session->get('chosen_shipping_methods');
                 if (!empty($chosen_methods) && is_array($chosen_methods)) {
                     $shipping_method_id = $chosen_methods[0];
-                    
-                    // Get shipping packages to find the label
+
                     $packages = WC()->shipping()->get_packages();
                     foreach ($packages as $package_key => $package) {
                         if (isset($package['rates'][$shipping_method_id])) {
@@ -132,36 +117,17 @@ function ckpg_enqueue_classic_checkout_script() {
                 }
             }
 
-            // Get discount lines (coupons)
-            $discount_lines = [];
-            if (WC()->cart && !WC()->cart->is_empty()) {
-                $applied_coupons = WC()->cart->get_applied_coupons();
-                if (!empty($applied_coupons)) {
-                    foreach ($applied_coupons as $coupon_code) {
-                        $coupon = new WC_Coupon($coupon_code);
-                        if ($coupon->is_valid()) {
-                            $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
-                            $discount_lines[] = [
-                                'code' => $coupon_code,
-                                'amount' => (int) round($discount_amount * 100), // Convert to cents
-                                'type' => 'coupon'
-                            ];
-                        }
-                    }
-                }
-            }
-
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
                 'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
-                'amount' => WC()->cart->get_total('edit') * 100,
+                'amount' => $cart_snapshot['amount'] ?? 0,
                 'currency' => get_woocommerce_currency(),
-                'cart_items' => $cart_items,
+                'cart_items' => $cart_snapshot['cart_items'] ?? [],
                 'shipping_cost' => $shipping_cost,
                 'shipping_method_id' => $shipping_method_id,
                 'shipping_method_label' => $shipping_method_label,
-                'discount_lines' => $discount_lines,
+                'discount_lines' => $cart_snapshot['discount_lines'] ?? [],
                 'locale' => $short_locale,
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode,
@@ -172,4 +138,132 @@ function ckpg_enqueue_classic_checkout_script() {
             ]);
         }
     }
+}
+
+/**
+ * Build discount lines from WC cart:
+ *   1. Native coupons
+ *   2. Negative fees (dynamic pricing plugins)
+ *   3. Price-level discounts (regular_price vs effective cart price)
+ */
+function ckpg_build_conekta_discount_lines(): array {
+    $discount_lines = [];
+    if (!WC()->cart || WC()->cart->is_empty()) {
+        return $discount_lines;
+    }
+
+    // Native WooCommerce coupons
+    foreach (WC()->cart->get_applied_coupons() as $coupon_code) {
+        $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+        if ($discount_amount > 0) {
+            $discount_lines[] = [
+                'code'   => $coupon_code,
+                'amount' => amount_validation($discount_amount),
+                'type'   => 'coupon',
+            ];
+        }
+    }
+
+    // Fee-based discounts (dynamic pricing plugins often add negative fees)
+    foreach (WC()->cart->get_fees() as $fee) {
+        if ($fee->total < 0) {
+            $discount_lines[] = [
+                'code'   => $fee->name ?: 'discount',
+                'amount' => amount_validation(abs($fee->total)),
+                'type'   => 'campaign',
+            ];
+        }
+    }
+
+    // Price-level discounts: dynamic pricing plugins that modify the product price
+    // directly (not via coupons/fees). Compare regular_price with effective cart price.
+    $price_discount_cents = 0;
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        if (!$product) continue;
+
+        $regular_price = (float) $product->get_regular_price();
+        if ($regular_price <= 0) continue;
+
+        $effective_subtotal = (float) $cart_item['line_subtotal'];
+        $expected_subtotal  = $regular_price * $cart_item['quantity'];
+
+        if ($expected_subtotal > $effective_subtotal) {
+            $price_discount_cents += amount_validation($expected_subtotal - $effective_subtotal);
+        }
+    }
+    if ($price_discount_cents > 0) {
+        $discount_lines[] = [
+            'code'   => 'dynamic_pricing',
+            'amount' => $price_discount_cents,
+            'type'   => 'campaign',
+        ];
+    }
+
+    return $discount_lines;
+}
+
+/**
+ * Build the cart snapshot used by both wp_localize_script and the checkout-update fragment.
+ */
+function ckpg_build_conekta_cart_snapshot(): array {
+    if (!WC()->cart || WC()->cart->is_empty()) {
+        return [];
+    }
+
+    $cart_items = [];
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        $cart_items[] = [
+            'id'           => $cart_item['product_id'],
+            'name'         => $product->get_name() ?? '',
+            'quantity'     => $cart_item['quantity'],
+            'total'        => amount_validation($cart_item['line_total']),
+            'variation_id' => $cart_item['variation_id'] ?? null,
+        ];
+    }
+
+    return [
+        'amount'         => amount_validation(WC()->cart->get_total('edit')),
+        'cart_items'     => $cart_items,
+        'discount_lines' => ckpg_build_conekta_discount_lines(),
+    ];
+}
+
+/**
+ * Send an updated cart-data fragment on every checkout AJAX refresh so the
+ * JS-side conekta_settings stays in sync with dynamic pricing changes.
+ */
+add_filter('woocommerce_update_order_review_fragments', 'ckpg_conekta_cart_fragment');
+function ckpg_conekta_cart_fragment($fragments) {
+    $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
+    if (!isset($available_gateways['conekta'])) {
+        return $fragments;
+    }
+
+    $data = ckpg_build_conekta_cart_snapshot();
+    if (!empty($data)) {
+        $fragments['#conekta-cart-data'] =
+            '<script id="conekta-cart-data" type="application/json">'
+            . wp_json_encode($data)
+            . '</script>';
+    }
+
+    return $fragments;
+}
+
+/**
+ * Output the initial hidden element that the fragment system will replace.
+ */
+add_action('woocommerce_after_checkout_form', 'ckpg_conekta_cart_data_element');
+function ckpg_conekta_cart_data_element() {
+    $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
+    if (!isset($available_gateways['conekta'])) {
+        return;
+    }
+
+    $data = ckpg_build_conekta_cart_snapshot();
+    echo '<script id="conekta-cart-data" type="application/json">'
+        . wp_json_encode($data)
+        . '</script>';
 }

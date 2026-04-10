@@ -212,13 +212,18 @@ const threeDsHandler = {
             total: Number(conekta_settings.amount), // Already in cents from PHP
             currency: conekta_settings.currency || 'MXN'
           };
-          
+
           // Add cart items if available
           if (conekta_settings.cart_items && conekta_settings.cart_items.length > 0) {
             cartData.items = conekta_settings.cart_items;
           }
-          
+
           requestData.cart_data = cartData;
+        }
+
+        // Include discount lines (native coupons + dynamic pricing discounts)
+        if (conekta_settings.discount_lines && conekta_settings.discount_lines.length > 0) {
+          requestData.discount_lines = conekta_settings.discount_lines;
         }
       }
       
@@ -610,6 +615,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.body.addEventListener("updated_checkout", () => {
+    // Sync conekta_settings with the latest cart data from the PHP fragment
+    // (covers dynamic pricing, coupons, and any cart change after page load)
+    const cartDataEl = document.getElementById('conekta-cart-data');
+    if (cartDataEl) {
+      try {
+        const snapshot = JSON.parse(cartDataEl.textContent);
+        if (snapshot.amount)         conekta_settings.amount = snapshot.amount;
+        if (snapshot.cart_items)     conekta_settings.cart_items = snapshot.cart_items;
+        if (snapshot.discount_lines) conekta_settings.discount_lines = snapshot.discount_lines;
+      } catch (_) { /* ignore parse errors */ }
+    }
+
     // Update shipping information from the updated checkout
     const form = document.querySelector(FORM_SELECTOR);
     if (form) {
