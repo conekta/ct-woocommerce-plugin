@@ -68,3 +68,6 @@ jobs:
         env:
           CONEKTA_HOST: http://localhost:3000
         run: vendor/bin/phpunit --testdox
+
+      - name: Run JS tests
+        run: npm test
