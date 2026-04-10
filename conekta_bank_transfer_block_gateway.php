@@ -272,7 +272,10 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         $tax_lines = array_merge($tax_lines, $fees_data);
         $discount_lines = ckpg_build_discount_lines($data);
         $discount_lines = array_merge($discount_lines, $discounts_data);
-        $line_items = ckpg_build_line_items($items, parent::ckpg_get_version());
+        $line_items = ckpg_build_line_items($items, parent::ckpg_get_version(), $price_level_discount);
+        if ($price_level_discount > 0) {
+            $discount_lines[] = ['code' => 'dynamic_pricing', 'amount' => $price_level_discount, 'type' => 'campaign'];
+        }
         $shipping_lines = ckpg_build_shipping_lines($data);
         $shipping_contact = ckpg_build_shipping_contact($data);
         $customer_info = ckpg_build_customer_info($data);

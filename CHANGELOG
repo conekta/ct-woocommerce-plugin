@@ -1,3 +1,7 @@
+5.4.12, 2026-04-09
+-------------------------------------
+- Feature: Add support to dynamic pricing rules
+
 5.4.11, 2026-03-30
 -------------------------------------
 - Fix: Resolved fatal error when plugin is activated without API key configured by moving 3DS company fetch inside api_key guard

@@ -3,7 +3,7 @@
 /*
  * Title   : Conekta Payment Extension for WooCommerce
  * Author  : Cristina Randall
- * Url     : https://www.conekta.io/es/docs/plugins/woocommerce
+ * Url     : https://developers.conekta.com/docs/woocommerce
  */
 
 function ckpg_check_balance($order, $total): array
@@ -62,9 +62,10 @@ function ckpg_build_order_metadata($data): array
     return $metadata;
 }
 
-function ckpg_build_line_items($items, $version)
+function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
 {
     $line_items = array();
+    $price_level_discount = 0;
 
     foreach ($items as $item) {
 
@@ -76,6 +77,19 @@ function ckpg_build_line_items($items, $version)
         $item_name   = item_name_validation($item['name']);
         $unit_price  = intval(round(floatval($unit_price) / 10), 2);
         $quantity    = intval($item['qty']);
+
+        // Detect price-level discounts (dynamic pricing plugins modify the product
+        // price directly; Conekta needs the original price + an explicit discount_line).
+        $variation_id = isset($item['variation_id']) ? intval($item['variation_id']) : 0;
+        $price_product = $variation_id ? wc_get_product($variation_id) : $productmeta;
+        $regular_price = $price_product ? (float) $price_product->get_regular_price() : 0;
+        if ($regular_price > 0) {
+            $regular_unit_cents = intval(round($regular_price * 100));
+            if ($regular_unit_cents > $unit_price) {
+                $price_level_discount += ($regular_unit_cents - $unit_price) * $quantity;
+                $unit_price = $regular_unit_cents;
+            }
+        }
         $tags = wp_get_post_terms($item['product_id'], 'product_tag', array('fields' => 'names'));
         $brands = wp_get_post_terms($item['product_id'], 'product_brand', array('fields' => 'names'));
 
@@ -216,7 +230,7 @@ function ckpg_build_get_fees($fees): array
             $negative_fees[] = array(
                 'code'   => $fee_name,
                 'amount' => $fee_amount_formatted * -1,
-                'type'   => 'coupon'
+                'type'   => 'campaign'
             );
         }
     } 

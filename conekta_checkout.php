@@ -4,11 +4,11 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for Woocommerce for both credit and debit cards as well as cash payments  and monthly installments for Mexican credit cards.
-Version: 5.4.11
+Version: 5.4.12
 Requires at least: 6.6.2
 Requires PHP: 7.4
 Author: Conekta.io
-Author URI: https://www.conekta.io
+Author URI: https://www.conekta.com
 License: GNU General Public License v3.0
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
 */
@@ -132,24 +132,8 @@ function ckpg_enqueue_classic_checkout_script() {
                 }
             }
 
-            // Get discount lines (coupons)
-            $discount_lines = [];
-            if (WC()->cart && !WC()->cart->is_empty()) {
-                $applied_coupons = WC()->cart->get_applied_coupons();
-                if (!empty($applied_coupons)) {
-                    foreach ($applied_coupons as $coupon_code) {
-                        $coupon = new WC_Coupon($coupon_code);
-                        if ($coupon->is_valid()) {
-                            $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
-                            $discount_lines[] = [
-                                'code' => $coupon_code,
-                                'amount' => (int) round($discount_amount * 100), // Convert to cents
-                                'type' => 'coupon'
-                            ];
-                        }
-                    }
-                }
-            }
+            // Get discount lines (coupons + fee-based discounts from dynamic pricing plugins)
+            $discount_lines = ckpg_build_conekta_discount_lines();
 
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
@@ -172,4 +156,132 @@ function ckpg_enqueue_classic_checkout_script() {
             ]);
         }
     }
+}
+
+/**
+ * Build discount lines from WC cart:
+ *   1. Native coupons
+ *   2. Negative fees (dynamic pricing plugins)
+ *   3. Price-level discounts (regular_price vs effective cart price)
+ */
+function ckpg_build_conekta_discount_lines(): array {
+    $discount_lines = [];
+    if (!WC()->cart || WC()->cart->is_empty()) {
+        return $discount_lines;
+    }
+
+    // Native WooCommerce coupons
+    foreach (WC()->cart->get_applied_coupons() as $coupon_code) {
+        $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code);
+        if ($discount_amount > 0) {
+            $discount_lines[] = [
+                'code'   => $coupon_code,
+                'amount' => (int) round($discount_amount * 100),
+                'type'   => 'coupon',
+            ];
+        }
+    }
+
+    // Fee-based discounts (dynamic pricing plugins often add negative fees)
+    foreach (WC()->cart->get_fees() as $fee) {
+        if ($fee->total < 0) {
+            $discount_lines[] = [
+                'code'   => $fee->name ?: 'discount',
+                'amount' => (int) round(abs($fee->total) * 100),
+                'type'   => 'campaign',
+            ];
+        }
+    }
+
+    // Price-level discounts: dynamic pricing plugins that modify the product price
+    // directly (not via coupons/fees). Compare regular_price with effective cart price.
+    $price_discount = 0;
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        if (!$product) continue;
+
+        $regular_price = (float) $product->get_regular_price();
+        if ($regular_price <= 0) continue;
+
+        $effective_subtotal = (float) $cart_item['line_subtotal'];
+        $expected_subtotal  = $regular_price * $cart_item['quantity'];
+
+        if ($expected_subtotal > $effective_subtotal) {
+            $price_discount += (int) round(($expected_subtotal - $effective_subtotal) * 100);
+        }
+    }
+    if ($price_discount > 0) {
+        $discount_lines[] = [
+            'code'   => 'dynamic_pricing',
+            'amount' => $price_discount,
+            'type'   => 'campaign',
+        ];
+    }
+
+    return $discount_lines;
+}
+
+/**
+ * Build the cart snapshot used by both wp_localize_script and the checkout-update fragment.
+ */
+function ckpg_build_conekta_cart_snapshot(): array {
+    if (!WC()->cart || WC()->cart->is_empty()) {
+        return [];
+    }
+
+    $cart_items = [];
+    foreach (WC()->cart->get_cart() as $cart_item) {
+        $product = $cart_item['data'];
+        $cart_items[] = [
+            'id'           => $cart_item['product_id'],
+            'name'         => $product->get_name() ?? '',
+            'quantity'     => $cart_item['quantity'],
+            'total'        => (int) round($cart_item['line_total'] * 100),
+            'variation_id' => $cart_item['variation_id'] ?? null,
+        ];
+    }
+
+    return [
+        'amount'         => (int) round(WC()->cart->get_total('edit') * 100),
+        'cart_items'     => $cart_items,
+        'discount_lines' => ckpg_build_conekta_discount_lines(),
+    ];
+}
+
+/**
+ * Send an updated cart-data fragment on every checkout AJAX refresh so the
+ * JS-side conekta_settings stays in sync with dynamic pricing changes.
+ */
+add_filter('woocommerce_update_order_review_fragments', 'ckpg_conekta_cart_fragment');
+function ckpg_conekta_cart_fragment($fragments) {
+    $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
+    if (!isset($available_gateways['conekta'])) {
+        return $fragments;
+    }
+
+    $data = ckpg_build_conekta_cart_snapshot();
+    if (!empty($data)) {
+        $fragments['.conekta-cart-data'] =
+            '<script class="conekta-cart-data" type="application/json">'
+            . wp_json_encode($data)
+            . '</script>';
+    }
+
+    return $fragments;
+}
+
+/**
+ * Output the initial hidden element that the fragment system will replace.
+ */
+add_action('woocommerce_after_checkout_form', 'ckpg_conekta_cart_data_element');
+function ckpg_conekta_cart_data_element() {
+    $available_gateways = WC()->payment_gateways()->get_available_payment_gateways();
+    if (!isset($available_gateways['conekta'])) {
+        return;
+    }
+
+    $data = ckpg_build_conekta_cart_snapshot();
+    echo '<script class="conekta-cart-data" type="application/json">'
+        . wp_json_encode($data)
+        . '</script>';
 }
