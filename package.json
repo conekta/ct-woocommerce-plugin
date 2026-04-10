@@ -14,7 +14,8 @@
   "devDependencies": {
     "@woocommerce/dependency-extraction-webpack-plugin": "^3.1.0",
     "@wordpress/scripts": "^30.13.0",
-    "cross-env": "7.0.3"
+    "cross-env": "7.0.3",
+    "playwright": "^1.59.1"
   },
   "scripts": {
     "start": "wp-scripts start",
@@ -25,6 +26,7 @@
     "i18n:json": "$(which wp) i18n make-json languages --no-purge",
     "packages-update": "wp-scripts packages-update",
     "test": "wp-scripts test-unit-js --testPathPattern=tests/js",
+    "test:e2e": "node tests/e2e/discount-3ds-checkout.spec.js",
     "check-engines": "wp-scripts check-engines",
     "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x '.claude*'"
   },

@@ -71,3 +71,31 @@ jobs:
 
       - name: Run JS tests
         run: npm test
+
+  e2e-checkout:
+    runs-on: ubuntu-latest
+    name: E2E Classic Checkout
+    needs: build-and-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Run E2E tests
+        env:
+          CONEKTA_API_KEY: ${{ secrets.CONEKTA_API_KEY }}
+          STORE_URL: https://woocommerce.stg.conekta.io
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASS: ${{ secrets.WP_PASS }}
+        run: npm run test:e2e
