@@ -84,7 +84,7 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
         $price_product = $variation_id ? wc_get_product($variation_id) : $productmeta;
         $regular_price = $price_product ? (float) $price_product->get_regular_price() : 0;
         if ($regular_price > 0) {
-            $regular_unit_cents = intval(round($regular_price * 100));
+            $regular_unit_cents = amount_validation($regular_price);
             if ($regular_unit_cents > $unit_price) {
                 $price_level_discount += ($regular_unit_cents - $unit_price) * $quantity;
                 $unit_price = $regular_unit_cents;
@@ -377,7 +377,7 @@ function ckpg_get_request_data($order)
 
 function amount_validation(float $amount) : int
 {
-    return  $amount * 100;
+    return (int) round($amount * 100);
 }
 
 function item_name_validation($item='')

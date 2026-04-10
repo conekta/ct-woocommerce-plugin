@@ -1152,6 +1152,648 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(0, $result['tax_lines'][0]['amount']);
     }
 
+    // =========================================================
+    // conekta_gateway_helper.php — comprehensive function tests
+    // =========================================================
+
+    // -------------------------------------------------------
+    // amount_validation
+    // -------------------------------------------------------
+
+    public function test_amount_validation_normal()
+    {
+        $this->assertEquals(10000, amount_validation(100.00));
+        $this->assertEquals(50050, amount_validation(500.50));
+    }
+
+    public function test_amount_validation_rounds_correctly()
+    {
+        // 199.99 * 100 = 19999.0 → 19999
+        $this->assertEquals(19999, amount_validation(199.99));
+        // Float imprecision: 99.99 * 100 can be 9998.999...96 → round → 9999
+        $this->assertEquals(9999, amount_validation(99.99));
+        // 0.1 + 0.2 style edge: 33.33 * 100 = 3333.0 → 3333
+        $this->assertEquals(3333, amount_validation(33.33));
+    }
+
+    public function test_amount_validation_zero()
+    {
+        $this->assertEquals(0, amount_validation(0));
+        $this->assertEquals(0, amount_validation(0.00));
+    }
+
+    public function test_amount_validation_negative()
+    {
+        $this->assertEquals(-5000, amount_validation(-50.00));
+    }
+
+    public function test_amount_validation_small_decimals()
+    {
+        $this->assertEquals(1, amount_validation(0.01));
+        $this->assertEquals(99, amount_validation(0.99));
+    }
+
+    public function test_amount_validation_large_amount()
+    {
+        $this->assertEquals(9999999, amount_validation(99999.99));
+    }
+
+    // -------------------------------------------------------
+    // validate_total
+    // -------------------------------------------------------
+
+    public function test_validate_total_numeric_string()
+    {
+        $this->assertEquals(10000.0, validate_total('100.00'));
+        $this->assertEquals(5000.0, validate_total('50'));
+    }
+
+    public function test_validate_total_integer()
+    {
+        $this->assertEquals(10000.0, validate_total(100));
+    }
+
+    public function test_validate_total_non_numeric_returns_as_is()
+    {
+        $this->assertEquals('abc', validate_total('abc'));
+        $this->assertEquals('', validate_total(''));
+    }
+
+    public function test_validate_total_zero()
+    {
+        $this->assertEquals(0.0, validate_total('0'));
+        $this->assertEquals(0.0, validate_total(0));
+    }
+
+    // -------------------------------------------------------
+    // item_name_validation
+    // -------------------------------------------------------
+
+    public function test_item_name_validation_normal()
+    {
+        $this->assertEquals('Producto de prueba', item_name_validation('Producto de prueba'));
+    }
+
+    public function test_item_name_validation_empty()
+    {
+        $this->assertEquals('', item_name_validation(''));
+    }
+
+    public function test_item_name_validation_default()
+    {
+        $this->assertEquals('', item_name_validation());
+    }
+
+    public function test_item_name_validation_passes_through_sanitize()
+    {
+        // sanitize_text_field in real WP strips tags; stub is pass-through.
+        // This test verifies the function delegates to sanitize_text_field.
+        $result = item_name_validation('Product <Special>');
+        $this->assertIsString($result);
+        $this->assertNotEmpty($result);
+    }
+
+    // -------------------------------------------------------
+    // post_code_validation
+    // -------------------------------------------------------
+
+    public function test_post_code_validation_five_chars()
+    {
+        $this->assertEquals('06600', post_code_validation('06600'));
+    }
+
+    public function test_post_code_validation_truncates_long()
+    {
+        $this->assertEquals('06600', post_code_validation('066001'));
+        $this->assertEquals('11010', post_code_validation('11010999'));
+    }
+
+    public function test_post_code_validation_short_unchanged()
+    {
+        $this->assertEquals('123', post_code_validation('123'));
+        $this->assertEquals('1', post_code_validation('1'));
+    }
+
+    public function test_post_code_validation_empty()
+    {
+        $this->assertEquals('', post_code_validation(''));
+        $this->assertEquals('', post_code_validation());
+    }
+
+    // -------------------------------------------------------
+    // int_validation
+    // -------------------------------------------------------
+
+    public function test_int_validation_numeric_string()
+    {
+        $this->assertEquals(123, int_validation('123'));
+    }
+
+    public function test_int_validation_integer()
+    {
+        $this->assertEquals(456, int_validation(456));
+    }
+
+    public function test_int_validation_float_truncates()
+    {
+        $this->assertEquals(12, int_validation('12.9'));
+    }
+
+    public function test_int_validation_non_numeric_returns_as_is()
+    {
+        $this->assertEquals('abc', int_validation('abc'));
+        $this->assertEquals('', int_validation(''));
+    }
+
+    public function test_int_validation_zero()
+    {
+        $this->assertEquals(0, int_validation('0'));
+        $this->assertEquals(0, int_validation(0));
+    }
+
+    // -------------------------------------------------------
+    // get_expired_at / get_expired_at_minutes
+    // -------------------------------------------------------
+
+    public function test_get_expired_at_future_timestamp()
+    {
+        $now = time();
+        $result = get_expired_at(1);
+
+        // Should be roughly 1 day ahead (allow ±2 hours for timezone)
+        $this->assertGreaterThan($now, $result);
+        $this->assertLessThan($now + 86400 + 7200, $result);
+    }
+
+    public function test_get_expired_at_30_days()
+    {
+        $now = time();
+        $result = get_expired_at(30);
+
+        $this->assertGreaterThan($now + (29 * 86400), $result);
+        $this->assertLessThan($now + (31 * 86400), $result);
+    }
+
+    public function test_get_expired_at_minutes_10()
+    {
+        $now = time();
+        $result = get_expired_at_minutes(10);
+
+        // Should be 10 minutes ahead (±10 seconds tolerance)
+        $expected = $now + 600;
+        $this->assertGreaterThanOrEqual($expected - 10, $result);
+        $this->assertLessThanOrEqual($expected + 10, $result);
+    }
+
+    public function test_get_expired_at_minutes_1440()
+    {
+        $now = time();
+        $result = get_expired_at_minutes(1440);
+
+        $expected = $now + 86400;
+        $this->assertGreaterThanOrEqual($expected - 10, $result);
+        $this->assertLessThanOrEqual($expected + 10, $result);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_order_metadata
+    // -------------------------------------------------------
+
+    public function test_build_order_metadata_basic()
+    {
+        $data = [
+            'order_id'               => 123,
+            'plugin_conekta_version' => '5.4.12',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Gateway',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertEquals(123, $result['reference_id']);
+        $this->assertEquals('5.4.12', $result['plugin_conekta_version']);
+        $this->assertEquals('woocommerce', $result['plugin']);
+        $this->assertEquals('9.0.0', $result['woocommerce_version']);
+        $this->assertEquals('WC_Conekta_Gateway', $result['payment_method']);
+        $this->assertArrayNotHasKey('customer_message', $result);
+    }
+
+    public function test_build_order_metadata_with_customer_message()
+    {
+        $data = [
+            'order_id'               => 456,
+            'plugin_conekta_version' => '5.4.12',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Gateway',
+            'customer_message'       => 'Entregar por la tarde',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertArrayHasKey('customer_message', $result);
+        $this->assertEquals('Entregar por la tarde', $result['customer_message']);
+    }
+
+    public function test_build_order_metadata_empty_customer_message_excluded()
+    {
+        $data = [
+            'order_id'               => 789,
+            'plugin_conekta_version' => '5.4.12',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Gateway',
+            'customer_message'       => '',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertArrayNotHasKey('customer_message', $result);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_tax_lines
+    // -------------------------------------------------------
+
+    public function test_build_tax_lines_single_tax()
+    {
+        $taxes = [
+            ['tax_amount' => 16.00, 'label' => 'IVA'],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+    }
+
+    public function test_build_tax_lines_with_shipping_tax()
+    {
+        $taxes = [
+            ['tax_amount' => 16.00, 'label' => 'IVA', 'shipping_tax_amount' => 2.40],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[1]['description']);
+        $this->assertEquals(240, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_empty()
+    {
+        $this->assertEmpty(ckpg_build_tax_lines([]));
+    }
+
+    public function test_build_tax_lines_multiple()
+    {
+        $taxes = [
+            ['tax_amount' => 16.00, 'label' => 'IVA'],
+            ['tax_amount' => 3.00, 'label' => 'IEPS'],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals('IEPS', $result[1]['description']);
+        $this->assertEquals(300, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_zero_amount()
+    {
+        $taxes = [
+            ['tax_amount' => 0, 'label' => 'Exempt'],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals(0, $result[0]['amount']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_shipping_lines
+    // -------------------------------------------------------
+
+    public function test_build_shipping_lines_with_data()
+    {
+        $data = [
+            'shipping_lines' => [
+                ['amount' => 5000, 'carrier' => 'DHL', 'method' => 'express'],
+            ],
+        ];
+
+        $result = ckpg_build_shipping_lines($data);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals(5000, $result[0]['amount']);
+        $this->assertEquals('DHL', $result[0]['carrier']);
+    }
+
+    public function test_build_shipping_lines_empty()
+    {
+        $this->assertEmpty(ckpg_build_shipping_lines([]));
+        $this->assertEmpty(ckpg_build_shipping_lines(['shipping_lines' => []]));
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_shipping_contact
+    // -------------------------------------------------------
+
+    public function test_build_shipping_contact_with_data()
+    {
+        $data = [
+            'shipping_contact' => [
+                'phone'    => '5555555555',
+                'receiver' => 'John Doe',
+                'address'  => ['street1' => 'Calle 1'],
+            ],
+        ];
+
+        $result = ckpg_build_shipping_contact($data);
+
+        $this->assertEquals('John Doe', $result['receiver']);
+        $this->assertTrue($result['metadata']['soft_validations']);
+    }
+
+    public function test_build_shipping_contact_empty()
+    {
+        $this->assertEmpty(ckpg_build_shipping_contact([]));
+        $this->assertEmpty(ckpg_build_shipping_contact(['other' => 'data']));
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_customer_info
+    // -------------------------------------------------------
+
+    public function test_build_customer_info_adds_metadata()
+    {
+        $data = [
+            'customer_info' => [
+                'name'  => 'John Doe',
+                'phone' => '5555555555',
+                'email' => 'john@example.com',
+            ],
+        ];
+
+        $result = ckpg_build_customer_info($data);
+
+        $this->assertEquals('John Doe', $result['name']);
+        $this->assertEquals('john@example.com', $result['email']);
+        $this->assertTrue($result['metadata']['soft_validations']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_discount_lines (the helper function, not the cart one)
+    // -------------------------------------------------------
+
+    public function test_build_discount_lines_from_data()
+    {
+        $data = [
+            'discount_lines' => [
+                ['code' => 'PROMO', 'amount' => 5000],
+                ['code' => 'VIP', 'amount' => 2000],
+            ],
+        ];
+
+        $result = ckpg_build_discount_lines($data);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('PROMO', $result[0]['code']);
+        $this->assertEquals(5000, $result[0]['amount']);
+        $this->assertEquals('coupon', $result[0]['type']);
+        $this->assertEquals('VIP', $result[1]['code']);
+    }
+
+    public function test_build_discount_lines_empty_data()
+    {
+        $this->assertEmpty(ckpg_build_discount_lines([]));
+        $this->assertEmpty(ckpg_build_discount_lines(['discount_lines' => []]));
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_line_items — unit_price calculation
+    // -------------------------------------------------------
+
+    public function test_build_line_items_unit_price_calculation()
+    {
+        // line_subtotal=1000, qty=2 → per unit = 1000/2 = 500
+        // unit_price = (500 * 1000) / 10 = 50000 ... wait
+        // Actually: sub_total = 1000 * 1000 = 1000000; / 2 = 500000; / 10 = 50000
+        $items = [[
+            'line_subtotal' => 1000.00,
+            'qty'           => 2,
+            'product_id'    => 99,
+            'name'          => 'Widget',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        $this->assertEquals(50000, $line_items[0]['unit_price']); // 500 MXN in cents
+        $this->assertEquals(2, $line_items[0]['quantity']);
+        $this->assertEquals('Widget', $line_items[0]['name']);
+    }
+
+    public function test_build_line_items_single_quantity()
+    {
+        $items = [[
+            'line_subtotal' => 299.99,
+            'qty'           => 1,
+            'product_id'    => 99,
+            'name'          => 'Single',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        // 299.99 * 1000 / 1 / 10 = 29999
+        $this->assertEquals(29999, $line_items[0]['unit_price']);
+    }
+
+    public function test_build_line_items_includes_tags_and_metadata()
+    {
+        $items = [[
+            'line_subtotal' => 100.00,
+            'qty'           => 1,
+            'product_id'    => 99,
+            'name'          => 'Tagged',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        $this->assertContains('WooCommerce', $line_items[0]['tags']);
+        $this->assertContains('Conekta 5.4.12', $line_items[0]['tags']);
+        $this->assertTrue($line_items[0]['metadata']['soft_validations']);
+    }
+
+    public function test_build_line_items_empty_items()
+    {
+        $this->assertEmpty(ckpg_build_line_items([], '5.4.12'));
+    }
+
+    public function test_build_line_items_description_fallback()
+    {
+        $items = [[
+            'line_subtotal' => 100.00,
+            'qty'           => 1,
+            'product_id'    => 99,
+            'name'          => 'No Desc',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        // WC_Product stub returns '' for description → fallback 'no description'
+        $this->assertEquals('no description', $line_items[0]['description']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_get_request_data — edge cases
+    // -------------------------------------------------------
+
+    public function test_get_request_data_null_order_returns_false()
+    {
+        $this->assertFalse(ckpg_get_request_data(null));
+    }
+
+    public function test_get_request_data_basic_order()
+    {
+        $order = new WC_Order(100);
+
+        $data = ckpg_get_request_data($order);
+
+        $this->assertEquals(100, $data['order_id']);
+        $this->assertEquals(10000.0, $data['amount']); // 100.00 * 100
+        $this->assertEquals('MXN', $data['currency']);
+        $this->assertEquals('John Doe', $data['customer_info']['name']);
+        $this->assertEquals('john@example.com', $data['customer_info']['email']);
+        $this->assertEquals('+5215555555555', $data['customer_info']['phone']);
+    }
+
+    public function test_get_request_data_has_shipping_lines()
+    {
+        $order = new WC_Order(101);
+        $data = ckpg_get_request_data($order);
+
+        // WC_Order stub returns 'flat_rate' as shipping method
+        $this->assertNotEmpty($data['shipping_lines']);
+        $this->assertEquals('flat_rate', $data['shipping_lines'][0]['carrier']);
+    }
+
+    public function test_get_request_data_has_shipping_contact()
+    {
+        $order = new WC_Order(102);
+        $data = ckpg_get_request_data($order);
+
+        // Stub has address_1 and postcode, so shipping_contact should be present
+        $this->assertArrayHasKey('shipping_contact', $data);
+        $this->assertEquals('John Doe', $data['shipping_contact']['receiver']);
+        $this->assertEquals('CDMX', $data['shipping_contact']['address']['city']);
+    }
+
+    public function test_get_request_data_with_coupons()
+    {
+        $order = new WC_Order(103);
+        $order->set_coupons([
+            ['name' => 'TEST10', 'type' => 'percent', 'discount_amount' => 10.00],
+        ]);
+
+        $data = ckpg_get_request_data($order);
+
+        $this->assertArrayHasKey('discount_lines', $data);
+        $this->assertCount(1, $data['discount_lines']);
+        $this->assertEquals('TEST10', $data['discount_lines'][0]['code']);
+        $this->assertEquals(1000, $data['discount_lines'][0]['amount']);
+    }
+
+    public function test_get_request_data_without_coupons_no_discount_key()
+    {
+        $order = new WC_Order(104);
+
+        $data = ckpg_get_request_data($order);
+
+        $this->assertArrayNotHasKey('discount_lines', $data);
+    }
+
+    public function test_get_request_data_description_contains_email()
+    {
+        $order = new WC_Order(105);
+        $data = ckpg_get_request_data($order);
+
+        $this->assertStringContainsString('john@example.com', $data['description']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_check_balance — additional edge cases
+    // -------------------------------------------------------
+
+    public function test_check_balance_exact_no_adjustment()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [['amount' => 0]],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 1600, 'description' => 'IVA']],
+        ];
+
+        $result = ckpg_check_balance($order, 11600);
+
+        $this->assertEquals(1600, $result['tax_lines'][0]['amount']);
+    }
+
+    public function test_check_balance_multiple_items()
+    {
+        $order = [
+            'line_items'     => [
+                ['unit_price' => 10000, 'quantity' => 2],
+                ['unit_price' => 5000, 'quantity' => 1],
+            ],
+            'shipping_lines' => [['amount' => 3000]],
+            'discount_lines' => [['amount' => 2000]],
+            'tax_lines'      => [['amount' => 0, 'description' => 'Tax']],
+        ];
+        // 20000 + 5000 + 3000 - 2000 + 0 = 26000
+        $result = ckpg_check_balance($order, 26000);
+
+        $this->assertEquals(0, $result['tax_lines'][0]['amount']);
+    }
+
+    public function test_check_balance_adds_round_adjustment_description()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [['amount' => 0]],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 0, 'description' => '']], // empty description
+        ];
+
+        // total=10001 but sum=10000 → adjustment=1, description should be set
+        $result = ckpg_check_balance($order, 10001);
+
+        $this->assertEquals(1, $result['tax_lines'][0]['amount']);
+        $this->assertEquals('Round Adjustment', $result['tax_lines'][0]['description']);
+    }
+
+    public function test_check_balance_preserves_existing_description()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [['amount' => 0]],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 1500, 'description' => 'IVA']],
+        ];
+
+        $result = ckpg_check_balance($order, 11600);
+
+        // Adjusted by 100, but description 'IVA' should remain
+        $this->assertEquals(1600, $result['tax_lines'][0]['amount']);
+        $this->assertEquals('IVA', $result['tax_lines'][0]['description']);
+    }
+
     // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------

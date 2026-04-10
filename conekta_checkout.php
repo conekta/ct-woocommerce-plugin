@@ -101,7 +101,7 @@ function ckpg_enqueue_classic_checkout_script() {
                         'id' => $cart_item['product_id'],
                         'name' => $product->get_name() ?? '',
                         'quantity' => $cart_item['quantity'],
-                        'total' => $cart_item['line_total'] * 100, // Convert to cents
+                        'total' => amount_validation($cart_item['line_total']),
                         'variation_id' => $cart_item['variation_id'] ?? null
                     ];
                 }
@@ -114,7 +114,7 @@ function ckpg_enqueue_classic_checkout_script() {
             
             if (WC()->cart && !WC()->cart->is_empty()) {
                 // Get shipping total (already calculated by WooCommerce)
-                $shipping_cost = (int) round(WC()->cart->get_shipping_total() * 100); // Convert to cents
+                $shipping_cost = amount_validation(WC()->cart->get_shipping_total());
                 // Get chosen shipping method
                 $chosen_methods = WC()->session->get('chosen_shipping_methods');
                 if (!empty($chosen_methods) && is_array($chosen_methods)) {
@@ -139,7 +139,7 @@ function ckpg_enqueue_classic_checkout_script() {
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
                 'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
-                'amount' => WC()->cart->get_total('edit') * 100,
+                'amount' => amount_validation(WC()->cart->get_total('edit')),
                 'currency' => get_woocommerce_currency(),
                 'cart_items' => $cart_items,
                 'shipping_cost' => $shipping_cost,
@@ -176,7 +176,7 @@ function ckpg_build_conekta_discount_lines(): array {
         if ($discount_amount > 0) {
             $discount_lines[] = [
                 'code'   => $coupon_code,
-                'amount' => (int) round($discount_amount * 100),
+                'amount' => amount_validation($discount_amount),
                 'type'   => 'coupon',
             ];
         }
@@ -187,7 +187,7 @@ function ckpg_build_conekta_discount_lines(): array {
         if ($fee->total < 0) {
             $discount_lines[] = [
                 'code'   => $fee->name ?: 'discount',
-                'amount' => (int) round(abs($fee->total) * 100),
+                'amount' => amount_validation(abs($fee->total)),
                 'type'   => 'campaign',
             ];
         }
@@ -207,7 +207,7 @@ function ckpg_build_conekta_discount_lines(): array {
         $expected_subtotal  = $regular_price * $cart_item['quantity'];
 
         if ($expected_subtotal > $effective_subtotal) {
-            $price_discount += (int) round(($expected_subtotal - $effective_subtotal) * 100);
+            $price_discount += amount_validation($expected_subtotal - $effective_subtotal);
         }
     }
     if ($price_discount > 0) {
@@ -236,13 +236,13 @@ function ckpg_build_conekta_cart_snapshot(): array {
             'id'           => $cart_item['product_id'],
             'name'         => $product->get_name() ?? '',
             'quantity'     => $cart_item['quantity'],
-            'total'        => (int) round($cart_item['line_total'] * 100),
+            'total'        => amount_validation($cart_item['line_total']),
             'variation_id' => $cart_item['variation_id'] ?? null,
         ];
     }
 
     return [
-        'amount'         => (int) round(WC()->cart->get_total('edit') * 100),
+        'amount'         => amount_validation(WC()->cart->get_total('edit')),
         'cart_items'     => $cart_items,
         'discount_lines' => ckpg_build_conekta_discount_lines(),
     ];
