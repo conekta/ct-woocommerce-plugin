@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout código fuente
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Configurar PHP
         uses: shivammathur/setup-php@v2
@@ -23,13 +23,13 @@ jobs:
         run: composer install --no-interaction --no-progress
 
       - name: Instalar Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v6
         with:
-          node-version: '16'
+          node-version-file: '.nvmrc'
 
       - name: Instalar dependencias de NPM
         run: |
-          npm i
+          npm ci
           npm run build
 
       - name: Despliegue en WordPress.org
