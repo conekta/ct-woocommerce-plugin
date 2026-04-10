@@ -20,7 +20,7 @@ jobs:
           coverage: none
 
       - name: Instalar dependencias de Composer
-        run: composer install --no-interaction --no-progress
+        run: composer install --no-dev --no-interaction --no-progress
 
       - name: Instalar Node.js
         uses: actions/setup-node@v6
@@ -40,11 +40,38 @@ jobs:
           # Instalar SVN
           sudo apt-get -y install subversion
           
-          # Checkout del repositorio SVN de WordPress.org
-          svn checkout https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+          # Checkout del repositorio SVN de WordPress.org (solo trunk, sin descargar tags históricos)
+          svn checkout --depth immediates https://plugins.svn.wordpress.org/conekta-payment-gateway/ svn-dir --username $SVN_USERNAME --password $SVN_PASSWORD
+          svn update --set-depth infinity svn-dir/trunk
+          svn update --set-depth immediates svn-dir/tags
           
           # Sincroniza los archivos
-          rsync -av --exclude=".git" --exclude="node_modules" --exclude=".github" --exclude=".claude" --exclude="tests" --exclude="svn-dir" --exclude="vendor/squizlabs/php_codesniffer" . svn-dir/trunk/
+          rsync -av --delete \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude=".claude" \
+            --exclude=".devcontainer" \
+            --exclude=".idea" \
+            --exclude=".gitignore" \
+            --exclude=".gitattributes" \
+            --exclude=".nvmrc" \
+            --exclude=".DS_Store" \
+            --exclude=".phpunit.result.cache" \
+            --exclude="node_modules" \
+            --exclude="tests" \
+            --exclude="svn-dir" \
+            --exclude="vendor/squizlabs/php_codesniffer" \
+            --exclude="composer.json" \
+            --exclude="composer.lock" \
+            --exclude="package.json" \
+            --exclude="package-lock.json" \
+            --exclude="webpack.config.js" \
+            --exclude="phpunit.xml" \
+            --exclude="Dockerfile" \
+            --exclude="*.zip" \
+            --exclude="readme_files" \
+            --exclude="CLAUDE.md" \
+            . svn-dir/trunk/
           
           # Cambia al directorio SVN
           cd svn-dir
