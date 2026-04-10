@@ -180,7 +180,9 @@ function ckpg_build_discount_lines($data): array
                         array(
                             'code' => (string) $discount['code'],
                             'amount' => $discount['amount'] ,
-                            'type'=> 'coupon'
+                            'type'=> in_array($discount['type'] ?? '', ['coupon', 'campaign', 'loyalty', 'sign'])
+                                    ? $discount['type']
+                                    : 'coupon'
                         )
                     )
                 );
@@ -188,6 +190,20 @@ function ckpg_build_discount_lines($data): array
         }
 
     return $discount_lines;
+}
+
+/**
+ * Append a price-level discount to $discount_lines only if one doesn't already exist.
+ * Prevents double-counting when multiple code paths detect the same discount.
+ */
+function ckpg_add_price_level_discount(array &$discount_lines, int $amount): void
+{
+    if ($amount <= 0) return;
+
+    $already_exists = array_filter($discount_lines, fn($d) => ($d['code'] ?? '') === 'dynamic_pricing');
+    if (!empty($already_exists)) return;
+
+    $discount_lines[] = ['code' => 'dynamic_pricing', 'amount' => $amount, 'type' => 'campaign'];
 }
 
 function ckpg_build_shipping_contact($data): array

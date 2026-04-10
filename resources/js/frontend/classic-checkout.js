@@ -617,7 +617,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.body.addEventListener("updated_checkout", () => {
     // Sync conekta_settings with the latest cart data from the PHP fragment
     // (covers dynamic pricing, coupons, and any cart change after page load)
-    const cartDataEl = document.querySelector('.conekta-cart-data');
+    const cartDataEl = document.getElementById('conekta-cart-data');
     if (cartDataEl) {
       try {
         const snapshot = JSON.parse(cartDataEl.textContent);

@@ -92,35 +92,20 @@ function ckpg_enqueue_classic_checkout_script() {
             $short_locale = substr($locale, 0, 2);
             $gateway = $available_gateways['conekta'];
 
-            // Get cart items for classic checkout
-            $cart_items = [];
-            if (WC()->cart && !WC()->cart->is_empty()) {
-                foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
-                    $product = $cart_item['data'];
-                    $cart_items[] = [
-                        'id' => $cart_item['product_id'],
-                        'name' => $product->get_name() ?? '',
-                        'quantity' => $cart_item['quantity'],
-                        'total' => amount_validation($cart_item['line_total']),
-                        'variation_id' => $cart_item['variation_id'] ?? null
-                    ];
-                }
-            }
+            // Cart snapshot (same structure used by the fragment update)
+            $cart_snapshot = ckpg_build_conekta_cart_snapshot();
 
             // Get shipping information
             $shipping_cost = 0;
             $shipping_method_id = '';
             $shipping_method_label = '';
-            
+
             if (WC()->cart && !WC()->cart->is_empty()) {
-                // Get shipping total (already calculated by WooCommerce)
                 $shipping_cost = amount_validation(WC()->cart->get_shipping_total());
-                // Get chosen shipping method
                 $chosen_methods = WC()->session->get('chosen_shipping_methods');
                 if (!empty($chosen_methods) && is_array($chosen_methods)) {
                     $shipping_method_id = $chosen_methods[0];
-                    
-                    // Get shipping packages to find the label
+
                     $packages = WC()->shipping()->get_packages();
                     foreach ($packages as $package_key => $package) {
                         if (isset($package['rates'][$shipping_method_id])) {
@@ -132,20 +117,17 @@ function ckpg_enqueue_classic_checkout_script() {
                 }
             }
 
-            // Get discount lines (coupons + fee-based discounts from dynamic pricing plugins)
-            $discount_lines = ckpg_build_conekta_discount_lines();
-
             wp_localize_script('conekta-classic-checkout', 'conekta_settings', [
                 'public_key' => $settings['cards_public_api_key'] ?? '',
                 'enable_msi' => $settings['is_msi_enabled'] ?? 'no',
                 'available_msi_options' => array_map('intval', (array)($settings['months'] ?? [])),
-                'amount' => amount_validation(WC()->cart->get_total('edit')),
+                'amount' => $cart_snapshot['amount'] ?? 0,
                 'currency' => get_woocommerce_currency(),
-                'cart_items' => $cart_items,
+                'cart_items' => $cart_snapshot['cart_items'] ?? [],
                 'shipping_cost' => $shipping_cost,
                 'shipping_method_id' => $shipping_method_id,
                 'shipping_method_label' => $shipping_method_label,
-                'discount_lines' => $discount_lines,
+                'discount_lines' => $cart_snapshot['discount_lines'] ?? [],
                 'locale' => $short_locale,
                 'three_ds_enabled' => $gateway->three_ds_enabled,
                 'three_ds_mode' => $gateway->three_ds_mode,
@@ -195,7 +177,7 @@ function ckpg_build_conekta_discount_lines(): array {
 
     // Price-level discounts: dynamic pricing plugins that modify the product price
     // directly (not via coupons/fees). Compare regular_price with effective cart price.
-    $price_discount = 0;
+    $price_discount_cents = 0;
     foreach (WC()->cart->get_cart() as $cart_item) {
         $product = $cart_item['data'];
         if (!$product) continue;
@@ -207,13 +189,13 @@ function ckpg_build_conekta_discount_lines(): array {
         $expected_subtotal  = $regular_price * $cart_item['quantity'];
 
         if ($expected_subtotal > $effective_subtotal) {
-            $price_discount += amount_validation($expected_subtotal - $effective_subtotal);
+            $price_discount_cents += amount_validation($expected_subtotal - $effective_subtotal);
         }
     }
-    if ($price_discount > 0) {
+    if ($price_discount_cents > 0) {
         $discount_lines[] = [
             'code'   => 'dynamic_pricing',
-            'amount' => $price_discount,
+            'amount' => $price_discount_cents,
             'type'   => 'campaign',
         ];
     }
@@ -261,8 +243,8 @@ function ckpg_conekta_cart_fragment($fragments) {
 
     $data = ckpg_build_conekta_cart_snapshot();
     if (!empty($data)) {
-        $fragments['.conekta-cart-data'] =
-            '<script class="conekta-cart-data" type="application/json">'
+        $fragments['#conekta-cart-data'] =
+            '<script id="conekta-cart-data" type="application/json">'
             . wp_json_encode($data)
             . '</script>';
     }
@@ -281,7 +263,7 @@ function ckpg_conekta_cart_data_element() {
     }
 
     $data = ckpg_build_conekta_cart_snapshot();
-    echo '<script class="conekta-cart-data" type="application/json">'
+    echo '<script id="conekta-cart-data" type="application/json">'
         . wp_json_encode($data)
         . '</script>';
 }

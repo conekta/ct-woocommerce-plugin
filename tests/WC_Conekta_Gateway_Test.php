@@ -1573,6 +1573,34 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEmpty(ckpg_build_discount_lines(['discount_lines' => []]));
     }
 
+    public function test_build_discount_lines_preserves_type()
+    {
+        $data = [
+            'discount_lines' => [
+                ['code' => 'CUPON10', 'amount' => 1000, 'type' => 'coupon'],
+                ['code' => 'dynamic_pricing', 'amount' => 5000, 'type' => 'campaign'],
+            ],
+        ];
+
+        $result = ckpg_build_discount_lines($data);
+
+        $this->assertEquals('coupon', $result[0]['type']);
+        $this->assertEquals('campaign', $result[1]['type'], 'campaign type must not be overridden to coupon');
+    }
+
+    public function test_build_discount_lines_defaults_to_coupon_when_type_missing()
+    {
+        $data = [
+            'discount_lines' => [
+                ['code' => 'OLD_FORMAT', 'amount' => 2000],
+            ],
+        ];
+
+        $result = ckpg_build_discount_lines($data);
+
+        $this->assertEquals('coupon', $result[0]['type']);
+    }
+
     // -------------------------------------------------------
     // ckpg_build_line_items — unit_price calculation
     // -------------------------------------------------------
@@ -1792,6 +1820,138 @@ class WC_Conekta_Gateway_Test extends TestCase
         // Adjusted by 100, but description 'IVA' should remain
         $this->assertEquals(1600, $result['tax_lines'][0]['amount']);
         $this->assertEquals('IVA', $result['tax_lines'][0]['description']);
+    }
+
+    // -------------------------------------------------------
+    // Critical #1: Double-counting test — full REST API discount pipeline
+    // -------------------------------------------------------
+
+    /**
+     * Simulates the exact discount-building pipeline from conekta-rest-api.php
+     * lines 347-358 to verify no double-counting of dynamic_pricing entries.
+     */
+    public function test_rest_api_pipeline_no_double_counting_price_level_only()
+    {
+        // Setup: product with regular_price=500, effective=400 (price-level discount)
+        $this->registerProduct(10, 500.00);
+
+        // Simulate order items (as returned by $order->get_items())
+        $items = [[
+            'line_subtotal' => 800.00, // 400 * 2
+            'qty'           => 2,
+            'product_id'    => 10,
+            'name'          => 'Discounted Product',
+            'variation_id'  => 0,
+        ]];
+
+        // Simulate $data from ckpg_get_request_data($order) — no coupons, no dynamic_pricing
+        $data = [
+            'discount_lines' => [], // order has no coupons
+        ];
+
+        // Simulate empty fees (no negative fees)
+        $fees = [];
+
+        // === Reproduce the REST API pipeline (lines 347-358) ===
+        $fees_formatted = ckpg_build_get_fees($fees);
+        $discounts_data = $fees_formatted['discounts'];   // empty
+        $discount_lines = ckpg_build_discount_lines($data); // empty (no coupons)
+        $discount_lines = array_merge($discount_lines, $discounts_data); // still empty
+
+        $price_level_discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $price_level_discount);
+        ckpg_add_price_level_discount($discount_lines, $price_level_discount);
+
+        // Assert: exactly ONE dynamic_pricing entry, not two
+        $dynamic_entries = array_filter($discount_lines, fn($d) => $d['code'] === 'dynamic_pricing');
+        $this->assertCount(1, $dynamic_entries, 'Should have exactly 1 dynamic_pricing entry, not duplicated');
+        $this->assertEquals(20000, $price_level_discount); // (50000-40000)*2
+    }
+
+    /**
+     * Same pipeline but with a negative fee AND a price-level discount.
+     * These are DIFFERENT discount mechanisms — both should appear.
+     */
+    public function test_rest_api_pipeline_fee_and_price_level_are_separate()
+    {
+        $this->registerProduct(10, 500.00);
+
+        $items = [[
+            'line_subtotal' => 800.00,
+            'qty'           => 2,
+            'product_id'    => 10,
+            'name'          => 'Product',
+            'variation_id'  => 0,
+        ]];
+
+        $data = ['discount_lines' => []];
+
+        // Negative fee from dynamic pricing
+        $fees = [
+            new class {
+                public function get_total() { return -50.00; }
+                public function get_name() { return 'Cart Discount'; }
+            },
+        ];
+
+        // === REST API pipeline ===
+        $fees_formatted = ckpg_build_get_fees($fees);
+        $discounts_data = $fees_formatted['discounts'];
+        $discount_lines = ckpg_build_discount_lines($data);
+        $discount_lines = array_merge($discount_lines, $discounts_data);
+
+        $price_level_discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $price_level_discount);
+        ckpg_add_price_level_discount($discount_lines, $price_level_discount);
+
+        // Fee discount and price-level discount are separate mechanisms
+        $this->assertCount(2, $discount_lines);
+        $this->assertEquals('Cart Discount', $discount_lines[0]['code']);
+        $this->assertEquals(5000, $discount_lines[0]['amount']);
+        $this->assertEquals('dynamic_pricing', $discount_lines[1]['code']);
+        $this->assertEquals(20000, $discount_lines[1]['amount']);
+    }
+
+    /**
+     * Worst-case scenario: $data['discount_lines'] already contains a
+     * 'dynamic_pricing' entry AND ckpg_build_line_items detects the same.
+     * The guard in ckpg_add_price_level_discount() must prevent duplication.
+     */
+    public function test_rest_api_pipeline_guard_prevents_double_counting()
+    {
+        $this->registerProduct(10, 500.00);
+
+        $items = [[
+            'line_subtotal' => 800.00,
+            'qty'           => 2,
+            'product_id'    => 10,
+            'name'          => 'Product',
+            'variation_id'  => 0,
+        ]];
+
+        // $data already has dynamic_pricing (e.g. from another code path)
+        $data = [
+            'discount_lines' => [
+                ['code' => 'dynamic_pricing', 'amount' => 20000, 'type' => 'campaign'],
+            ],
+        ];
+
+        $fees = [];
+
+        // === REST API pipeline (now using the guard) ===
+        $fees_formatted = ckpg_build_get_fees($fees);
+        $discounts_data = $fees_formatted['discounts'];
+        $discount_lines = ckpg_build_discount_lines($data);
+        $discount_lines = array_merge($discount_lines, $discounts_data);
+
+        $price_level_discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $price_level_discount);
+        ckpg_add_price_level_discount($discount_lines, $price_level_discount);
+
+        // Guard must prevent the second entry
+        $dynamic_entries = array_filter($discount_lines, fn($d) => $d['code'] === 'dynamic_pricing');
+        $this->assertCount(1, $dynamic_entries, 'Guard should prevent duplicate dynamic_pricing');
+        $this->assertEquals(20000, array_values($dynamic_entries)[0]['amount']);
     }
 
     // -------------------------------------------------------
