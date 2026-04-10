@@ -318,6 +318,7 @@ if (!class_exists('WC_Cart_Test_Helper')) {
         public function get_coupon_discount_tax_amount(string $code): float {
             return $this->coupon_tax_amounts[$code] ?? 0.0;
         }
+        public function get_coupon_discount_totals(): array { return $this->coupon_amounts; }
         public function get_fees(): array { return $this->fees; }
         public function get_total(string $context = ''): float { return $this->total; }
         public function get_coupons(): array {
