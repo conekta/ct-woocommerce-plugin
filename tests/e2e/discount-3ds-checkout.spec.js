@@ -6,6 +6,13 @@ const WP_USER = process.env.WP_USER || 'user';
 const WP_PASS = process.env.WP_PASS || 'bitnami';
 const REGULAR_PRICE = '1000';
 const DISCOUNT_AMOUNT = '500';
+const TEST_CARD = {
+  number: '5200000000001096',
+  name: 'Test User',
+  expMonth: String(Math.floor(Math.random() * 12) + 1).padStart(2, '0'),
+  expYear: String((new Date().getFullYear() + 2) % 100).padStart(2, '0'),
+  cvc: String(Math.floor(Math.random() * 900) + 100),
+};
 
 if (!CONEKTA_API_KEY) {
   console.error('\x1b[31mUsage: CONEKTA_API_KEY=key_xxx npm run test:e2e\x1b[0m');
@@ -34,7 +41,15 @@ function assert(condition, label) {
   counters[COUNTER[key]]++;
 }
 
+async function refreshNonce() {
+  wpNonce = await page.evaluate(async () => {
+    const res = await fetch('/wp-admin/admin-ajax.php?action=rest-nonce');
+    return res.text();
+  });
+}
+
 async function wcApi(method, endpoint, body) {
+  await refreshNonce();
   return page.evaluate(async ({ url, method, body, nonce }) => {
     const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
@@ -44,121 +59,20 @@ async function wcApi(method, endpoint, body) {
 }
 
 // -------------------------------------------------------
-// ADP Rule helpers — create/delete pricing rules via admin AJAX
+// ADP Rule helpers — verify existing rules via admin page
 // -------------------------------------------------------
 
-async function getAdpNonce() {
+async function getAdpRuleProductIds() {
   await page.goto(`${STORE_URL}/wp-admin/admin.php?page=wdp_settings`);
   await page.waitForLoadState('networkidle');
-  return page.$eval('#security', el => el.value);
-}
-
-function buildAdpRule(productId) {
-  return {
-    id: null,
-    deleted: false,
-    enabled: 'on',
-    exclusive: false,
-    rule_type: 'common',
-    title: 'E2E Test Discount',
-    type: 'common',
-    priority: 99,
-    options: { repeat: '-1', apply_to: 'expensive' },
-    conditions: [],
-    filters: [{
-      qty: '1',
-      type: 'products',
-      limitation: 'none',
-      method: 'in_list',
-      value: [String(productId)],
-      excludes: [{ type: 'products' }],
-    }],
-    limits: [],
-    cart_adjustments: [],
-    product_adjustments: {
-      type: 'total',
-      total: { type: 'discount__amount', value: DISCOUNT_AMOUNT },
-      split: [{ type: 'discount__amount', value: '' }],
-      max_discount_sum: '',
-      split_discount_by: 'cost',
-    },
-    sortable_blocks_priority: ['roles', 'bulk-adjustments'],
-    bulk_adjustments: { type: 'bulk', table_message: '' },
-    role_discounts: [],
-    get_products: { repeat: '-1', repeat_subtotal: '' },
-    auto_add_products: [],
-    additional: {
-      blocks: {
-        productFilters: { isOpen: '1' },
-        productDiscounts: { isOpen: '1' },
-        roleDiscounts: { isOpen: '0' },
-        bulkDiscounts: { isOpen: '0' },
-        freeProducts: { isOpen: '0' },
-        autoAddToCart: { isOpen: '0' },
-        advertising: { isOpen: '0' },
-        cartAdjustments: { isOpen: '0' },
-        conditions: { isOpen: '0' },
-        limits: { isOpen: '0' },
-      },
-      date_from: '', date_to: '', replace_name: '',
-      sortable_apply_mode: 'consistently',
-      free_products_replace_name: '',
-      conditions_relationship: 'and',
-    },
-    advertising: [],
-    condition_message: [],
-  };
-}
-
-async function createAdpRule(productId) {
-  const adpNonce = await getAdpNonce();
-  const rule = buildAdpRule(productId);
-
-  const result = await page.evaluate(async ({ url, nonce, rules }) => {
-    const formData = new FormData();
-    formData.append('action', 'wdp_ajax');
-    formData.append('security', nonce);
-    formData.append('data', JSON.stringify({ rules }));
-
-    const res = await fetch(url, { method: 'POST', body: formData });
-    return res.json();
-  }, {
-    url: `${STORE_URL}/wp-admin/admin-ajax.php`,
-    nonce: adpNonce,
-    rules: [rule],
-  });
-
-  return result?.data?.[0]?.id || result?.[0]?.id;
-}
-
-async function deleteAdpRule(ruleId) {
-  const adpNonce = await getAdpNonce();
-
-  // Load existing rules, mark ours as deleted, save
-  const existingData = await page.evaluate(() => window.wdp_data);
-  const rules = (existingData?.rules || []).map(r =>
-    r.id === ruleId ? { ...r, deleted: true } : r
-  );
-
-  await page.evaluate(async ({ url, nonce, rules }) => {
-    const formData = new FormData();
-    formData.append('action', 'wdp_ajax');
-    formData.append('security', nonce);
-    formData.append('data', JSON.stringify({ rules }));
-
-    await fetch(url, { method: 'POST', body: formData });
-  }, {
-    url: `${STORE_URL}/wp-admin/admin-ajax.php`,
-    nonce: adpNonce,
-    rules,
-  });
+  const data = await page.evaluate(() => window.wdp_data);
+  const rules = (data?.rules || []).filter(r => r.enabled === 'on');
+  return rules.flatMap(r => r.filters?.[0]?.value || []);
 }
 
 // -------------------------------------------------------
 // Setup & Teardown
 // -------------------------------------------------------
-
-let adpRuleId;
 
 async function setup() {
   browser = await chromium.launch({ headless: true });
@@ -173,30 +87,15 @@ async function setup() {
   await page.click('#wp-submit');
   await page.waitForLoadState('networkidle');
 
-  // Get WP REST nonce
+  // Navigate to admin to establish session
   await page.goto(`${STORE_URL}/wp-admin/`);
   await page.waitForLoadState('networkidle');
-  wpNonce = await page.evaluate(async () => {
-    const res = await fetch('/wp-admin/admin-ajax.php?action=rest-nonce');
-    return res.text();
-  });
 
-  // Create test product
-  console.log(`Setup: Creating product (regular_price=$${REGULAR_PRICE})...`);
-  const product = await wcApi('POST', 'wc/v3/products', {
-    name: 'E2E Discount Test Product',
-    type: 'simple',
-    regular_price: REGULAR_PRICE,
-    status: 'publish',
-    manage_stock: false,
-  });
-  productId = product.id;
-  console.log(`Setup: Product created (ID: ${productId})`);
-
-  // Create ADP pricing rule ($500 off this product)
-  console.log(`Setup: Creating ADP pricing rule (-$${DISCOUNT_AMOUNT})...`);
-  adpRuleId = await createAdpRule(productId);
-  console.log(`Setup: ADP rule created (ID: ${adpRuleId})`);
+  // Find a product that already has an ADP pricing rule
+  console.log('Setup: Finding product with ADP discount rule...');
+  const adpProductIds = await getAdpRuleProductIds();
+  productId = Number(adpProductIds[0]);
+  console.log(`Setup: Using product ${productId} (has active ADP rule)`);
 
   // Add product to cart
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
@@ -206,20 +105,7 @@ async function setup() {
 
 async function teardown() {
   console.log('\nTeardown...');
-
-  // Delete ADP rule
-  if (adpRuleId) {
-    await deleteAdpRule(adpRuleId);
-    console.log(`  Deleted ADP rule ${adpRuleId}`);
-  }
-
-  // Delete product
-  if (productId) {
-    await wcApi('DELETE', `wc/v3/products/${productId}?force=true`);
-    console.log(`  Deleted product ${productId}`);
-  }
-
-  await browser.close();
+  try { await browser.close(); } catch (_) { /* browser never launched */ }
 }
 
 // -------------------------------------------------------
@@ -306,6 +192,84 @@ async function testTokenizerIframe() {
   assert(iframe !== null, 'tokenizer iframe loaded');
 }
 
+async function testFillCardAndPlaceOrder() {
+  console.log('\n--- Fill card + Place order ---');
+
+  // Fill card fields inside the Conekta tokenizer iframe (use title to pick the right one)
+  const tokenizerFrame = page.frameLocator('iframe[title*="tokenizer"]');
+  await tokenizerFrame.locator('#cardNumber').fill(TEST_CARD.number);
+  await tokenizerFrame.locator('#cardExpMonthYear').fill(`${TEST_CARD.expMonth}/${TEST_CARD.expYear}`);
+  await tokenizerFrame.locator('#cardVerificationValue').fill(TEST_CARD.cvc);
+  await tokenizerFrame.locator('#cardholderName').fill(TEST_CARD.name);
+  assert(true, 'card fields filled in tokenizer iframe');
+
+  // Click Place Order
+  await page.click('button#place_order, input#place_order');
+  assert(true, 'Place Order clicked');
+
+  // Wait for 3DS iframe to appear (strict mode)
+  console.log('\n--- 3DS authentication ---');
+  await page.waitForTimeout(5000);
+
+  // Wait for 3DS challenge iframe
+  await page.waitForSelector('#conekta3dsContainer iframe', { timeout: 15000 });
+  assert(true, '3DS challenge iframe appeared');
+
+  // The 3DS form is in a nested iframe: conekta3dsContainer > conekta iframe > Cardinal iframe
+  // Wait for the Cardinal challenge form to render (nested iframe with OTP input)
+  const threeDsFrame = page.frameLocator('#conekta3dsContainer iframe');
+  const challengeFrame = threeDsFrame.frameLocator('#Cardinal-CCA-IFrame');
+  await challengeFrame.locator('input[name="challengeDataEntry"]').waitFor({ state: 'visible', timeout: 30000 });
+  await challengeFrame.locator('input[name="challengeDataEntry"]').fill('1234');
+  await challengeFrame.locator('input[value="SUBMIT"]').click();
+  assert(true, '3DS token 1234 submitted');
+
+  // Wait for redirect to order-received
+  await page.waitForURL('**/order-received/**', { timeout: 60000 });
+  assert(true, 'redirected to order-received');
+}
+
+async function testOrderStatus() {
+  console.log('\n--- Order status ---');
+
+  const currentUrl = page.url();
+  const isOrderReceived = currentUrl.includes('order-received');
+  assert(isOrderReceived, `redirected to order-received page`);
+
+  // Extract WC order ID from URL: /checkout/order-received/{id}/
+  const orderIdMatch = currentUrl.match(/order-received\/(\d+)/);
+  assert(orderIdMatch !== null, `order ID in URL`);
+  const wcOrderId = orderIdMatch[1];
+
+  // Verify WC order status via REST API
+  const order = await wcApi('GET', `wc/v3/orders/${wcOrderId}`);
+  const validStatuses = ['processing', 'completed', 'on-hold'];
+  const statusOk = validStatuses.includes(order.status);
+  assert(statusOk, `WC order status = ${order.status}`);
+
+  // Verify Conekta order ID is stored in WC meta
+  const conektaMeta = order.meta_data.find(m => m.key === 'conekta-order-id');
+  assert(conektaMeta !== undefined, `conekta-order-id meta = ${conektaMeta?.value}`);
+
+  // Verify discount_lines in Conekta order via API
+  console.log('\n--- Conekta order verification ---');
+  const conektaOrderId = conektaMeta.value;
+  const conektaOrder = await page.evaluate(async ({ url, key }) => {
+    const res = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + key, 'Accept': 'application/vnd.conekta-v2.2.0+json' },
+    });
+    return res.json();
+  }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
+
+  const conektaDiscounts = conektaOrder.discount_lines?.data || [];
+  assert(conektaDiscounts.length > 0, `Conekta discount_lines count = ${conektaDiscounts.length}`);
+
+  const conektaDynamic = conektaDiscounts.find(d => d.code === 'dynamic_pricing');
+  assert(conektaDynamic !== undefined, `Conekta has dynamic_pricing entry`);
+  assert(conektaDynamic.type === 'campaign', `Conekta dynamic_pricing type = ${conektaDynamic.type}`);
+  assert(conektaDynamic.amount > 0, `Conekta dynamic_pricing amount = ${conektaDynamic.amount}`);
+}
+
 // -------------------------------------------------------
 // Runner
 // -------------------------------------------------------
@@ -322,6 +286,8 @@ async function testTokenizerIframe() {
     await testFragmentElement();
     await testBillingFormAndFragmentSync();
     await testTokenizerIframe();
+    await testFillCardAndPlaceOrder();
+    await testOrderStatus();
   } catch (error) {
     console.error(`\n\x1b[31mError: ${error.message}\x1b[0m`);
     await page.screenshot({ path: '/tmp/e2e-checkout-error.png', fullPage: true });
