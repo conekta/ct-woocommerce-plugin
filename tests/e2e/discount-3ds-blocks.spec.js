@@ -21,25 +21,30 @@ h.run('Blocks Checkout — Discount + 3DS', async ({ page, assert, config, coupo
   const totalText = await page.locator('.wc-block-components-totals-footer-item .wc-block-components-totals-item__value').textContent();
   assert(totalText.length > 0, `total = ${totalText.trim()}`);
 
-  // --- Fill billing (blocks selectors) ---
+  // --- Billing: fill only visible fields (Blocks auto-fills for logged-in users) ---
   console.log('\n--- Billing ---');
-  await page.fill('#email', BILLING.email);
-  await page.waitForTimeout(1000);
+  const emailField = page.locator('#email');
+  const isEmailVisible = await emailField.isVisible();
+  await (isEmailVisible && emailField.fill(BILLING.email));
 
-  // Blocks auto-fills some fields. Fill what's empty.
-  await page.fill('#billing-first_name', BILLING.first_name);
-  await page.fill('#billing-last_name', BILLING.last_name);
-  await page.fill('#billing-address_1', BILLING.address_1);
-  await page.fill('#billing-city', BILLING.city);
-  await page.fill('#billing-postcode', BILLING.postcode);
-  await page.fill('#billing-phone', BILLING.phone);
-
-  // State: blocks combobox
-  await page.locator('#billing-state input').fill('Ciudad');
-  await page.waitForTimeout(1000);
-  await page.locator('.wc-block-components-combobox__option, [role="option"]').first().click();
+  // Fill each field only if visible (Blocks hides them when auto-filled)
+  const billingFields = {
+    '#billing-first_name': BILLING.first_name,
+    '#billing-last_name': BILLING.last_name,
+    '#billing-address_1': BILLING.address_1,
+    '#billing-city': BILLING.city,
+    '#billing-postcode': BILLING.postcode,
+    '#billing-phone': BILLING.phone,
+  };
+  await Promise.all(
+    Object.entries(billingFields).map(async ([sel, val]) => {
+      const field = page.locator(sel);
+      const visible = await field.isVisible();
+      return visible && field.fill(val);
+    })
+  );
   await page.waitForTimeout(2000);
-  assert(true, 'billing filled');
+  assert(true, 'billing ready');
 
   // --- Select Conekta + fill card ---
   console.log('\n--- Card + Place Order ---');

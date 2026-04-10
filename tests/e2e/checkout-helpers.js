@@ -100,6 +100,16 @@ async function setup() {
   await page.goto(`${STORE_URL}/wp-admin/`);
   await page.waitForLoadState('networkidle');
 
+  // Cleanup orphaned e2e resources from previous crashed runs
+  const staleProducts = await wcApi('GET', 'wc/v3/products?search=E2E+Discount+Test&per_page=50');
+  const staleCoupons = await wcApi('GET', 'wc/v3/coupons?search=e2e_&per_page=50');
+  await Promise.all([
+    ...staleProducts.map(p => wcApi('DELETE', `wc/v3/products/${p.id}?force=true`)),
+    ...staleCoupons.map(c => wcApi('DELETE', `wc/v3/coupons/${c.id}?force=true`)),
+  ]);
+  const cleaned = staleProducts.length + staleCoupons.length;
+  console.log(`Setup: cleaned ${cleaned} orphaned e2e resources`);
+
   console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}`);
 
   const product = await wcApi('POST', 'wc/v3/products', {
