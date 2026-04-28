@@ -143,7 +143,9 @@ async function setup(options = {}) {
   // Version gate: ensure the staging store runs the same plugin version as this branch.
   // Uses wp/v2/plugins (cheap WP core endpoint) instead of wc/v3/system_status, which
   // is heavy and intermittently returns without active_plugins on staging. Retries
-  // because staging occasionally drops the response (returns non-array or fewer rows).
+  // because staging occasionally drops the response (returns non-array or fewer rows)
+  // and because the rest-nonce can come back invalid right after login — reloading
+  // wp-admin re-establishes a fresh session before the next attempt.
   let storeVersion, lastResponse;
   for (let attempt = 1; attempt <= 4; attempt++) {
     lastResponse = await wcApi('GET', 'wp/v2/plugins');
@@ -152,6 +154,8 @@ async function setup(options = {}) {
       : null;
     storeVersion = conektaPlugin?.version;
     if (storeVersion) break;
+    await page.goto(`${STORE_URL}/wp-admin/`);
+    await page.waitForLoadState('domcontentloaded');
     await new Promise(r => setTimeout(r, 1000 * attempt));
   }
   if (storeVersion !== EXPECTED_VERSION) {
@@ -316,6 +320,22 @@ const INTEGRATION_CONTAINER = '#conektaITokenizerframeContainer';
 
 async function waitForIntegrationIframe() {
   await page.waitForSelector(`${INTEGRATION_CONTAINER} iframe`, { timeout: config.timeouts.threeDs });
+  // The element mounts before the SDK finishes navigating + initializing the
+  // tokenizer UI. Wait for the iframe to be a real Conekta-hosted document so
+  // downstream selectors don't race the SDK boot.
+  const iframeReady = async () => {
+    for (const frame of page.frames()) {
+      let hostname;
+      try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
+      if (hostname.endsWith('.conekta.com') || hostname === 'conekta.com') return true;
+    }
+    return false;
+  };
+  const deadline = Date.now() + config.timeouts.threeDs;
+  while (Date.now() < deadline) {
+    if (await iframeReady()) return;
+    await page.waitForTimeout(500);
+  }
 }
 
 /**
@@ -326,7 +346,7 @@ async function waitForIntegrationIframe() {
  * cart-change PUT). We poll every frame on the page until the card-number
  * field appears, then fill the four fields in whatever frame held it.
  */
-async function fillIntegrationCard(card, timeoutMs = 60000) {
+async function fillIntegrationCard(card, timeoutMs = 120000) {
   const cardNumberSel = 'input[placeholder*="0000"], input[autocomplete="cc-number"], input[name*="number" i], input[id*="cardNumber" i], input[id*="card-number" i]';
   const nameSel = 'input[placeholder*="ombre" i], input[autocomplete="cc-name"], input[name*="name" i], input[id*="cardholder" i], input[id*="card-name" i]';
   const expSel = 'input[placeholder*="MM/AA"], input[placeholder*="MM/YY"], input[autocomplete="cc-exp"], input[name*="expir" i], input[id*="expiration" i], input[id*="exp" i]';
@@ -334,26 +354,31 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
   // The Conekta iframe may show a multi-method picker (Tarjeta, BBVA, Coppel,
   // etc.). We need to click "Tarjeta" inside the Conekta-served frame to
   // expand the card form. Skip mainFrame because WC's own "Tarjeta" radio
-  // shares the text but is unrelated.
+  // shares the text but is unrelated. Retry the picker scan because the
+  // Tarjeta tile renders after the SDK finishes its initial XHR (sometimes
+  // several seconds after the iframe loads on a slow staging API).
   const mainFrame = page.mainFrame();
-  for (const frame of page.frames()) {
-    if (frame === mainFrame) continue;
-    let hostname;
-    try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
-    if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
-    try {
-      // Use getByText regardless of element type — Conekta wraps the row in
-      // a <div> with its own click handler that role/label selectors miss.
-      const t = frame.getByText('Tarjeta', { exact: true }).first();
-      if (await t.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await t.click({ force: true }).catch(() => {});
-        await page.waitForTimeout(800);
-        // Click again on the row in case the first click only highlighted.
-        await t.click({ force: true }).catch(() => {});
-        await page.waitForTimeout(1000);
-        break;
-      }
-    } catch (_) { /* skip frame */ }
+  const pickerDeadline = Date.now() + 15000;
+  let pickerClicked = false;
+  while (!pickerClicked && Date.now() < pickerDeadline) {
+    for (const frame of page.frames()) {
+      if (frame === mainFrame) continue;
+      let hostname;
+      try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
+      if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
+      try {
+        const t = frame.getByText('Tarjeta', { exact: true }).first();
+        if (await t.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await t.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(800);
+          await t.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(1000);
+          pickerClicked = true;
+          break;
+        }
+      } catch (_) { /* skip frame */ }
+    }
+    if (!pickerClicked) await page.waitForTimeout(1000);
   }
 
   const start = Date.now();
@@ -363,13 +388,13 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
     for (const frame of page.frames()) {
       try {
         const numberField = frame.locator(cardNumberSel).first();
-        if (await numberField.isVisible({ timeout: 300 }).catch(() => false)) {
+        if (await numberField.isVisible({ timeout: 1000 }).catch(() => false)) {
           cardForm = frame;
           break;
         }
       } catch (_) { /* skip frame */ }
     }
-    if (!cardForm) await page.waitForTimeout(500);
+    if (!cardForm) await page.waitForTimeout(1000);
   }
 
   if (!cardForm) throw new Error('Conekta card-number input never became visible');
