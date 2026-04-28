@@ -2,589 +2,262 @@ import { registerPaymentMethod } from '@woocommerce/blocks-registry';
 import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef, useState } from '@wordpress/element';
-import { TokenEmitter } from './TokenEmitter';
-import { CONEKTA_MSI_OPTION_KEY, DEFAULT_MSI_OPTION, useComponentScript } from './useComponentScript';
-import { TRANSLATIONS_FILES } from './translations';
+import { OrderEmitter } from './OrderEmitter';
+import { useComponentScript } from './useComponentScript';
 
 const settings = getSetting('conekta_data', {});
 const labelConekta = decodeEntities(settings.title);
-const tokenEmitter = new TokenEmitter();
 
-// Process 3DS if enabled
-const is3dsEnabled = settings.three_ds_enabled === true || settings.three_ds_enabled === "yes" || settings.three_ds_enabled === "1";
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEBOUNCE_MS = 500;
 
-const waitGetToken = () => {
-    return new Promise((resolve, reject) => {
-        tokenEmitter.resetStates();
-
-        let timeout = setTimeout(() => {
-            reject(new Error("Timeout esperando token"));
-        }, 30000);
-
-        tokenEmitter.onToken((token) => {
-            clearTimeout(timeout);
-            resolve(token);
-        });
-
-        tokenEmitter.onError((error) => {
-            clearTimeout(timeout);
-            reject(error);
-        });
-    });
-};
-
-// Create Conekta order with 3DS
-const create3dsOrder = async (token, orderId, msiOption, props) => {
-    try {
-        const headers = {
-            'Content-Type': 'application/json',
-        };
-        
-        const requestData = {
-            token,
-            msi_option: msiOption,
-            nonce: settings.nonce,
-        };
-        
-        // Add order_id if provided
-        if (orderId) {
-            requestData.order_id = orderId;
-        } else {
-            // Add blocks-specific data
-            requestData.is_blocks_context = true;
-            
-            // Extract cart items from props.cartData
-            const cartItems = props?.cartData?.cartItems || [];
-            
-            // Extract cart total from props.billing
-            const cartTotal = props?.billing?.cartTotal?.value || 0;
-            const currencyCode = props?.billing?.currency?.code || 'MXN';
-            
-            // Process cart data
-            const cartData = {
-                total: cartTotal,
-                currency: currencyCode
-            };
-            
-            // Format cart items
-            if (cartItems && cartItems.length > 0) {
-                cartData.items = cartItems.map(item => {
-                    // Ensure numeric values
-                    const quantity = parseInt(item.quantity, 10);
-                    // Try to get item total from different possible locations
-                    let total = 0;
-                    if (item.totals && item.totals.line_total) {
-                        total = parseFloat(item.totals.line_total);
-                    } else if (item.prices && item.prices.price) {
-                        total = parseFloat(item.prices.price) * quantity;
-                    }
-                    
-                    return {
-                        id: parseInt(item.id, 10),
-                        name: item.name || 'Product',
-                        quantity: quantity,
-                        total: total,
-                        variation_id: item.variation && item.variation.id ? parseInt(item.variation.id, 10) : null
-                    };
-                });
-            }
-            
-            requestData.cart_data = cartData;
-            
-            // Process billing data - use billingAddress or billingData
-            const billingData = props?.billing?.billingAddress || props?.billing?.billingData;
-            
-            if (billingData) {
-                requestData.billing_data = {
-                    first_name: billingData.first_name || '',
-                    last_name: billingData.last_name || '',
-                    company: billingData.company || '',
-                    address_1: billingData.address_1 || '',
-                    address_2: billingData.address_2 || '',
-                    city: billingData.city || '',
-                    state: billingData.state || '',
-                    postcode: billingData.postcode || '',
-                    country: billingData.country || 'MX',
-                    email: billingData.email || '',
-                    phone: billingData.phone || ''
-                };
-            }
-            
-            // Process shipping data - use shippingAddress or shippingData
-            const shippingData = props?.shippingData?.shippingAddress || props?.shipping?.shippingAddress;
-            
-            if (shippingData) {
-                requestData.shipping_data = {
-                    first_name: shippingData.first_name || '',
-                    last_name: shippingData.last_name || '',
-                    company: shippingData.company || '',
-                    address_1: shippingData.address_1 || '',
-                    address_2: shippingData.address_2 || '',
-                    city: shippingData.city || '',
-                    state: shippingData.state || '',
-                    postcode: shippingData.postcode || '',
-                    country: shippingData.country || 'MX'
-                };
-            }
-            
-            // Process shipping options - try multiple paths to get shipping data
-            let shippingRates = props?.shippingData?.shippingRates || [];
-            
-            // Alternative paths for shipping data
-            if (!shippingRates.length) {
-                shippingRates = props?.shipping?.shippingRates || [];
-            }
-            
-            if (!shippingRates.length && props?.cartData?.shippingRates) {
-                shippingRates = props.cartData.shippingRates;
-            }
-            
-            if (shippingRates && shippingRates.length > 0) {
-                // Find selected shipping rate
-                let selectedRate = shippingRates.find(rate => rate.selected);
-                
-                // If no selected rate found, try to find it in nested structure
-                if (!selectedRate) {
-                    for (const packageRates of shippingRates) {
-                        if (Array.isArray(packageRates.shipping_rates)) {
-                            selectedRate = packageRates.shipping_rates.find(rate => rate.selected);
-                            if (selectedRate) break;
-                        }
-                    }
-                }
-                
-                if (selectedRate) {
-                    let cost = 0;
-                    // Try multiple ways to get the cost
-                    if (selectedRate.cost !== undefined) {
-                        cost = parseFloat(selectedRate.cost);
-                    } else if (selectedRate.price !== undefined) {
-                        cost = parseFloat(selectedRate.price);
-                    } else if (selectedRate.rate_cost !== undefined) {
-                        cost = parseFloat(selectedRate.rate_cost);
-                    }
-                    
-                    requestData.shipping_method = {
-                        id: selectedRate.id || selectedRate.rate_id || '',
-                        label: selectedRate.label || selectedRate.name || selectedRate.rate_label || '',
-                        cost: cost
-                    };
-                }
-            }
-        }
-        
-        const response = await fetch(settings.create_3ds_order_url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestData),
-            credentials: 'same-origin'
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Error creating 3DS order (${response.status}): ${errorText}`);
-        }
-        
-        return await response.json();
-    } catch (error) {
-        console.error('Error creating 3DS order:', error);
-        throw error;
+const pickSelectedShipping = (props) => {
+    let shippingRates = props?.shippingData?.shippingRates || [];
+    if (!shippingRates.length) {
+        shippingRates = props?.shipping?.shippingRates || [];
     }
-};
+    if (!shippingRates.length && props?.cartData?.shippingRates) {
+        shippingRates = props.cartData.shippingRates;
+    }
+    if (!shippingRates.length) return null;
 
-const THREE_DS_TIMEOUT = 60 * 1000;
-
-// Create iframe for 3DS authentication
-const create3dsIframe = (url) => {
-    return new Promise((resolve, reject) => {
-        try {
-            // Remove any existing iframe
-            const existingIframe = document.getElementById('conekta3dsIframe');
-            const existingContainer = document.getElementById('conekta3dsContainer');
-            
-            if (existingContainer) {
-                existingContainer.parentNode.removeChild(existingContainer);
+    let selectedRate = shippingRates.find((rate) => rate.selected);
+    if (!selectedRate) {
+        for (const packageRates of shippingRates) {
+            if (Array.isArray(packageRates.shipping_rates)) {
+                selectedRate = packageRates.shipping_rates.find((rate) => rate.selected);
+                if (selectedRate) break;
             }
-            
-            // Usa contenedor existente para 3DS
-            const conekta3dsContainer = document.getElementById('conektaIThreeDsframeContainer');
-            if (!conekta3dsContainer) {
-                console.error('3DS container not found');
-                reject(new Error('No se encontró el contenedor para 3DS'));
-                return;
-            }
-            conekta3dsContainer.innerHTML = '';
-            conekta3dsContainer.style.display = 'flex';
-            
-            conekta3dsContainer.style.display = 'flex';
-            conekta3dsContainer.style.flexDirection = 'column';
-            conekta3dsContainer.style.justifyContent = 'center';
-            conekta3dsContainer.style.alignItems = 'center';
- 
-            const parentContainer = document.getElementById('conektaITokenizerframeContainer');
-            if (!parentContainer) {
-                console.error('Target container for 3DS not found');
-                reject(new Error('No se encontró el contenedor para 3DS'));
-                return;
-            }
-
-            // Animar ocultar tokenizer
-            parentContainer.classList.remove('conekta-slide-in');
-            parentContainer.classList.add('conekta-slide-out');
-            setTimeout(() => {
-                parentContainer.style.display = 'none';
-                parentContainer.classList.remove('conekta-slide-out');
-            }, 300);
-
-            if (getComputedStyle(parentContainer).position === 'static') {
-                parentContainer.style.position = 'relative';
-            }
-
-
-
-            const header = document.createElement('div');
-            header.style.backgroundColor = 'white';
-            header.style.padding = '15px';
-            header.style.borderRadius = '8px 8px 0 0';
-            header.style.width = '100%';
-            header.style.maxWidth = '600px';
-            header.style.borderBottom = '1px solid #ddd';
-            header.style.textAlign = 'center';
-
-            const title = document.createElement('h3');
-            title.textContent = 'Autenticación 3D Secure';
-            title.style.margin = '0';
-            title.style.padding = '0';
-            title.style.fontWeight = 'bold';
-
-            header.appendChild(title);
-            conekta3dsContainer.appendChild(header);
-
-            const iframe = document.createElement('iframe');
-            iframe.id = 'conekta3dsIframe';
-            iframe.src = `${url}?source=embedded`;
-            iframe.style.width = '100%';
-            const updateIframeHeight = () => {
-                const isMobile = window.innerWidth <= 768;
-                iframe.style.height = isMobile ? '600px' : '700px';
-            };
-            
-            updateIframeHeight();
-            
-            const resizeListener = () => updateIframeHeight();
-            window.addEventListener('resize', resizeListener);
-            
-            iframe.style.border = 'none';
-            iframe.style.backgroundColor = 'white';
-            iframe.style.borderRadius = '0 0 8px 8px';
-            
-            const loadingDiv = document.createElement('div');
-            loadingDiv.textContent = 'Cargando autenticación 3D Secure...';
-            loadingDiv.style.padding = '20px';
-            loadingDiv.style.backgroundColor = 'white';
-            loadingDiv.style.textAlign = 'center';
-            loadingDiv.id = 'conekta3dsLoading';
-            conekta3dsContainer.appendChild(loadingDiv);
-
-            iframe.onload = function() {
-                loadingDiv.style.display = 'none';
-            };
-
-            conekta3dsContainer.appendChild(iframe);
-            conekta3dsContainer.classList.add('conekta-slide-in'); 
-            
-            setTimeout(() => {
-                requestAnimationFrame(() => {
-                    if (conekta3dsContainer && conekta3dsContainer.offsetParent !== null) {
-                        const containerRect = conekta3dsContainer.getBoundingClientRect();
-                        const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
-                        const containerTop = containerRect.top + currentScroll;
-                        
-                        const targetPosition = Math.max(0, containerTop - 400);
-                        
-                        console.log('Scroll automático:', {
-                            containerTop: containerTop,
-                            currentScroll: currentScroll,
-                            targetPosition: targetPosition
-                        });
-                        
-                        window.scrollTo({
-                            top: targetPosition,
-                            behavior: 'smooth'
-                        });
-                    }
-                });
-            }, 1000); 
-            
-            setTimeout(() => {
-                const containerRect = conekta3dsContainer.getBoundingClientRect();
-                if (containerRect.top > 100) {
-                    console.log('Aplicando scroll de respaldo...');
-                    conekta3dsContainer.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                }
-            }, 2500);
-            
-
-            
-            // Add timeout to reject if iframe doesn't load
-            const timeoutId = setTimeout(() => {
-                window.removeEventListener('resize', resizeListener);
-                reject(new Error('Tiempo de espera agotado para la autenticación 3D Secure'));
-                if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                    conekta3dsContainer.classList.remove('conekta-slide-in');
-                            conekta3dsContainer.classList.add('conekta-slide-out');
-                            setTimeout(()=>{
-                                conekta3dsContainer.innerHTML='';
-                                conekta3dsContainer.style.display='none';
-                                conekta3dsContainer.classList.remove('conekta-slide-out');
-
-                                parentContainer.style.display='';
-                                parentContainer.classList.add('conekta-slide-in');
-                            },300);
-                }
-            }, THREE_DS_TIMEOUT); // timeout 3DS
-            
-            // Listen for message event from iframe
-            const messageHandler = (event) => {
-                try {
-                    if (event.origin === 'https://3ds-pay.conekta.com') {
-                        window.removeEventListener('message', messageHandler);
-                        window.removeEventListener('resize', resizeListener);
-                        clearTimeout(timeoutId);
-                        
-                        if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                            conekta3dsContainer.classList.remove('conekta-slide-in');
-                            conekta3dsContainer.classList.add('conekta-slide-out');
-                            setTimeout(()=>{
-                                conekta3dsContainer.innerHTML='';
-                                conekta3dsContainer.style.display='none';
-                                conekta3dsContainer.classList.remove('conekta-slide-out');
-
-                                parentContainer.style.display='';
-                                parentContainer.classList.add('conekta-slide-in');
-                            },300);
-                        }
-                        
-                        if (event.data.error || event.data.payment_status !== 'paid') {
-                            reject(new Error('La autenticación 3D Secure ha fallado'));
-                        } else {
-                            resolve({
-                                order_id: event.data.order_id,
-                                payment_status: event.data.payment_status
-                            });
-                        }
-                    }
-                } catch (msgError) {
-                    console.error('Error processing 3DS message:', msgError);
-                    clearTimeout(timeoutId);
-                    window.removeEventListener('resize', resizeListener);
-                    if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.classList.remove('conekta-slide-in');
-                            conekta3dsContainer.classList.add('conekta-slide-out');
-                            setTimeout(()=>{
-                                conekta3dsContainer.innerHTML='';
-                                conekta3dsContainer.style.display='none';
-                                conekta3dsContainer.classList.remove('conekta-slide-out');
-
-                                parentContainer.style.display='';
-                                parentContainer.classList.add('conekta-slide-in');
-                            },300);
-                    }
-                    reject(new Error('Error en el procesamiento de la respuesta 3D Secure'));
-                }
-            };
-            
-            window.addEventListener('message', messageHandler);
-            
-            // Add escape key handler to close modal
-            const keyHandler = (keyEvent) => {
-                if (keyEvent.key === 'Escape' || keyEvent.keyCode === 27) {
-                    window.removeEventListener('keydown', keyHandler);
-                    window.removeEventListener('resize', resizeListener);
-                    clearTimeout(timeoutId);
-                    if (conekta3dsContainer.parentNode && conekta3dsContainer.parentNode.contains(conekta3dsContainer)) {
-                        conekta3dsContainer.classList.remove('conekta-slide-in');
-                            conekta3dsContainer.classList.add('conekta-slide-out');
-                            setTimeout(()=>{
-                                conekta3dsContainer.innerHTML='';
-                                conekta3dsContainer.style.display='none';
-                                conekta3dsContainer.classList.remove('conekta-slide-out');
-
-                                parentContainer.style.display='';
-                                parentContainer.classList.add('conekta-slide-in');
-                            },300);
-                    }
-                    reject(new Error('Autenticación 3D Secure cancelada por el usuario'));
-                }
-            };
-            
-            window.addEventListener('keydown', keyHandler);
-            
-        } catch (error) {
-            console.error('Error creating 3DS iframe:', error);
-            reject(new Error('Error al crear la ventana de autenticación 3D Secure'));
         }
-    });
+    }
+    if (!selectedRate) return null;
+
+    let cost = 0;
+    if (selectedRate.cost !== undefined) cost = parseFloat(selectedRate.cost);
+    else if (selectedRate.price !== undefined) cost = parseFloat(selectedRate.price);
+    else if (selectedRate.rate_cost !== undefined) cost = parseFloat(selectedRate.rate_cost);
+
+    return {
+        id: selectedRate.id || selectedRate.rate_id || '',
+        label: selectedRate.label || selectedRate.name || selectedRate.rate_label || '',
+        cost,
+    };
 };
 
 const ContentConekta = (props) => {
     const locale = settings.locale ?? 'es';
     const { eventRegistration, emitResponse } = props;
-    const conektaSubmitFunction = useRef(null);
     const { onPaymentSetup } = eventRegistration;
     const { loadScript } = useComponentScript();
-    const [processing, setProcessing] = useState(false);
+
+    const [checkoutRequestId, setCheckoutRequestId] = useState(null);
+    const [mountToken, setMountToken] = useState(0);
+    const [refreshing, setRefreshing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
 
-    // Añadir clase al bloque de métodos de pago durante el proceso 3DS/tokenización
+    const scriptRef = useRef(null);
+    const orderEmitterRef = useRef(null);
+    if (orderEmitterRef.current === null) {
+        orderEmitterRef.current = new OrderEmitter();
+    }
+    // Mirrors `refreshing` so onPaymentSetup (registered once) sees the latest value.
+    const refreshingRef = useRef(false);
+    const checkoutRequestIdRef = useRef(null);
+    refreshingRef.current = refreshing;
+    checkoutRequestIdRef.current = checkoutRequestId;
+
+    const billingAddress = props.billing?.billingAddress || {};
+    const cartItems = props.cartData?.cartItems || [];
+    const cartTotal = props.billing?.cartTotal?.value || 0;
+    const currencyCode = props.billing?.currency?.code || 'MXN';
+
+    const selectedShipping = pickSelectedShipping(props);
+    const shippingRateId = selectedShipping?.id ?? '';
+    const itemsHashSource = cartItems
+        .map((i) => `${i.id}:${i.quantity}:${i.variation?.id ?? ''}`)
+        .join('|');
+    const billingEmail = billingAddress.email || '';
+    // Address fields go in the hash so the checkout-request POST re-fires
+    // when the address completes — the create call requires shipping_contact
+    // and Conekta's update path can't backfill it.
+    const addrHashSource = [
+        billingAddress.first_name || '',
+        billingAddress.last_name || '',
+        billingAddress.address_1 || '',
+        billingAddress.city || '',
+        billingAddress.state || '',
+        billingAddress.postcode || '',
+        billingAddress.country || '',
+    ].join('|');
+    const hash = `${cartTotal}|${currencyCode}|${itemsHashSource}|${shippingRateId}|${billingEmail}|${addrHashSource}`;
+
     useEffect(() => {
-        const paymentMethodContainer = document.querySelector('.wc-block-checkout__payment-method');
-        if (paymentMethodContainer) {
-            if (processing) {
-                paymentMethodContainer.classList.add('three-ds-process');
-            } else {
-                paymentMethodContainer.classList.remove('three-ds-process');
-            }
+        if (!billingEmail || !EMAIL_REGEX.test(billingEmail)) {
+            setCheckoutRequestId(null);
+            setErrorMessage('');
+            return undefined;
         }
-    }, [processing]);
+
+        let cancelled = false;
+        const timer = setTimeout(async () => {
+            setRefreshing(true);
+            try {
+                const response = await fetch(settings.checkout_request_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        nonce: settings.nonce,
+                        email: billingEmail,
+                    }),
+                });
+
+                if (cancelled) return;
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    if (data?.code === 'missing_customer_email') {
+                        setErrorMessage('');  // expected while the user is still filling the form
+                    } else if (response.status >= 500) {
+                        setErrorMessage('Error del servidor al preparar el pago. Intenta de nuevo.');
+                    } else {
+                        setErrorMessage(data?.message || 'No se pudo preparar el pago.');
+                    }
+                    return;
+                }
+
+                if (data?.checkout_request_id) {
+                    setCheckoutRequestId(data.checkout_request_id);
+                    // Only remount when the Conekta order actually changed.
+                    // mode === 'unchanged' means the amount is the same as the
+                    // last sync, so the iframe is already showing the right total.
+                    if (data.mode !== 'unchanged') {
+                        setMountToken((t) => t + 1);
+                    }
+                    setErrorMessage('');
+                } else {
+                    setErrorMessage('Respuesta inválida del servidor.');
+                }
+            } catch (err) {
+                if (!cancelled) {
+                    setErrorMessage(err?.message || 'Error de red al preparar el pago.');
+                }
+            } finally {
+                if (!cancelled) {
+                    setRefreshing(false);
+                }
+            }
+        }, DEBOUNCE_MS);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [hash]);
+
+    useEffect(() => {
+        if (!checkoutRequestId) {
+            return undefined;
+        }
+
+        if (scriptRef.current && document.body.contains(scriptRef.current)) {
+            document.body.removeChild(scriptRef.current);
+            scriptRef.current = null;
+        }
+
+        const container = document.querySelector('#conektaITokenizerframeContainer');
+        if (container) container.innerHTML = '';
+
+        const onScriptError = (err) => {
+            setErrorMessage(err?.message || 'No se pudo cargar el componente de pago.');
+        };
+
+        const script = loadScript(
+            settings.api_key,
+            checkoutRequestId,
+            locale,
+            orderEmitterRef.current,
+            onScriptError
+        );
+        document.body.appendChild(script);
+        scriptRef.current = script;
+
+        return () => {
+            if (scriptRef.current && document.body.contains(scriptRef.current)) {
+                document.body.removeChild(scriptRef.current);
+            }
+            scriptRef.current = null;
+            orderEmitterRef.current.resetStates();
+            orderEmitterRef.current.clearSubmit();
+        };
+    }, [checkoutRequestId, mountToken]);
 
     useEffect(() => {
         const unsubscribe = onPaymentSetup(async () => {
-            if (!conektaSubmitFunction.current) {
-                console.error("Conekta submit function no disponible.");
+            if (refreshingRef.current) {
                 return {
                     type: emitResponse.responseTypes.ERROR,
-                    message: "Error: Componente de pago no inicializado",
+                    message: 'Actualizando importe, intenta de nuevo en un momento',
+                };
+            }
+            if (!checkoutRequestIdRef.current) {
+                return {
+                    type: emitResponse.responseTypes.ERROR,
+                    message: 'Completa tu correo para ver el formulario de pago.',
+                };
+            }
+
+            // Bail if WC's validation store has any errors — that's WC's own
+            // generic record of "checkout fields are not valid yet". This avoids
+            // calling Conekta (and charging the customer) for a checkout that
+            // WC will reject anyway.
+            const validationStore = window.wp?.data?.select?.('wc/store/validation');
+            const validationErrors = validationStore?.getValidationErrors?.() || {};
+            if (Object.keys(validationErrors).length > 0) {
+                return {
+                    type: emitResponse.responseTypes.ERROR,
+                    message: 'Completa los campos requeridos del formulario antes de pagar.',
                 };
             }
 
             try {
-                // Prevent multiple submissions
-                if (processing) {
-                    return { 
-                        type: emitResponse.responseTypes.ERROR, 
-                        message: "Procesando pago, por favor espere" 
-                    };
-                }
-                
-                setProcessing(true);
-                setErrorMessage('');
-                
-                try {
-                    // Get token from Conekta Component
-                    conektaSubmitFunction.current();
-                    const token = await waitGetToken();
-                    
-                    // If 3DS is enabled, create 3DS order
-                    if (is3dsEnabled) {
-                        try {
-                            const msiOption = sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION;
-                            
-                            const orderResponse = await create3dsOrder(token, null, msiOption, props);
-                            
-                            if (orderResponse.next_action) {
-                                const redirectUrl = orderResponse.next_action.redirect_url;
-                                const authResult = await create3dsIframe(redirectUrl);
-                                
-                                // Verify order status
-                                if (authResult.payment_status === 'paid') {
-                                    return {
-                                        type: emitResponse.responseTypes.SUCCESS,
-                                        meta: {
-                                            paymentMethodData: {
-                                                conekta_token: token,
-                                                conekta_msi_option: String(msiOption),
-                                                conekta_order_id: String(orderResponse.order_id),
-                                                conekta_woo_order_id: String(orderResponse.woo_order_id),
-                                                conekta_3ds_completed: true
-                                            },
-                                        }
-                                    };
-                                } else {
-                                    throw new Error('3DS authentication failed');
-                                }
-                            }
-                            
-                            // If we get here, order was created but no 3DS needed
-                            return {
-                                type: emitResponse.responseTypes.SUCCESS,
-                                meta: {
-                                    paymentMethodData: {
-                                        conekta_token: token,
-                                        conekta_msi_option: String(msiOption),
-                                        conekta_order_id: String(orderResponse.order_id),
-                                        conekta_woo_order_id: String(orderResponse.woo_order_id)
-                                    },
-                                }
-                            };
-                        } catch (error) {
-                            console.error('3DS error:', error);
-                            setErrorMessage(error.message || 'Error en la autenticación 3DS');
-                            return { 
-                                type: emitResponse.responseTypes.ERROR,
-                                message: "Error en autenticación 3DS: " + (error.message || 'Error desconocido')
-                            };
-                        }
-                    }
-                    
-                    // Standard non-3DS flow
-                    return {
-                        type: emitResponse.responseTypes.SUCCESS,
-                        meta: {
-                            paymentMethodData: {
-                                conekta_token: token,
-                                conekta_msi_option: String(sessionStorage.getItem(CONEKTA_MSI_OPTION_KEY) || DEFAULT_MSI_OPTION),
-                            },
-                        }
-                    };
-                } catch (error) {
-                    console.error("Error en el pago:", error);
-                    setErrorMessage(error.message || 'Error procesando el pago');
-                    return {
-                        type: emitResponse.responseTypes.ERROR,
-                        message: error.isFormError ? 
-                            (TRANSLATIONS_FILES[locale]?.form_error || "Por favor completa el formulario") : 
-                            "Error procesando el pago: " + (error.message || 'Error desconocido'),
-                    };
-                } finally {
-                    setProcessing(false);
-                }
-            } catch (outerError) {
-                console.error("Error inesperado:", outerError);
-                setProcessing(false);
-                setErrorMessage(outerError.message || 'Error inesperado');
+                const orderPromise = new Promise((resolve, reject) => {
+                    orderEmitterRef.current.onOrder((o) => resolve(o));
+                    orderEmitterRef.current.onError((e) => reject(e));
+                });
+                orderEmitterRef.current.submit();
+                const order = await orderPromise;
+
+                return {
+                    type: emitResponse.responseTypes.SUCCESS,
+                    meta: {
+                        paymentMethodData: {
+                            conekta_order_id: String(order.id),
+                        },
+                    },
+                };
+            } catch (error) {
                 return {
                     type: emitResponse.responseTypes.ERROR,
-                    message: "Error inesperado: " + (outerError.message || 'Error desconocido'),
+                    message: error?.message || 'Error procesando el pago',
                 };
             }
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [onPaymentSetup, emitResponse.responseTypes.SUCCESS, emitResponse.responseTypes.ERROR]);
 
-    useEffect(() => {
-        const script = loadScript(settings.api_key, locale, conektaSubmitFunction, tokenEmitter, 
-            settings.msi_enabled, settings.available_msi_options, props.billing?.cartTotal?.value || 0);
-        document.body.appendChild(script);
-
-        return () => {
-            if (document.body.contains(script)) {
-                document.body.removeChild(script);
-            }
-        };
-    }, [props.billing.cartTotal.value]);
+    const showEmailPlaceholder = !billingEmail || !EMAIL_REGEX.test(billingEmail);
 
     return (
         <div>
             <p>{decodeEntities(settings.description)}</p>
-            {errorMessage && <p style={{color: 'red'}}>{errorMessage}</p>}
-            <div key={props.billing.cartTotal.value} id="conektaITokenizerframeContainer"></div>
-            <div  id="conektaIThreeDsframeContainer"></div>
-            {processing && <p>Procesando su pago...</p>}
+            {showEmailPlaceholder && (
+                <p>Completa tu correo para ver el formulario de pago.</p>
+            )}
+            {errorMessage && <p style={{ color: 'red' }}>{errorMessage}</p>}
+            <div id="conektaITokenizerframeContainer" style={{ height: 600 }}></div>
         </div>
     );
 };

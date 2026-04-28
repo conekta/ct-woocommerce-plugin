@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 5.4.14
+Stable tag: 6.0.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,17 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.0 =
+* BREAKING: Card payments migrated from the Card tokenizer SDK component to the Integration SDK component. The Conekta order is pre-created at iframe-mount time and updated via PUT on every cart change; process_payment only validates the already-paid order against the WooCommerce total.
+* Feature: New endpoint POST /conekta/v1/checkout-request that creates or updates the Conekta Integration order. customer_info and currency are set once at creation; line_items/discount_lines/shipping_lines are PUT on every cart change.
+* Feature: Amount-mismatch guard in process_payment — requires payment_status='paid' AND conekta_order.amount equals WooCommerce total before completing the order.
+* Feature: MSI is now passed via the Integration checkout config (monthly_installments_enabled defaults to false; merchant-configured plazos travel as monthly_installments_options).
+* Removal: Custom 3DS handling, the create_3ds_order REST endpoint, the three_ds_enabled/three_ds_mode properties, and the company API helper. The Integration SDK handles 3DS internally.
+* Removal: JS no longer scrapes the DOM or ships cart/billing/shipping payload — the request body is now { nonce } and the server reads WC()->cart + WC()->customer directly (kept in sync by WooCommerce).
+* Removal: Fragment system (#conekta-cart-data and the woocommerce_update_order_review_fragments filter).
+* Cleanup: conekta_settings localized to classic JS reduced from 11 keys to 5. Token + MSI hidden fields replaced by a single conekta_order_id hidden field.
+* Compat: WooCommerce Blocks checkout migrated to the same flow — paymentMethodData is now { conekta_order_id }.
+
 = 5.4.14 =
 * Fix: Webhook `order.paid`/`order.expired` now uses `wc_get_order()` with fallback lookup by `conekta-order-id` meta, fixing HPOS compatibility and 3DS temp order mismatch
 * Fix: `validate_reference_id` now rejects empty, non-numeric, zero, and negative values

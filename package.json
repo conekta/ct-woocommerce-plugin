@@ -1,6 +1,6 @@
 {
   "name": "conekta-payment-gateway",
-  "version": "5.4.14",
+  "version": "6.0.0",
   "description": "<div align=\"center\">",
   "main": "index.js",
   "directories": {
@@ -28,7 +28,7 @@
     "test": "wp-scripts test-unit-js --testPathPattern=tests/js",
     "test:e2e": "node tests/e2e/run.js",
     "check-engines": "wp-scripts check-engines",
-    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x '.claude*'"
+    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*' -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x 'test-results*' -x '.claude*' -x 'deploy.zip' -x '*.bak' -x 'phpunit.xml' -x 'composer.lock' -x 'package-lock.json'"
   },
   "dependencies": {
     "@woocommerce/settings": "^1.0.0",

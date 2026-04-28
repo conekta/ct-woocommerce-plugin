@@ -11,7 +11,6 @@ use \Conekta\Configuration;
 use \Conekta\Model\WebhookRequest;
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
-use Conekta\Api\CompaniesApi;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
@@ -22,7 +21,7 @@ require_once(__DIR__ . '/conekta-rest-api.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.4.14";
+	public $version  = "6.0.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit, debit, cash, and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -263,24 +262,6 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             'handler' => $stack,
         ]);
         return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
-    }
-
-    public static function get_companies_api_instance(string $api_key, string $version): CompaniesApi
-    {
-        $stack = HandlerStack::create();
-        $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
-            return $request->withHeader(
-                'X-Conekta-Client-User-Agent',
-                json_encode([
-                    'plugin_name'    => 'woocommerce',
-                    'plugin_version' => $version,
-                ])
-            );
-        }));
-        $client = new Client([
-            'handler' => $stack,
-        ]);
-        return new CompaniesApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
     }
 
     public static function handle_conekta_3ds_callback() {
