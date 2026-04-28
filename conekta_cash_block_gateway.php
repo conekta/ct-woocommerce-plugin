@@ -431,15 +431,6 @@ function ckpg_conekta_cash_add_gateway($methods)
 
 add_filter('woocommerce_payment_gateways', 'ckpg_conekta_cash_add_gateway');
 
-add_action('wp_enqueue_scripts', function () {
-    wp_enqueue_style(
-        'ckpg-checkout-style',
-        plugin_dir_url(__FILE__) . 'assets/styles.css',
-        [],
-        '1.0'
-    );
-});
-
 add_action('woocommerce_blocks_loaded', 'woocommerce_gateway_conekta_cash_woocommerce_block_support');
 function woocommerce_gateway_conekta_cash_woocommerce_block_support()
 {

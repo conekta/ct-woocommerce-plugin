@@ -81,8 +81,6 @@ class WC_Conekta_Gateway_Test extends TestCase
             'webhook_url'          => 'http://localhost/?wc-api=wc_conekta',
             'alternate_imageurl'   => '',
             'order_expiration'     => 1,
-            'is_msi_enabled'       => 'no',
-            'months'               => [],
         ];
 
         $settings = array_merge($defaults, $overrides);
@@ -93,8 +91,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway->api_key = $settings['cards_api_key'];
         $gateway->public_api_key = $settings['cards_public_api_key'];
         $gateway->webhook_url = $settings['webhook_url'];
-        $gateway->three_ds_enabled = false;
-        $gateway->three_ds_mode = '';
         $gateway->has_fields = true;
         $gateway->method_title = 'Conekta Tarjetas';
 
@@ -115,8 +111,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway = new WC_Conekta_Gateway();
 
         $this->assertEmpty($gateway->api_key);
-        $this->assertFalse($gateway->three_ds_enabled);
-        $this->assertSame('', $gateway->three_ds_mode);
     }
 
     // -------------------------------------------------------
@@ -318,43 +312,6 @@ class WC_Conekta_Gateway_Test extends TestCase
     /**
      * @group mockoon
      */
-    public function test_create_order_success()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-        $order = new WC_Order(100);
-
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 1, &$error,
-        ]);
-
-        $this->assertTrue($result, 'Order creation should succeed. Error: ' . ($error ?? 'none'));
-        $this->assertNull($error);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_create_order_with_msi()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway(['is_msi_enabled' => 'yes']);
-        $order = new WC_Order(101);
-
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 6, &$error,
-        ]);
-
-        $this->assertTrue($result, 'MSI order creation should succeed. Error: ' . ($error ?? 'none'));
-    }
-
-    /**
-     * @group mockoon
-     */
     public function test_get_order_by_id()
     {
         $this->requireMockoon();
@@ -393,19 +350,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('paid', $captured->getPaymentStatus());
     }
 
-    /**
-     * @group mockoon
-     */
-    public function test_get_company_3ds_info()
-    {
-        $this->requireMockoon();
-
-        $companiesApi = WC_Conekta_Plugin::get_companies_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
-
-        $company = $companiesApi->getCurrentCompany('es');
-        $this->assertNotNull($company);
-    }
-
     public function test_gateway_disabled_without_api_key()
     {
         $gateway = new WC_Conekta_Gateway();
@@ -431,75 +375,6 @@ class WC_Conekta_Gateway_Test extends TestCase
     /**
      * @group mockoon
      */
-    public function test_process_payment_standard_card_flow()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_msi_option' => '1',
-        ];
-
-        $result = $gateway->process_payment(200);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_flow_with_paid_order()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // Mockoon GET /orders/:id returns pending_payment by default
-        // Simulate 3DS completed with capture flow
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_test_123',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(300);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_already_paid_skips_capture()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // ord_2znsJ8YNbNoDDsN3p returns paid — no capture needed
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_2znsJ8YNbNoDDsN3p',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(301);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
-    }
-
-    /**
-     * @group mockoon
-     */
     public function test_process_payment_3ds_failed_order_returns_failure()
     {
         $this->requireMockoon();
@@ -518,31 +393,6 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $this->assertEquals('failure', $result['result']);
         $this->assertArrayNotHasKey('redirect', $result);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_with_temp_order_transfers_meta()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // Simulate 3DS with a temporary WooCommerce order
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_test_123',
-            'conekta_woo_order_id' => '999',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(303);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
     }
 
     public function test_process_payment_returns_failure_on_empty_post()
@@ -716,285 +566,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('coupon', $requestBody['discount_lines'][1]['type']);
     }
 
-    /**
-     * @group mockoon
-     */
-    public function test_create_order_with_discount_and_verify_discount_lines()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-        $order = new WC_Order(503);
-        $order->set_coupons([
-            ['name' => 'DESC10', 'type' => 'percent', 'discount_amount' => 10.00],
-        ]);
-
-        // Create order via the plugin
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 1, &$error,
-        ]);
-        $this->assertTrue($result, 'Order with discount should succeed. Error: ' . ($error ?? 'none'));
-
-        // Fetch the order and verify discount_lines exist
-        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
-        $conektaOrder = $api->getOrderById('ord_2znsF4cv7L8s3452');
-
-        $discountLines = $conektaOrder->getDiscountLines();
-        $this->assertNotNull($discountLines, 'Order should have discount_lines');
-        $this->assertNotEmpty($discountLines->getData(), 'discount_lines should not be empty');
-
-        $firstDiscount = $discountLines->getData()[0];
-        $this->assertEquals(1000, $firstDiscount->getAmount());
-    }
-
-    // -------------------------------------------------------
-    // 3DS Smart mode — next_action may not have redirect_to_url
-    // -------------------------------------------------------
-
-    /**
-     * @group mockoon
-     */
-    public function test_create_3ds_order_smart_mode_without_redirect()
-    {
-        $this->requireMockoon();
-
-        // Configure gateway with 3DS smart mode
-        $gateway = $this->createConfiguredGateway();
-        $gateway->three_ds_mode = 'smart';
-
-        // Register gateway in WC() so create_3ds_order can find it
-        global $test_conekta_gateway;
-        $test_conekta_gateway = $gateway;
-
-        // Simulate REST request to create-3ds-order
-        $request = new WP_REST_Request('POST');
-        $request->set_params([
-            'token' => 'tok_test_visa_4242',
-            'order_id' => '600',
-            'msi_option' => 1,
-        ]);
-
-        $response = WC_Conekta_REST_API::create_3ds_order($request);
-        $data = $response->get_data();
-
-        // In smart mode without 3DS, should succeed without next_action
-        $this->assertEquals(200, $response->get_status(), 'Response should be 200. Got: ' . json_encode($data));
-        $this->assertTrue($data['success']);
-        $this->assertNotEmpty($data['order_id']);
-        $this->assertEquals('paid', $data['payment_status']);
-        $this->assertArrayNotHasKey('next_action', $data, 'Smart mode should not require 3DS redirect');
-    }
-
-    // -------------------------------------------------------
-    // Dynamic pricing / discount integration (cart helpers)
-    // -------------------------------------------------------
-
-    public function test_build_discount_lines_captures_native_coupons()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 1000.00, 900.00)
-            ->withCoupon('VERANO20', 50.00)
-            ->withCoupon('ENVIO', 100.00)
-            ->withTotal(850.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-
-        $this->assertEquals('VERANO20', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        $this->assertEquals('coupon', $lines[0]['type']);
-
-        $this->assertEquals('ENVIO', $lines[1]['code']);
-        $this->assertEquals(10000, $lines[1]['amount']);
-        $this->assertEquals('coupon', $lines[1]['type']);
-    }
-
-    public function test_build_discount_lines_captures_negative_fee_discounts()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withFee('Advanced Pricing Discount', -150.00)
-            ->withTotal(350.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('Advanced Pricing Discount', $lines[0]['code']);
-        $this->assertEquals(15000, $lines[0]['amount']);
-        $this->assertEquals('campaign', $lines[0]['type']);
-    }
-
-    public function test_build_discount_lines_combines_coupons_and_fees()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 400.00)
-            ->withCoupon('DESC100', 100.00)
-            ->withFee('2x1 Promo', -200.00)
-            ->withTotal(200.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-        // Coupons come first, then fee-based discounts
-        $this->assertEquals('DESC100', $lines[0]['code']);
-        $this->assertEquals(10000, $lines[0]['amount']);
-        $this->assertEquals('2x1 Promo', $lines[1]['code']);
-        $this->assertEquals(20000, $lines[1]['amount']);
-    }
-
-    public function test_build_discount_lines_empty_without_discounts()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withTotal(500.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_ignores_positive_fees()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withFee('Service Fee', 50.00)         // positive — NOT a discount
-            ->withFee('Flash Sale', -100.00)         // negative — IS a discount
-            ->withTotal(450.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines, 'Only negative fees should appear as discount lines');
-        $this->assertEquals('Flash Sale', $lines[0]['code']);
-        $this->assertEquals(10000, $lines[0]['amount']);
-    }
-
-    public function test_build_discount_lines_returns_empty_when_cart_null()
-    {
-        WC()->cart = null;
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_zero_coupon_amount_excluded()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withCoupon('EXPIRED', 0.00)     // zero-amount coupon
-            ->withCoupon('VALID10', 10.00)
-            ->withTotal(490.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines, 'Zero-amount coupons should be excluded');
-        $this->assertEquals('VALID10', $lines[0]['code']);
-    }
-
-    // -------------------------------------------------------
-    // Price-level discount detection (dynamic pricing modifying product price)
-    // -------------------------------------------------------
-
-    public function test_build_discount_lines_detects_price_level_discounts()
-    {
-        // Product regular price = 500, dynamic pricing lowered to 400
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00)
-            ->withTotal(800.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('dynamic_pricing', $lines[0]['code']);
-        $this->assertEquals(20000, $lines[0]['amount']); // (500*2 - 800) * 100
-        $this->assertEquals('campaign', $lines[0]['type']);
-    }
-
-    public function test_build_discount_lines_price_level_combined_with_coupon()
-    {
-        // Regular 500, dynamic → 400, coupon 50 off
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 350.00, 0, 500.00)
-            ->withCoupon('DESC50', 50.00)
-            ->withTotal(350.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-        $this->assertEquals('DESC50', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        $this->assertEquals('dynamic_pricing', $lines[1]['code']);
-        $this->assertEquals(10000, $lines[1]['amount']); // (500 - 400) * 100
-    }
-
-    public function test_build_discount_lines_no_price_discount_when_regular_matches()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 1000.00, 1000.00, 0, 500.00) // 500*2 = 1000 = subtotal
-            ->withTotal(1000.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_all_three_types_together()
-    {
-        // Coupon + negative fee + price-level: the triple combo
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 350.00, 0, 500.00) // regular=500, dynamic→400, coupon→350
-            ->withCoupon('CUPON50', 50.00)
-            ->withFee('Promo Fee', -30.00)
-            ->withTotal(320.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(3, $lines);
-        // 1) Coupon
-        $this->assertEquals('CUPON50', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        // 2) Fee discount
-        $this->assertEquals('Promo Fee', $lines[1]['code']);
-        $this->assertEquals(3000, $lines[1]['amount']);
-        // 3) Price-level
-        $this->assertEquals('dynamic_pricing', $lines[2]['code']);
-        $this->assertEquals(10000, $lines[2]['amount']); // (500 - 400) * 100
-
-        // Verify total adds up: 5000 + 3000 + 10000 = 18000 cents = $180 total discount
-        $total_discount = array_sum(array_column($lines, 'amount'));
-        $this->assertEquals(18000, $total_discount);
-    }
-
-    public function test_build_discount_lines_mixed_items_some_discounted()
-    {
-        // Item 10: regular=500, dynamic→400 (discounted)
-        // Item 20: regular=300, no discount (300*1 = 300 = subtotal)
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00)  // 500*2=1000, subtotal=800 → 200 discount
-            ->withItem(20, 1, 300.00, 300.00, 0, 300.00)   // 300*1=300,  subtotal=300 → 0 discount
-            ->withTotal(1100.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('dynamic_pricing', $lines[0]['code']);
-        $this->assertEquals(20000, $lines[0]['amount']); // only item 10 contributes
-    }
-
-    public function test_build_discount_lines_item_without_regular_price()
-    {
-        // Product with no regular_price set (0) should not generate discount
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 400.00, 0, 0) // regular_price=0
-            ->withTotal(400.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines, 'No discount when regular_price is 0/unset');
-    }
-
     // -------------------------------------------------------
     // ckpg_build_line_items — price-level discount via &$price_level_discount
     // -------------------------------------------------------
@@ -1084,100 +655,6 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $this->assertCount(1, $line_items);
         $this->assertEquals(50000, $line_items[0]['unit_price']);
-    }
-
-    // -------------------------------------------------------
-    // Cart snapshot (ckpg_build_conekta_cart_snapshot)
-    // -------------------------------------------------------
-
-    public function test_cart_snapshot_reflects_discounted_totals()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 4, 2000.00, 1500.00)
-            ->withCoupon('VERANO20', 500.00)
-            ->withTotal(1500.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(150000, $snapshot['amount'], 'Total should be 1500.00 in cents');
-        $this->assertCount(1, $snapshot['cart_items']);
-        $this->assertEquals(10, $snapshot['cart_items'][0]['id']);
-        $this->assertEquals(4, $snapshot['cart_items'][0]['quantity']);
-        $this->assertEquals(150000, $snapshot['cart_items'][0]['total'], 'Item total should use line_total (after discount)');
-    }
-
-    public function test_cart_snapshot_includes_all_discount_lines()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 400.00)
-            ->withCoupon('DESC100', 100.00)
-            ->withFee('Dynamic Discount', -50.00)
-            ->withTotal(350.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertArrayHasKey('discount_lines', $snapshot);
-        $this->assertCount(2, $snapshot['discount_lines']);
-        $this->assertEquals('DESC100', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(10000, $snapshot['discount_lines'][0]['amount']);
-        $this->assertEquals('Dynamic Discount', $snapshot['discount_lines'][1]['code']);
-        $this->assertEquals(5000, $snapshot['discount_lines'][1]['amount']);
-    }
-
-    public function test_cart_snapshot_empty_when_cart_null()
-    {
-        WC()->cart = null;
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEmpty($snapshot);
-    }
-
-    public function test_cart_snapshot_multiple_items_with_dynamic_pricing()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 400.00, 400.00)   // discounted by dynamic pricing (was 500 each)
-            ->withItem(20, 1, 300.00, 300.00)
-            ->withFee('Bulk Discount', -70.00)
-            ->withTotal(630.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(63000, $snapshot['amount']);
-        $this->assertCount(2, $snapshot['cart_items']);
-
-        $this->assertEquals(10, $snapshot['cart_items'][0]['id']);
-        $this->assertEquals(40000, $snapshot['cart_items'][0]['total']);
-
-        $this->assertEquals(20, $snapshot['cart_items'][1]['id']);
-        $this->assertEquals(30000, $snapshot['cart_items'][1]['total']);
-
-        $this->assertCount(1, $snapshot['discount_lines']);
-        $this->assertEquals('Bulk Discount', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(7000, $snapshot['discount_lines'][0]['amount']);
-    }
-
-    // -------------------------------------------------------
-    // Cart snapshot with price-level discounts
-    // -------------------------------------------------------
-
-    public function test_cart_snapshot_includes_price_level_discount_lines()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00) // regular=500, effective=400
-            ->withCoupon('PROMO', 100.00)
-            ->withTotal(700.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(70000, $snapshot['amount']);
-
-        // discount_lines should have coupon + price-level
-        $this->assertCount(2, $snapshot['discount_lines']);
-        $this->assertEquals('PROMO', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(10000, $snapshot['discount_lines'][0]['amount']);
-        $this->assertEquals('dynamic_pricing', $snapshot['discount_lines'][1]['code']);
-        $this->assertEquals(20000, $snapshot['discount_lines'][1]['amount']);
     }
 
     // -------------------------------------------------------

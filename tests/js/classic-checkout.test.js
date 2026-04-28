@@ -21,19 +21,10 @@ function loadScript() {
 function setupGlobals(overrides = {}) {
   const defaults = {
     public_key: 'key_public_test',
-    three_ds_enabled: 'yes',
-    three_ds_mode: 'smart',
     nonce: 'test_nonce',
-    amount: 150000,
-    currency: 'MXN',
-    cart_items: [{ id: 10, name: 'Producto', quantity: 2, total: 150000 }],
-    discount_lines: [{ code: 'dynamic_pricing', amount: 20000, type: 'campaign' }],
     locale: 'es',
-    create_3ds_order_url: '/test-3ds',
     checkout_url: '/test-checkout',
-    rest_url: '/wp-json/conekta/v1/',
-    enable_msi: 'no',
-    available_msi_options: [],
+    checkout_request_url: '/wp-json/conekta/v1/checkout-request',
   };
 
   global.conekta_settings = { ...defaults, ...overrides };
@@ -69,13 +60,8 @@ function createCheckoutForm() {
   return form;
 }
 
-function createFragmentElement(data) {
-  const script = document.createElement('script');
-  script.id = 'conekta-cart-data';
-  script.type = 'application/json';
-  script.textContent = typeof data === 'string' ? data : JSON.stringify(data);
-  document.body.appendChild(script);
-  return script;
+function triggerNativeUpdatedCheckout() {
+  document.body.dispatchEvent(new Event('updated_checkout'));
 }
 
 // -------------------------------------------------------
@@ -98,99 +84,53 @@ describe('classic-checkout.js', () => {
   });
 
   // -------------------------------------------------------
-  // Fragment sync: updated_checkout reads #conekta-cart-data
+  // updated_checkout triggers debounced SDK refresh
   // -------------------------------------------------------
 
-  describe('updated_checkout fragment sync', () => {
-    test('updates conekta_settings from fragment element', () => {
+  describe('updated_checkout event', () => {
+    test('schedules a debounced refresh on native event', () => {
       createCheckoutForm();
       loadScript();
 
-      createFragmentElement({
-        amount: 80000,
-        cart_items: [{ id: 20, quantity: 1, total: 80000 }],
-        discount_lines: [{ code: 'CUPON', amount: 5000, type: 'coupon' }],
-      });
-
-      document.body.dispatchEvent(new Event('updated_checkout'));
-
-      expect(conekta_settings.amount).toBe(80000);
-      expect(conekta_settings.cart_items[0].id).toBe(20);
-      expect(conekta_settings.discount_lines[0].code).toBe('CUPON');
+      expect(() => triggerNativeUpdatedCheckout()).not.toThrow();
+      // The debounce timer is set — verify it doesn't fire synchronously.
+      expect(jest.getTimerCount()).toBeGreaterThan(0);
     });
 
-    test('does not crash when fragment element is missing', () => {
-      createCheckoutForm();
+    test('does not throw when form is missing', () => {
       loadScript();
 
-      expect(() => {
-        document.body.dispatchEvent(new Event('updated_checkout'));
-      }).not.toThrow();
-
-      expect(conekta_settings.amount).toBe(150000);
+      expect(() => triggerNativeUpdatedCheckout()).not.toThrow();
     });
 
-    test('does not crash on invalid JSON in fragment', () => {
+    test('multiple calls debounce into one', () => {
       createCheckoutForm();
       loadScript();
 
-      createFragmentElement('{broken json');
+      triggerNativeUpdatedCheckout();
+      const timerCount = jest.getTimerCount();
 
-      expect(() => {
-        document.body.dispatchEvent(new Event('updated_checkout'));
-      }).not.toThrow();
-
-      expect(conekta_settings.amount).toBe(150000);
-    });
-
-    test('partial fragment only updates present fields', () => {
-      createCheckoutForm();
-      loadScript();
-
-      const originalItems = conekta_settings.cart_items;
-      const originalDiscounts = conekta_settings.discount_lines;
-
-      createFragmentElement({ amount: 99000 });
-
-      document.body.dispatchEvent(new Event('updated_checkout'));
-
-      expect(conekta_settings.amount).toBe(99000);
-      expect(conekta_settings.cart_items).toBe(originalItems);
-      expect(conekta_settings.discount_lines).toBe(originalDiscounts);
-    });
-
-    test('multiple fragment updates keep latest values', () => {
-      createCheckoutForm();
-      loadScript();
-
-      createFragmentElement({ amount: 50000 });
-      document.body.dispatchEvent(new Event('updated_checkout'));
-      expect(conekta_settings.amount).toBe(50000);
-
-      // Update fragment content
-      document.getElementById('conekta-cart-data').textContent = JSON.stringify({ amount: 30000 });
-      document.body.dispatchEvent(new Event('updated_checkout'));
-      expect(conekta_settings.amount).toBe(30000);
+      triggerNativeUpdatedCheckout();
+      triggerNativeUpdatedCheckout();
+      // Each scheduleRefresh call clears the previous timer and sets a new one.
+      expect(jest.getTimerCount()).toBe(timerCount);
     });
   });
 
   // -------------------------------------------------------
-  // 3DS enabled detection
+  // Settings shape
   // -------------------------------------------------------
 
-  describe('3DS enabled detection', () => {
-    test.each([
-      [true],
-      ['yes'],
-      ['1'],
-      [false],
-      ['no'],
-      [null],
-      [undefined],
-    ])('three_ds_enabled=%p loads without error', (value) => {
-      setupGlobals({ three_ds_enabled: value });
+  describe('conekta_settings shape', () => {
+    test('contains all keys required by the Integration SDK flow', () => {
       createCheckoutForm();
-      expect(() => loadScript()).not.toThrow();
+      loadScript();
+
+      expect(conekta_settings.public_key).toBe('key_public_test');
+      expect(conekta_settings.locale).toBe('es');
+      expect(conekta_settings.checkout_url).toBe('/test-checkout');
+      expect(conekta_settings.checkout_request_url).toBe('/wp-json/conekta/v1/checkout-request');
+      expect(conekta_settings.nonce).toBe('test_nonce');
     });
   });
 
@@ -199,65 +139,24 @@ describe('classic-checkout.js', () => {
   // -------------------------------------------------------
 
   describe('translations', () => {
-    test('adds 3ds_error translation if missing', () => {
-      global.CONEKTA_TRANSLATIONS = { es: { token_error: 'Error' } };
-      createCheckoutForm();
-      loadScript();
-
-      expect(global.CONEKTA_TRANSLATIONS.es['3ds_error']).toBe('Autenticación 3D Secure fallida');
-    });
-
-    test('does not overwrite existing 3ds_error translation', () => {
-      global.CONEKTA_TRANSLATIONS = { es: { '3ds_error': 'Custom error' } };
-      createCheckoutForm();
-      loadScript();
-
-      expect(global.CONEKTA_TRANSLATIONS.es['3ds_error']).toBe('Custom error');
-    });
-
     test('handles missing CONEKTA_TRANSLATIONS gracefully', () => {
       global.CONEKTA_TRANSLATIONS = undefined;
       createCheckoutForm();
+      loadScript();
 
       expect(() => loadScript()).not.toThrow();
     });
   });
 
   // -------------------------------------------------------
-  // Settings shape: discount_lines present in conekta_settings
+  // Missing settings resilience
   // -------------------------------------------------------
 
-  describe('discount_lines in settings', () => {
-    test('conekta_settings.discount_lines is available for 3DS requests', () => {
+  describe('resilience', () => {
+    test('loads without conekta_settings (globals accessed lazily)', () => {
+      delete global.conekta_settings;
       createCheckoutForm();
-      loadScript();
-
-      expect(conekta_settings.discount_lines).toBeDefined();
-      expect(conekta_settings.discount_lines).toHaveLength(1);
-      expect(conekta_settings.discount_lines[0]).toEqual({
-        code: 'dynamic_pricing',
-        amount: 20000,
-        type: 'campaign',
-      });
-    });
-
-    test('discount_lines updated after fragment sync', () => {
-      createCheckoutForm();
-      loadScript();
-
-      createFragmentElement({
-        amount: 80000,
-        discount_lines: [
-          { code: 'CUPON50', amount: 5000, type: 'coupon' },
-          { code: 'dynamic_pricing', amount: 10000, type: 'campaign' },
-        ],
-      });
-
-      document.body.dispatchEvent(new Event('updated_checkout'));
-
-      expect(conekta_settings.discount_lines).toHaveLength(2);
-      expect(conekta_settings.discount_lines[0].code).toBe('CUPON50');
-      expect(conekta_settings.discount_lines[1].code).toBe('dynamic_pricing');
+      expect(() => loadScript()).not.toThrow();
     });
   });
 });

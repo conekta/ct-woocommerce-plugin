@@ -9,12 +9,7 @@
 require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\ApiException;
-use Conekta\Model\ChargeRequest;
-use Conekta\Model\ChargeRequestPaymentMethod;
-use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
-use Conekta\Model\CustomerShippingContacts;
-use GuzzleHttp\Client;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
@@ -30,8 +25,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     public $api_key;
     public $public_api_key;
     public $webhook_url;
-    public $three_ds_enabled;
-    public $three_ds_mode;
 
     /**
      * @throws ApiException|Exception
@@ -53,9 +46,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         $this->public_api_key = $this->settings['cards_public_api_key'];
         $this->webhook_url = $this->settings['webhook_url'];
 
-        $this->three_ds_enabled = false;
-        $this->three_ds_mode    = '';
-
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wc_conekta', [$this, 'check_for_webhook']);
 
@@ -67,14 +57,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $this->enabled = false;
         }
         if (!empty($this->api_key)) {
-            try {
-                $companies_api = $this->get_companies_api_instance($this->api_key, $this->version);
-                $company = $companies_api->getCurrentCompany($this->get_user_locale());
-                $this->three_ds_enabled = $company->getThreeDsEnabled();
-                $this->three_ds_mode = $company->getThreeDsMode();
-            } catch (\Exception $e) {
-                error_log('Conekta - Error fetching company info: ' . $e->getMessage());
-            }
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
         }
         add_action('woocommerce_rest_checkout_process_payment_with_context', [$this, 'process_payment_api'], 10, 2);
@@ -98,6 +80,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             WC_Admin_Settings::add_error(__('Error: La clave privada de Conekta es obligatoria.', 'woothemes'));
         }
     }
+
     /**
      * @throws ApiException
      */
@@ -182,29 +165,24 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     'step' => 1
                 ),
             ),
-            'is_msi_enabled' => array(
-                'type' => 'checkbox',
-                'title' => __('Meses sin Intereses', 'woothemes'),
-                'label' => __('Habilitar Meses sin Intereses', 'woothemes'),
-                'default' => 'no'
-            ),
             'months' => array(
-                'type' => 'multiselect',
-                'title' => __('Meses sin intereses', 'woothemes'),
-                'options' => array(
-                    '3' => __('3', 'woothemes'),
-                    '6' => __('6', 'woothemes'),
-                    '9' => __('9', 'woothemes'),
+                'type'              => 'multiselect',
+                'title'             => __('Meses sin Intereses', 'woothemes'),
+                'description'       => __('Selecciona los plazos a habilitar. Déjalo vacío para desactivar MSI.', 'woothemes'),
+                'options'           => array(
+                    '3'  => __('3', 'woothemes'),
+                    '6'  => __('6', 'woothemes'),
+                    '9'  => __('9', 'woothemes'),
                     '12' => __('12', 'woothemes'),
                     '18' => __('18', 'woothemes'),
                     '24' => __('24', 'woothemes'),
                 ),
-                'default' => array(),
-                'class' => 'wc-enhanced-select',
-                'css' => 'width: 400px;',
+                'default'           => array(),
+                'class'             => 'wc-enhanced-select',
+                'css'               => 'width: 400px;',
                 'custom_attributes' => array(
-                    'data-placeholder' => __('Seleccione opciones', 'woothemes'),
-                    'multiple' => 'multiple'
+                    'data-placeholder' => __('Selecciona los plazos', 'woothemes'),
+                    'multiple'         => 'multiple',
                 ),
             ),
             'webhook_url' => array(
@@ -237,95 +215,88 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (!empty($this->description)) {
             echo wpautop(wp_kses_post($this->description));
         }
-        echo '<div id="conektaITokenizerframeContainer"></div>';
-        echo '<input type="hidden" name="conekta_token" />';
-        echo '<input type="hidden" name="conekta_msi_option" value="1" />';
+        echo '<div id="conektaITokenizerframeContainer" style="height:600px"></div>';
+        echo '<input type="hidden" name="conekta_order_id" />';
+    }
+
+    /**
+     * Validate the Conekta order paid by the Integration component and complete
+     * the WooCommerce order. Shared between blocks (process_payment_api) and
+     * classic (process_payment).
+     *
+     * @return array{success:bool,error?:string}
+     */
+    protected function complete_wc_order_from_conekta(WC_Order $order, string $conekta_order_id): array {
+        try {
+            $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
+            $conekta_order = $api->getOrderById($conekta_order_id);
+
+            if ($conekta_order->getPaymentStatus() !== 'paid') {
+                return [
+                    'success' => false,
+                    'error'   => sprintf('Conekta order is not paid (status: %s)', $conekta_order->getPaymentStatus()),
+                ];
+            }
+
+            $expected_amount = (int) round($order->get_total() * 100);
+            $actual_amount   = (int) $conekta_order->getAmount();
+            if ($expected_amount !== $actual_amount) {
+                return [
+                    'success' => false,
+                    'error'   => sprintf(
+                        'Amount mismatch: WooCommerce expects %d cents, Conekta charged %d cents',
+                        $expected_amount,
+                        $actual_amount
+                    ),
+                ];
+            }
+
+            self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
+            $order->payment_complete($conekta_order_id);
+            $order->add_order_note(sprintf(__('Pago confirmado con Conekta (orden %s)', 'woocommerce'), $conekta_order_id));
+
+            WC_Conekta_REST_API::clear_session();
+
+            return ['success' => true];
+        } catch (\Exception $e) {
+            error_log('Conekta - complete_wc_order_from_conekta: ' . $e->getMessage());
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
     }
 
     /**
      * @throws Exception
      */
     public function process_payment_api($context, $result) {
-        global $woocommerce;
         $order = $context->order;
         if ($context->payment_method !== $this->id) {
             return;
         }
 
-        $token_id = $context->payment_data['conekta_token'];
-        $msi_option = $context->payment_data['conekta_msi_option'];
-        
-        // Check if we have 3DS data
-        $conekta_order_id = isset($context->payment_data['conekta_order_id']) ? $context->payment_data['conekta_order_id'] : null;
-        $conekta_woo_order_id = isset($context->payment_data['conekta_woo_order_id']) ? $context->payment_data['conekta_woo_order_id'] : null;
-        $is_3ds_completed = isset($context->payment_data['conekta_3ds_completed']) && $context->payment_data['conekta_3ds_completed'];
-        
-        if (empty($token_id)) {
-            throw new Exception('Token de pago no recibido.');
-        }
-        
-        $error_message = null;
-        $success = false;
-        
-        // If we have a Conekta order ID from 3DS process, we need to check its status
-        if (!empty($conekta_order_id)) {
-            try {
-                $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-                $conekta_order = $conekta_api->getOrderById($conekta_order_id);
-                
-                // If there's a temporary order from 3DS, use that order's information
-                if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order->get_id()) {
-                    $temp_order = wc_get_order($conekta_woo_order_id);
-                    if ($temp_order) {
-                        // Transfer data from temporary order to current order if needed
-                        $conekta_order_meta = $temp_order->get_meta('conekta-order-id');
-                        if ($conekta_order_meta) {
-                            self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
-                        }
+        $conekta_order_id = isset($context->payment_data['conekta_order_id']) ? sanitize_text_field($context->payment_data['conekta_order_id']) : '';
 
-                        $temp_order->delete(true);
-                    }
-                } else {
-                    // Update order meta in current order
-                    self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
-                }
-                
-                if ($conekta_order->getPaymentStatus() === 'paid') {
-                    // Order is already paid, just update the status
-                    $order->update_status('processing', __('Pago procesado con Conekta (3DS)', 'woocommerce'));
-                    $success = true;
-                } else if ($is_3ds_completed && $conekta_order->getPaymentStatus() === 'pending_payment') {
-                    // Order needs to be captured
-                    $conekta_api->ordersCreateCapture($conekta_order_id);
-                    $order->update_status('processing', __('Pago capturado con Conekta (3DS)', 'woocommerce'));
-                    $success = true;
-                } else {
-                    $error_message = 'El pago no pudo ser procesado. Estado: ' . $conekta_order->getPaymentStatus();
-                    $success = false;
-                }
-            } catch (\Exception $e) {
-                $error_message = $e->getMessage();
-                $success = false;
-            }
-        } else {
-            // Standard payment flow without 3DS
-            $success = $this->process_conekta_payment_for_order($order, $token_id, $msi_option, $error_message);
+        if (empty($conekta_order_id)) {
+            $result->set_status('failure');
+            $result->set_payment_details(array_merge($result->payment_details, [
+                'error' => __('Falta la orden de Conekta. Vuelve a intentar el pago.', 'woocommerce'),
+            ]));
+            wc_add_notice(__('Error: Falta la orden de Conekta.', 'woocommerce'), 'error');
+            return;
         }
 
-        if ($success) {
+        $outcome = $this->complete_wc_order_from_conekta($order, $conekta_order_id);
+
+        if ($outcome['success']) {
             $result->set_status('success');
             $result->set_redirect_url($this->get_return_url($order));
         } else {
-            wc_add_notice(__('Error: ', 'woothemes') . $error_message);
+            wc_add_notice(__('Error: ', 'woothemes') . ($outcome['error'] ?? 'unknown'), 'error');
             WC()->session->reload_checkout = true;
 
             $result->set_status('failure');
-            $result->set_payment_details(array_merge(
-                $result->payment_details,
-                [
-                    'error' => $error_message,
-                ]
-            ));
+            $result->set_payment_details(array_merge($result->payment_details, [
+                'error' => $outcome['error'] ?? 'unknown',
+            ]));
         }
     }
 
@@ -340,182 +311,27 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         return in_array(get_woocommerce_currency(), $this->currencies);
     }
 
-    protected function process_conekta_payment_for_order($order, $token_id, $msi_option, &$error_message = null) {
-        try {
-            $data = ckpg_get_request_data($order);
-            $items = $order->get_items();
-            $taxes = $order->get_taxes();
-            $fees = $order->get_fees();
-            $fees_formatted = ckpg_build_get_fees($fees);
-            $discounts_data = $fees_formatted['discounts'];
-            $fees_data = $fees_formatted['fees'];
-            $tax_lines = ckpg_build_tax_lines($taxes);
-            $tax_lines = array_merge($tax_lines, $fees_data);
-            $discount_lines = ckpg_build_discount_lines($data);
-            $discount_lines = array_merge($discount_lines, $discounts_data);
-            $price_level_discount = 0;
-            $line_items = ckpg_build_line_items($items, parent::ckpg_get_version(), $price_level_discount);
-            ckpg_add_price_level_discount($discount_lines, $price_level_discount);
-            $shipping_lines = ckpg_build_shipping_lines($data);
-            $shipping_contact = ckpg_build_shipping_contact($data);
-            $customer_info = ckpg_build_customer_info($data);
-            $order_metadata = ckpg_build_order_metadata($data + array(
-                'plugin_conekta_version' => $this->version,
-                'woocommerce_version' => WC()->version,
-                'payment_method' => $this->GATEWAY_NAME,
-                ));
-
-            $rq = new OrderRequest([
-                'currency' => $data['currency'],
-                'shipping_lines' => $shipping_lines,
-                'discount_lines' => $discount_lines,
-                'tax_lines' => $tax_lines,
-                'customer_info' => $customer_info,
-                'line_items' => $line_items,
-                'metadata' => $order_metadata
-            ]);
-        
-            if (!empty($shipping_contact)) {
-                $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
-            }
-        
-            $payment_method = new ChargeRequestPaymentMethod([
-                'type' => 'card',
-                'token_id' => $token_id,
-                'expires_at' => get_expired_at($this->settings['order_expiration']),
-                'customer_ip_address' => $this->get_user_ip()
-            ]);
-        
-            if ($this->settings['is_msi_enabled'] == 'yes' && (int)$msi_option > 1) {
-                $payment_method->setMonthlyInstallments((int)$msi_option);
-            }
-        
-            $charge = new ChargeRequest([
-                'payment_method' => $payment_method,
-                'reference_id' => strval($order->get_id()),
-            ]);
-        
-            $rq->setCharges([$charge]);
-        
-            $orderCreated = $this->get_api_instance($this->settings['cards_api_key'], $this->version)->createOrder($rq, $this->get_user_locale());
-            $order->update_status('pending', __('Esperando el pago con Conekta', 'woocommerce'));
-            self::update_conekta_order_meta($order, $orderCreated->getId(), 'conekta-order-id');
-        
-            return true;
-        } catch (ApiException $e) {
-            $this->ckpg_mark_as_failed_payment($order);
-            
-            $responseBody = json_decode($e->getResponseBody());
-            $error_message = "Error al procesar el pago";
-            
-            $hasErrorDetails = $responseBody && 
-                             property_exists($responseBody, 'details') && 
-                             is_array($responseBody->details) && 
-                             !empty($responseBody->details) &&
-                             property_exists($responseBody->details[0], 'message');
-            
-            if ($hasErrorDetails) {
-                $error_message = $responseBody->details[0]->message;
-            }
-            
-            error_log($error_message);
-            return false;
-        }
-    }
-
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
-        
-        $token_id = isset($_POST['conekta_token']) ? sanitize_text_field($_POST['conekta_token']) : null;
-        $msi_option = isset($_POST['conekta_msi_option']) ? (int) $_POST['conekta_msi_option'] : 1;
-        
-        // Check if we have 3DS data from $_POST (modern approach) or session (fallback)
-        $conekta_order_id = isset($_POST['conekta_order_id']) ? sanitize_text_field($_POST['conekta_order_id']) : WC()->session->get('conekta_3ds_order_id');
-        $conekta_woo_order_id = isset($_POST['conekta_woo_order_id']) ? sanitize_text_field($_POST['conekta_woo_order_id']) : WC()->session->get('conekta_woo_order_id');
-        $payment_status = isset($_POST['conekta_payment_status']) ? sanitize_text_field($_POST['conekta_payment_status']) : WC()->session->get('conekta_3ds_payment_status');
-        $is_3ds_completed = isset($_POST['conekta_3ds_completed']) && $_POST['conekta_3ds_completed'] === 'true';
-        
-        // Clear session data
-        WC()->session->__unset('conekta_3ds_order_id');
-        WC()->session->__unset('conekta_woo_order_id');
-        WC()->session->__unset('conekta_3ds_payment_status');
-        
-        if (!$token_id && !$conekta_order_id) {
-            wc_add_notice(__('Error: No se recibió el token de Conekta.', 'woocommerce'), 'error');
+
+        $conekta_order_id = isset($_POST['conekta_order_id']) ? sanitize_text_field($_POST['conekta_order_id']) : '';
+
+        if (empty($conekta_order_id)) {
+            wc_add_notice(__('Error: Falta la orden de Conekta.', 'woocommerce'), 'error');
             return ['result' => 'failure'];
         }
-        
-        $error_message = null;
-        $success = false;
-        
-        // If we have a Conekta order ID from 3DS process, we need to check its status
-        if (!empty($conekta_order_id)) {
-            try {
-                info_log("Classic Checkout - Processing 3DS order: {$conekta_order_id}, WooCommerce order: {$order_id}, Payment Status: {$payment_status}, 3DS Completed: " . ($is_3ds_completed ? 'true' : 'false'));
-                
-                $conekta_api = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-                $conekta_order = $conekta_api->getOrderById($conekta_order_id);
-                
-                info_log("Classic Checkout - Conekta order status: " . $conekta_order->getPaymentStatus());
-                
-                // If there's a temporary order from 3DS, use that order's information
-                if (!empty($conekta_woo_order_id) && $conekta_woo_order_id != $order_id) {
-                    $temp_order = wc_get_order($conekta_woo_order_id);
-                    if ($temp_order) {
-                        // Transfer data from temporary order to current order
-                        $conekta_order_meta = $temp_order->get_meta('conekta-order-id');
-                        if ($conekta_order_meta) {
-                            self::update_conekta_order_meta($order, $conekta_order_meta, 'conekta-order-id');
-                        }
 
-                        $temp_order->delete(true);
-                    }
-                } else {
-                    // Update order meta in current order
-                    self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
-                }
-                
-                if ($conekta_order->getPaymentStatus() === 'paid') {
-                    // Order is already paid, just update the status
-                    $order->update_status('processing', __('Pago procesado con Conekta (3DS)', 'woocommerce'));
-                    $success = true;
-                    info_log("Classic Checkout - Order already paid, marked as processing");
-                } else if (($payment_status === 'paid' || $is_3ds_completed) && $conekta_order->getPaymentStatus() === 'pending_payment') {
-                    // Order needs to be captured
-                    try {
-                        info_log("Classic Checkout - Attempting to capture payment for order: {$conekta_order_id}");
-                        $conekta_api->ordersCreateCapture($conekta_order_id);
-                        $order->update_status('processing', __('Pago capturado con Conekta (3DS)', 'woocommerce'));
-                        $success = true;
-                        info_log("Classic Checkout - Payment captured successfully");
-                    } catch (\Exception $e) {
-                        $error_message = 'Error capturing payment: ' . $e->getMessage();
-                        $success = false;
-                        error_log("Classic Checkout - Error capturing payment: " . $e->getMessage());
-                    }
-                } else {
-                    $error_message = 'El pago no pudo ser procesado. Estado: ' . $conekta_order->getPaymentStatus();
-                    $success = false;
-                    error_log("Classic Checkout - Payment failed. Conekta status: " . $conekta_order->getPaymentStatus() . ", Payment status: {$payment_status}, 3DS completed: " . ($is_3ds_completed ? 'true' : 'false'));
-                }
-            } catch (\Exception $e) {
-                $error_message = $e->getMessage();
-                $success = false;
-            }
-        } else {
-            // Standard payment flow without 3DS
-            $success = $this->process_conekta_payment_for_order($order, $token_id, $msi_option, $error_message);
-        }
+        $outcome = $this->complete_wc_order_from_conekta($order, $conekta_order_id);
 
-        if ($success) {
+        if ($outcome['success']) {
             return [
                 'result'   => 'success',
                 'redirect' => $this->get_return_url($order),
             ];
-        } else {
-            wc_add_notice(__('Error al procesar el pago con Conekta: ', 'woocommerce') . $error_message, 'error');
-            return ['result' => 'failure'];
         }
+
+        wc_add_notice(__('Error al procesar el pago con Conekta: ', 'woocommerce') . ($outcome['error'] ?? 'unknown'), 'error');
+        return ['result' => 'failure'];
     }
 }
 

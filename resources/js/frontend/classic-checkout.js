@@ -1,17 +1,100 @@
-// Constants
 const CONTAINER_SELECTOR = "#conektaITokenizerframeContainer";
-const THREE_DS_TIMEOUT = 60 * 1000; // igual que blocks
 const FORM_SELECTOR = "form.checkout";
 const PAYMENT_METHOD_SELECTOR = 'input[name="payment_method"]:checked';
-const MSI_STORAGE_KEY = "conekta_msi_option";
-const DEFAULT_MSI = "1";
+const EMAIL_FIELD_SELECTOR = '#billing_email';
 const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
+const REFRESH_DEBOUNCE_MS = 500;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// 3DS configuration
-const is3dsEnabled = conekta_settings.three_ds_enabled === true || conekta_settings.three_ds_enabled === "yes" || conekta_settings.three_ds_enabled === "1";
+// Inlined twin of resources/js/frontend/OrderEmitter.js — kept here because
+// classic-checkout.js is loaded directly by WordPress (no webpack bundle).
+class OrderEmitter {
+  constructor() {
+    this.listeners = [];
+    this.errorListeners = [];
+    this.order = null;
+    this.error = null;
+    this.submitFn = null;
+  }
+  setOrder(newOrder) {
+    this.order = newOrder;
+    this.listeners.forEach((cb) => cb(newOrder));
+    this.resetStates();
+  }
+  onOrder(cb) {
+    this.listeners.push(cb);
+    if (this.order) {
+      cb(this.order);
+      this.resetStates();
+    }
+  }
+  setError(newError) {
+    this.error = newError;
+    this.errorListeners.forEach((cb) => cb(newError));
+    this.resetStates();
+  }
+  onError(cb) {
+    this.errorListeners.push(cb);
+    if (this.error) {
+      cb(this.error);
+      this.resetStates();
+    }
+  }
+  setSubmit(fn) {
+    this.submitFn = typeof fn === 'function' ? fn : null;
+  }
+  submit() {
+    if (typeof this.submitFn !== 'function') {
+      throw new Error('Conekta submit not ready');
+    }
+    return this.submitFn();
+  }
+  clearSubmit() {
+    this.submitFn = null;
+  }
+  resetStates() {
+    this.listeners = [];
+    this.errorListeners = [];
+    this.error = null;
+    this.order = null;
+  }
+}
 
-// Utilities
+// Inlined twin of resources/js/frontend/useComponentScript.js for the same reason.
+const buildScriptLoader = () => {
+  const loadScript = (publicKey, checkoutRequestId, locale, orderEmitter, onScriptError) => {
+    const script = document.createElement('script');
+    script.src = "https://pay.conekta.com/v1.0/js/conekta-checkout.min.js";
+    script.async = true;
+    script.onload = () => {
+      if (!window.ConektaCheckoutComponents) {
+        onScriptError && onScriptError(new Error('Conekta SDK not available'));
+        return;
+      }
+      const config = {
+        targetIFrame: CONTAINER_SELECTOR,
+        publicKey,
+        locale,
+        checkoutRequestId,
+        useExternalSubmit: true,
+      };
+      const callbacks = {
+        onGetInfoSuccess: () => {},
+        onUpdateSubmitTrigger: (fn) => orderEmitter.setSubmit(fn),
+        onFinalizePayment: (order) => orderEmitter.setOrder(order),
+        onErrorPayment: (error) => orderEmitter.setError(error),
+      };
+      window.ConektaCheckoutComponents.Integration({ config, callbacks });
+    };
+    script.onerror = () => {
+      onScriptError && onScriptError(new Error('Failed to load Conekta SDK'));
+    };
+    return script;
+  };
+  return { loadScript };
+};
+
 const utils = {
   getSelectedPaymentMethod: () =>
     document.querySelector(PAYMENT_METHOD_SELECTOR),
@@ -19,23 +102,15 @@ const utils = {
     const selected = utils.getSelectedPaymentMethod();
     return selected && selected.value === "conekta";
   },
-  waitForElement: (selector, callback, maxWaitTime = MAX_WAIT_TIME) => {
-    const startTime = Date.now();
-    const checkElement = setInterval(() => {
-      if (document.querySelector(selector)) {
-        clearInterval(checkElement);
-        callback();
-      } else if (Date.now() - startTime > maxWaitTime) {
-        clearInterval(checkElement);
-        console.warn(`Timeout waiting for element: ${selector}`);
-      }
-    }, POLLING_INTERVAL);
-  },
   getTranslation: (key) => {
     const locale = conekta_settings.locale || "es";
     return (
-      window.CONEKTA_TRANSLATIONS?.[locale]?.[key] ||
-      window.CONEKTA_TRANSLATIONS?.es?.[key] ||
+      (window.CONEKTA_TRANSLATIONS &&
+        window.CONEKTA_TRANSLATIONS[locale] &&
+        window.CONEKTA_TRANSLATIONS[locale][key]) ||
+      (window.CONEKTA_TRANSLATIONS &&
+        window.CONEKTA_TRANSLATIONS.es &&
+        window.CONEKTA_TRANSLATIONS.es[key]) ||
       key
     );
   },
@@ -43,19 +118,30 @@ const utils = {
     const form = document.querySelector(FORM_SELECTOR);
     if (!form) return;
 
+    const placeOrderBtn =
+      form.querySelector('#place_order') ||
+      form.querySelector('button[type="submit"]');
+
     if (isLoading) {
       if (!form.querySelector('.conekta-loading-overlay')) {
         const overlay = document.createElement('div');
         overlay.className = 'conekta-loading-overlay';
-        overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.6);z-index:1000;';
+        overlay.style.cssText =
+          'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.6);z-index:1000;';
         form.style.position = 'relative';
         form.appendChild(overlay);
       }
-      form.classList.add('three-ds-process');
+      if (placeOrderBtn) {
+        placeOrderBtn.disabled = true;
+        placeOrderBtn.classList.add('conekta-disabled');
+      }
     } else {
       const overlay = form.querySelector('.conekta-loading-overlay');
       if (overlay) overlay.remove();
-      form.classList.remove('three-ds-process');
+      if (placeOrderBtn) {
+        placeOrderBtn.disabled = false;
+        placeOrderBtn.classList.remove('conekta-disabled');
+      }
     }
   },
   showErrorMessage: (message) => {
@@ -71,271 +157,47 @@ const utils = {
 
     form.prepend(wrapper);
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  },
+  getBillingEmail: () => {
+    const input = document.querySelector(EMAIL_FIELD_SELECTOR);
+    return input ? input.value.trim() : "";
+  },
+  isValidEmail: (value) => EMAIL_REGEX.test(value || ""),
+  showPlaceholder: () => {
+    const container = document.querySelector(CONTAINER_SELECTOR);
+    if (!container) return;
+    const message =
+      utils.getTranslation('email_required') ||
+      'Completa tu correo para ver el formulario de pago';
+    container.innerHTML = `<div class="conekta-iframe-placeholder" style="padding:16px;color:#555;">${message}</div>`;
+  },
+  clearContainer: () => {
+    const container = document.querySelector(CONTAINER_SELECTOR);
+    if (container) container.innerHTML = "";
   }
 };
 
-// 3DS handling
-const threeDsHandler = {
-  create3dsOrder: async (token, msiOption) => {
-    try {
-      const headers = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Get order_id from the checkout form if available
-      const form = document.querySelector(FORM_SELECTOR);
-      const orderId = form.querySelector('#order_id')?.value;
-      
-      const requestData = {
-        token,
-        msi_option: msiOption,
-        nonce: conekta_settings.nonce,
-      };
-      
-      // Add order_id if available
-      if (orderId) {
-        requestData.order_id = orderId;
-      } else {
-        // Extract billing data from checkout form for classic checkout
-        const getBillingDataFromForm = () => {
-          const billingData = {};
-          
-          // Get billing fields from form
-          const billingFields = [
-            'billing_first_name', 'billing_last_name', 'billing_company',
-            'billing_address_1', 'billing_address_2', 'billing_city', 
-            'billing_state', 'billing_postcode', 'billing_country',
-            'billing_email', 'billing_phone'
-          ];
-          
-          billingFields.forEach(field => {
-            const input = form.querySelector(`[name="${field}"]`);
-            if (input) {
-              // Remove 'billing_' prefix for consistency with blocks
-              const key = field.replace('billing_', '');
-              billingData[key] = input.value || '';
-            }
-          });
-          
-          return billingData;
-        };
-        
-        // Add classic checkout context data
-        requestData.is_blocks_context = false; // This is classic checkout
-        requestData.is_classic_context = true;
-        
-        // Get billing data from form
-        const billingData = getBillingDataFromForm();
-        if (Object.keys(billingData).length > 0) {
-          requestData.billing_data = billingData;
-        }
+const orderEmitter = new OrderEmitter();
+const { loadScript } = buildScriptLoader();
 
-        // Get shipping data from form
-        const getShippingDataFromForm = () => {
-          const shippingData = {};
-          
-          // Get shipping fields from form
-          const shippingFields = [
-            'shipping_first_name', 'shipping_last_name', 'shipping_company',
-            'shipping_address_1', 'shipping_address_2', 'shipping_city', 
-            'shipping_state', 'shipping_postcode', 'shipping_country'
-          ];
-          
-          shippingFields.forEach(field => {
-            const input = form.querySelector(`[name="${field}"]`);
-            if (input) {
-              // Remove 'shipping_' prefix for consistency with blocks
-              const key = field.replace('shipping_', '');
-              shippingData[key] = input.value || '';
-            }
-          });
-          
-          return shippingData;
-        };
-        
-        const shippingData = getShippingDataFromForm();
-        if (Object.keys(shippingData).length > 0) {
-          requestData.shipping_data = shippingData;
-        }
-
-        // Get shipping method from conekta_settings (more reliable than parsing DOM)
-        if (conekta_settings.shipping_method_id) {
-          requestData.shipping_method = {
-            id: conekta_settings.shipping_method_id,
-            label: conekta_settings.shipping_method_label || conekta_settings.shipping_method_id,
-            cost: conekta_settings.shipping_cost || 0 // Already in cents from PHP
-          };
-        } else {
-          // Fallback: try to get from form if not available in settings
-          const shippingMethodInput = form.querySelector('input[name^="shipping_method"]:checked');
-          if (shippingMethodInput) {
-            const methodValue = shippingMethodInput.value;
-            let methodLabel = methodValue;
-            let methodCost = 0;
-            
-            // Try to get label and cost from various sources
-            const methodRow = shippingMethodInput.closest('tr, li, .wc-shipping-row');
-            if (methodRow) {
-              // Try to find label in the row
-              const labelElement = methodRow.querySelector('label, .shipping-method-label, .shipping-name');
-              if (labelElement) {
-                methodLabel = labelElement.textContent.trim();
-              }
-              
-              // Try to find cost in the row
-              const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
-              if (costElement) {
-                const costText = costElement.textContent.replace(/[^\d.,]/g, '');
-                methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0; // Convert to cents
-              }
-            }
-            
-            // If we still don't have cost, try to extract from label
-            if (methodCost === 0 && methodLabel) {
-              const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
-              if (costMatch) {
-                methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0; // Convert to cents
-              }
-            }
-            
-            requestData.shipping_method = {
-              id: methodValue,
-              label: methodLabel,
-              cost: methodCost
-            };
-          }
-        }
-
-        // Add cart data from available settings
-        if (conekta_settings.amount) {
-          const cartData = {
-            total: Number(conekta_settings.amount), // Already in cents from PHP
-            currency: conekta_settings.currency || 'MXN'
-          };
-
-          // Add cart items if available
-          if (conekta_settings.cart_items && conekta_settings.cart_items.length > 0) {
-            cartData.items = conekta_settings.cart_items;
-          }
-
-          requestData.cart_data = cartData;
-        }
-
-        // Include discount lines (native coupons + dynamic pricing discounts)
-        if (conekta_settings.discount_lines && conekta_settings.discount_lines.length > 0) {
-          requestData.discount_lines = conekta_settings.discount_lines;
-        }
-      }
-      
-      const response = await fetch(conekta_settings.create_3ds_order_url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestData),
-        credentials: 'same-origin'
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Error creating 3DS order: ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error creating 3DS order:', error);
-      throw error;
-    }
-  },
-  
-  show3dsIframe: (url) => {
-    return new Promise((resolve, reject) => {
-      // Remove any existing iframe
-      const existingIframe = document.getElementById('conekta3dsIframe');
-      if (existingIframe) {
-        existingIframe.parentNode.removeChild(existingIframe);
-      }
-      
-      // Create modal container
-      const conekta3dsContainer = document.createElement('div');
-      conekta3dsContainer.id = 'conekta3dsContainer';
-      conekta3dsContainer.classList.add('conekta-slide-in');
-      const parentContainer = document.querySelector(CONTAINER_SELECTOR);
-      if (!parentContainer) {
-        console.error('Target container for 3DS not found');
-        reject(new Error('No se encontró el contenedor para 3DS'));
-        return;
-      }
-
-      if (getComputedStyle(parentContainer).position === 'static') {
-        parentContainer.style.position = 'relative';
-        parentContainer.style.zIndex = '9999';
-      }
-
-      conekta3dsContainer.style.position = 'absolute';
-      conekta3dsContainer.style.top = '0';
-      conekta3dsContainer.style.left = '0';
-      conekta3dsContainer.style.right = '0';
-      conekta3dsContainer.style.bottom = '0';
-      conekta3dsContainer.style.display = 'flex';
-      conekta3dsContainer.style.justifyContent = 'center';
-      conekta3dsContainer.style.alignItems = 'center';
-      conekta3dsContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-      conekta3dsContainer.style.zIndex = '999';
-      
-      // Create iframe
-      const iframe = document.createElement('iframe');
-      iframe.id = 'conekta3dsIframe';
-      iframe.src = `${url}?source=embedded`;
-      iframe.style.width = '95%';
-      iframe.style.maxWidth = '600px';
-      iframe.style.height = '650px';
-      iframe.style.maxHeight = '95%';
-      iframe.style.border = 'none';
-      iframe.style.backgroundColor = 'white';
-      iframe.style.borderRadius = '8px';
-      
-      conekta3dsContainer.appendChild(iframe);
-      parentContainer.appendChild(conekta3dsContainer);
-      
-      // Listen for message event from iframe
-      const messageHandler = (event) => {
-        // Check that the origin is from Conekta
-        if (event.origin === 'https://3ds-pay.conekta.com') {
-          window.removeEventListener('message', messageHandler);
-          conekta3dsContainer.classList.remove('conekta-slide-in');
-          conekta3dsContainer.classList.add('conekta-slide-out');
-          setTimeout(()=>{
-            conekta3dsContainer.remove();
-          },300);
-          
-          if (event.data.error || event.data.payment_status !== 'paid') {
-            reject(new Error('3DS authentication failed'));
-          } else {
-            resolve({
-              order_id: event.data.order_id,
-              payment_status: event.data.payment_status
-            });
-          }
-        }
-      };
-      
-      window.addEventListener('message', messageHandler);
-    });
-  },
+const state = {
+  currentScriptEl: null,
+  currentCheckoutRequestId: null,
+  refreshTimer: null,
+  inflight: false,
+  payingInProgress: false,
 };
 
-// Form handling
 const formHandler = {
   submitForm: async (formData) => {
     try {
       utils.setLoading(true);
-      const response = await fetch(
-        conekta_settings.checkout_url,
-        {
-          method: "POST",
-          body: formData,
-          credentials: "same-origin",
-        }
-      );
-      const data = await response.json();
+      const response = await fetch(conekta_settings.checkout_url, {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+      });
+      const data = await response.json().catch(() => ({}));
 
       if (data.result === "success") {
         window.location.href = data.redirect;
@@ -348,7 +210,9 @@ const formHandler = {
 
           const wrapper = document.createElement("div");
           wrapper.className = "woocommerce-notices-wrapper";
-          wrapper.innerHTML = data.messages;
+          wrapper.innerHTML =
+            data.messages ||
+            `<div class="woocommerce-error">${utils.getTranslation('form_error')}</div>`;
 
           form.prepend(wrapper);
           wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -358,331 +222,292 @@ const formHandler = {
       utils.setLoading(false);
       utils.showErrorMessage(utils.getTranslation("form_error"));
     }
+  }
+};
+
+const requestCheckout = async () => {
+  const response = await fetch(conekta_settings.checkout_request_url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // Email is the user's primary input for this request and isn't derivable
+    // from WC()->customer when classic checkout fires before WC has run
+    // update_order_review. Send it so the server can backfill the customer
+    // email before snapshotting the cart for Conekta.
+    body: JSON.stringify({
+      nonce: conekta_settings.nonce,
+      email: utils.getBillingEmail(),
+    }),
+    credentials: 'same-origin',
+  });
+
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (_) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  if (!response.ok || !data || data.success === false) {
+    const err = new Error((data && data.message) || `HTTP ${response.status}`);
+    err.code = data && data.code;
+    throw err;
+  }
+
+  return data;
+};
+
+const mounter = {
+  wireOrderListeners: () => {
+    orderEmitter.onOrder((order) => {
+      const form = document.querySelector(FORM_SELECTOR);
+      if (!form) return;
+      const hidden = form.querySelector('[name="conekta_order_id"]');
+      if (hidden) hidden.value = (order && order.id) || "";
+      const formData = new FormData(form);
+      formData.append("wc-ajax", "checkout");
+      formHandler.submitForm(formData).finally(() => {
+        state.payingInProgress = false;
+      });
+      // OrderEmitter wipes listeners after each event; rebind for the next round.
+      mounter.wireOrderListeners();
+    });
+
+    orderEmitter.onError((error) => {
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      utils.showErrorMessage(
+        (error && error.message) || utils.getTranslation("form_error")
+      );
+      mounter.wireOrderListeners();
+    });
   },
 
-  setupSubmitListener: (form, triggerSubmitFunction) => {
-    if (form._conektaSubmitListener) {
-      form.removeEventListener("submit", form._conektaSubmitListener, true);
+  mount: (checkoutRequestId) => {
+    if (state.currentScriptEl && state.currentScriptEl.parentNode) {
+      state.currentScriptEl.parentNode.removeChild(state.currentScriptEl);
+      state.currentScriptEl = null;
     }
+    utils.clearContainer();
 
-    const submitListener = async (e) => {
-      if (!utils.isConektaSelected()) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      try {
-        utils.setLoading(true);
-        await triggerSubmitFunction();
-      } catch (error) {
-        console.error("Error in submit function:", error);
-        utils.setLoading(false);
-        if (error.message !== 'Can not send postrobot_method. Target window is closed') {
-          utils.showErrorMessage(utils.getTranslation("form_error"));
-        }
+    state.currentCheckoutRequestId = checkoutRequestId;
+    const scriptEl = loadScript(
+      conekta_settings.public_key,
+      checkoutRequestId,
+      conekta_settings.locale || 'es',
+      orderEmitter,
+      (error) => {
+        console.warn('Conekta script failed to load:', error);
+        utils.showErrorMessage(utils.getTranslation('form_error'));
       }
-    };
+    );
+    state.currentScriptEl = scriptEl;
+    document.body.appendChild(scriptEl);
 
-    form._conektaSubmitListener = submitListener;
-    form.addEventListener("submit", submitListener, true);
+    mounter.wireOrderListeners();
+  },
+
+  unmount: () => {
+    if (state.currentScriptEl && state.currentScriptEl.parentNode) {
+      state.currentScriptEl.parentNode.removeChild(state.currentScriptEl);
+    }
+    state.currentScriptEl = null;
+    state.currentCheckoutRequestId = null;
+    orderEmitter.clearSubmit();
+    utils.clearContainer();
+  }
+};
+
+// Hook into WC classic's `checkout_place_order_<method>` jQuery filter to
+// intercept the place-order click. The filter fires BEFORE WC's server-side
+// validation, so we re-run that validation explicitly via /checkout-request
+// (validate mode) and only trigger the SDK charge when WC would let the
+// order through. Without this gate the iframe could charge against a form
+// WC was about to reject, leaving the customer paid for an order WC never
+// created.
+const submitInterceptor = {
+  attach: () => {
+    if (!window.jQuery || submitInterceptor._attached) return;
+    submitInterceptor._attached = true;
+
+    const $ = window.jQuery;
+    const $form = $(FORM_SELECTOR);
+
+    $form.on('checkout_place_order_conekta', function () {
+      if (!utils.isConektaSelected()) return true;
+      if (state.payingInProgress) return false;
+      if (!state.currentCheckoutRequestId) {
+        utils.showErrorMessage(utils.getTranslation('form_error'));
+        return false;
+      }
+
+      // HTML5 native gate: short-circuits empty required / bad pattern fields
+      // without paying for the validation roundtrip.
+      const form = document.querySelector(FORM_SELECTOR);
+      if (form && typeof form.checkValidity === 'function' && !form.checkValidity()) {
+        if (typeof form.reportValidity === 'function') form.reportValidity();
+        return false;
+      }
+
+      // From here we always halt WC's native submission and drive the rest
+      // ourselves: server-side validation, then SDK charge, then formHandler
+      // posts to wc-ajax=checkout to create the actual WC order.
+      state.payingInProgress = true;
+      utils.setLoading(true);
+      submitInterceptor.runValidationAndCharge(form);
+      return false;
+    });
+  },
+
+  runValidationAndCharge: async (form) => {
+    try {
+      const errors = await submitInterceptor.fetchValidation(form);
+      if (errors && errors.length) {
+        submitInterceptor.renderValidationErrors(errors);
+        state.payingInProgress = false;
+        utils.setLoading(false);
+        return;
+      }
+      orderEmitter.submit();
+    } catch (err) {
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      utils.showErrorMessage(err.message || utils.getTranslation('form_error'));
+    }
+  },
+
+  fetchValidation: async (form) => {
+    const formData = {};
+    if (form) {
+      const fd = new FormData(form);
+      fd.forEach((value, key) => { formData[key] = value; });
+    }
+    const res = await fetch(conekta_settings.checkout_request_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nonce: conekta_settings.nonce,
+        validate: 1,
+        form_data: formData,
+      }),
+      credentials: 'same-origin',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data && Array.isArray(data.errors)) return data.errors;
+    if (!res.ok) throw new Error((data && data.message) || `HTTP ${res.status}`);
+    return [];
+  },
+
+  renderValidationErrors: (errors) => {
+    const form = document.querySelector(FORM_SELECTOR);
+    if (!form) return;
+    const existing = form.querySelector('.woocommerce-notices-wrapper');
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'woocommerce-notices-wrapper';
+    const list = document.createElement('ul');
+    list.className = 'woocommerce-error';
+    list.setAttribute('role', 'alert');
+    errors.forEach((e) => {
+      const li = document.createElement('li');
+      li.textContent = (e && e.message) || '';
+      list.appendChild(li);
+    });
+    wrapper.appendChild(list);
+    form.prepend(wrapper);
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
   },
 };
 
-// Conekta configuration
-const conektaConfig = {
-  getConfig: () => ({
-    targetIFrame: CONTAINER_SELECTOR,
-    publicKey: conekta_settings.public_key,
-    locale: conekta_settings.locale || "es",
-    useExternalSubmit: true,
-  }),
-
-  getOptions: () => ({
-    autoResize: true,
-    amount: Number(conekta_settings.amount),
-    enableMsi: conekta_settings.enable_msi === "yes",
-    availableMsiOptions: conekta_settings.available_msi_options,
-  }),
-
-  getCallbacks: () => ({
-    onCreateTokenSucceeded: async (token) => {
-      const form = document.querySelector(FORM_SELECTOR);
-      const msiOption = sessionStorage.getItem(MSI_STORAGE_KEY) || DEFAULT_MSI;
-      
-      // Set token and MSI option in the form
-      form.querySelector('[name="conekta_token"]').value = token.id;
-      form.querySelector('[name="conekta_msi_option"]').value = msiOption;
-      
-      // If 3DS is enabled, create order with 3DS
-      if (is3dsEnabled) {
-        try {
-          const orderResponse = await threeDsHandler.create3dsOrder(token.id, msiOption);
-          
-          // If next_action is present, authentication is required
-          if (orderResponse.next_action) {
-            // Show 3DS iframe
-            const redirectUrl = orderResponse.next_action.redirect_url;
-            
-            try {
-              // Show 3DS iframe and wait for result
-              const authResult = await threeDsHandler.show3dsIframe(redirectUrl);
-              
-              // After successful 3DS authentication, add order data to form
-              const formData = new FormData(form);
-              formData.append("wc-ajax", "checkout");
-              
-              // Add 3DS order data to the form submission
-              if (orderResponse.order_id) {
-                formData.append("conekta_order_id", String(orderResponse.order_id));
-              }
-              if (orderResponse.woo_order_id) {
-                formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
-              }
-              if (authResult.payment_status) {
-                formData.append("conekta_payment_status", String(authResult.payment_status));
-              }
-              formData.append("conekta_3ds_completed", "true");
-              
-              formHandler.submitForm(formData);
-            } catch (error) {
-              utils.setLoading(false);
-              utils.showErrorMessage(utils.getTranslation("3ds_error") || "3D Secure authentication failed");
-            }
-          } else {
-            // No 3DS authentication required, but add order data if available
-            const formData = new FormData(form);
-            formData.append("wc-ajax", "checkout");
-            
-            // Add order data to form submission
-            if (orderResponse.order_id) {
-              formData.append("conekta_order_id", String(orderResponse.order_id));
-            }
-            if (orderResponse.woo_order_id) {
-              formData.append("conekta_woo_order_id", String(orderResponse.woo_order_id));
-            }
-            if (orderResponse.payment_status) {
-              formData.append("conekta_payment_status", String(orderResponse.payment_status));
-            }
-            
-            formHandler.submitForm(formData);
-          }
-        } catch (error) {
-          utils.setLoading(false);
-          utils.showErrorMessage(error.message || utils.getTranslation("token_error"));
-        }
-      } else {
-        // Standard non-3DS flow
-        const formData = new FormData(form);
-        formData.append("wc-ajax", "checkout");
-        formHandler.submitForm(formData);
-      }
-    },
-
-    onCreateTokenError: (error) => {
-      utils.setLoading(false);
-      utils.showErrorMessage(utils.getTranslation("token_error") + ": " + error.message);
-    },
-
-    onEventListener: (event) => {
-      if (event.name === "monthlyInstallmentSelected" && event.value) {
-        sessionStorage.setItem(
-          MSI_STORAGE_KEY,
-          event.value.monthlyInstallments
-        );
-      }
-    },
-    onFormError: () => {
-      utils.setLoading(false);
-    },
-    onUpdateSubmitTrigger: (triggerSubmitFunction) => {
-      const form = document.querySelector(FORM_SELECTOR);
-      form._conektaSubmitFunction = triggerSubmitFunction;
-      formHandler.setupSubmitListener(form, triggerSubmitFunction);
-    },
-  }),
-};
-
-// Conekta initialization
-const conektaInitializer = {
-  initConektaIframe: () => {
-    if (!window.ConektaCheckoutComponents) return;
-    const container = document.querySelector(CONTAINER_SELECTOR);
-    if (!container) return;
-
-    // If there's an existing iframe and it's working, don't reinitialize
-    const existingIframe = container.querySelector("iframe");
-    if (existingIframe && existingIframe.contentWindow) {
+const orchestrator = {
+  refresh: async () => {
+    if (!utils.isConektaSelected()) return;
+    if (!utils.isValidEmail(utils.getBillingEmail())) {
+      utils.showPlaceholder();
       return;
     }
+    if (state.inflight) return;
 
-    // If there's an iframe but it's not working, remove it
-    if (existingIframe) {
-      existingIframe.remove();
-    }
+    state.inflight = true;
+    utils.setLoading(true);
 
     try {
-      console.log("Initializing Conekta iframe...");
-      ConektaCheckoutComponents.Card({
-        config: conektaConfig.getConfig(),
-        options: conektaConfig.getOptions(),
-        callbacks: conektaConfig.getCallbacks(),
-      });
+      const data = await requestCheckout();
+      if (data.checkout_request_id) {
+        // Remount when the amount changed OR when WC has wiped our iframe out
+        // of the DOM (which it does on coupon apply, shipping change, etc. —
+        // those re-render the entire checkout review block).
+        const container = document.querySelector(CONTAINER_SELECTOR);
+        const containerEmpty = !container || !container.querySelector('iframe');
+        if (data.mode !== 'unchanged' || !state.currentCheckoutRequestId || containerEmpty) {
+          mounter.mount(data.checkout_request_id);
+        }
+      }
     } catch (error) {
-      console.warn("Error initializing Conekta:", error);
+      if (error.code === 'missing_customer_email') {
+        utils.showPlaceholder();
+      } else {
+        utils.showErrorMessage(error.message || utils.getTranslation('form_error'));
+      }
+    } finally {
+      state.inflight = false;
+      utils.setLoading(false);
     }
   },
 
-  initialize: () => {
-    if (!utils.isConektaSelected()) return;
-
-    const checkReady = setInterval(() => {
-      if (
-        window.ConektaCheckoutComponents &&
-        document.querySelector(CONTAINER_SELECTOR)
-      ) {
-        conektaInitializer.initConektaIframe();
-        clearInterval(checkReady);
-      }
-    }, POLLING_INTERVAL);
-
-    setTimeout(() => clearInterval(checkReady), MAX_WAIT_TIME);
-  },
+  scheduleRefresh: () => {
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    state.refreshTimer = setTimeout(() => {
+      state.refreshTimer = null;
+      orchestrator.refresh();
+    }, REFRESH_DEBOUNCE_MS);
+  }
 };
 
-// DOM observer
-const domObserver = {
-  observer: new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      if (mutation.type === "childList") {
-        mutation.removedNodes.forEach((node) => {
-          if (
-            node.id === CONTAINER_SELECTOR.replace("#", "") ||
-            (node.querySelector && node.querySelector(CONTAINER_SELECTOR))
-          ) {
-            const form = document.querySelector(FORM_SELECTOR);
-            if (form) {
-              form._conektaSubmitFunction = null;
-            }
-          }
-        });
-
-        mutation.addedNodes.forEach((node) => {
-          if (
-            node.id === CONTAINER_SELECTOR.replace("#", "") ||
-            (node.querySelector && node.querySelector(CONTAINER_SELECTOR))
-          ) {
-            conektaInitializer.initialize();
-          }
-        });
-      }
-    });
-  }),
-
-  start: (form) => {
-    domObserver.observer.observe(form, { childList: true, subtree: true });
-  },
-};
-
-// Add 3DS translation if not exists
-if (window.CONEKTA_TRANSLATIONS) {
-  const locales = Object.keys(window.CONEKTA_TRANSLATIONS);
-  locales.forEach(locale => {
-    if (!window.CONEKTA_TRANSLATIONS[locale]['3ds_error']) {
-      window.CONEKTA_TRANSLATIONS[locale]['3ds_error'] = 'Autenticación 3D Secure fallida';
-    }
-  });
-}
-
-// Main initialization
 document.addEventListener("DOMContentLoaded", () => {
-  // Wait for WooCommerce to finish rendering the checkout
   const checkWooCommerceReady = setInterval(() => {
     const form = document.querySelector(FORM_SELECTOR);
     if (form) {
       clearInterval(checkWooCommerceReady);
-      conektaInitializer.initialize();
-      domObserver.start(form);
+      submitInterceptor.attach();
+      orchestrator.refresh();
     }
   }, POLLING_INTERVAL);
 
   setTimeout(() => clearInterval(checkWooCommerceReady), MAX_WAIT_TIME);
 
-  // Event Listeners
   document.addEventListener("change", (e) => {
-    if (e.target.name === "payment_method" && e.target.value === "conekta") {
-      setTimeout(conektaInitializer.initialize, POLLING_INTERVAL);
+    if (e.target && e.target.name === "payment_method") {
+      if (e.target.value === "conekta") {
+        setTimeout(orchestrator.refresh, POLLING_INTERVAL);
+      } else {
+        mounter.unmount();
+      }
     }
   });
 
-  const onUpdatedCheckout = () => {
-    // Sync conekta_settings with the latest cart data from the PHP fragment
-    // (covers dynamic pricing, coupons, and any cart change after page load)
-    const cartDataEl = document.getElementById('conekta-cart-data');
-    if (cartDataEl) {
-      try {
-        const snapshot = JSON.parse(cartDataEl.textContent);
-        if (snapshot.amount)         conekta_settings.amount = snapshot.amount;
-        if (snapshot.cart_items)     conekta_settings.cart_items = snapshot.cart_items;
-        if (snapshot.discount_lines) conekta_settings.discount_lines = snapshot.discount_lines;
-      } catch (_) { /* ignore parse errors */ }
+  // The email field can be replaced by WC AJAX renders, so delegate from document.
+  const onEmailFieldChange = () => {
+    if (!utils.isConektaSelected()) return;
+    if (utils.isValidEmail(utils.getBillingEmail())) {
+      if (!state.currentCheckoutRequestId) orchestrator.refresh();
+    } else {
+      mounter.unmount();
+      utils.showPlaceholder();
     }
-
-    // Update shipping information from the updated checkout
-    const form = document.querySelector(FORM_SELECTOR);
-    if (form) {
-      const shippingMethodInput = form.querySelector('input[name^="shipping_method"]:checked');
-      if (shippingMethodInput) {
-        const methodValue = shippingMethodInput.value;
-        let methodLabel = methodValue;
-        let methodCost = 0;
-        
-        // Try to get label and cost from the DOM
-        const methodRow = shippingMethodInput.closest('tr, li, .wc-shipping-row');
-        if (methodRow) {
-          const labelElement = methodRow.querySelector('label, .shipping-method-label, .shipping-name');
-          if (labelElement) {
-            methodLabel = labelElement.textContent.trim();
-          }
-          
-          const costElement = methodRow.querySelector('.amount, .woocommerce-Price-amount, .shipping-cost');
-          if (costElement) {
-            const costText = costElement.textContent.replace(/[^\d.,]/g, '');
-            methodCost = Math.round(parseFloat(costText.replace(',', '.')) * 100) || 0; // Convert to cents
-          }
-        }
-        
-        // If we still don't have cost, try to extract from label
-        if (methodCost === 0 && methodLabel) {
-          const costMatch = methodLabel.match(/(\d+[.,]\d+|\d+)/);
-          if (costMatch) {
-            methodCost = Math.round(parseFloat(costMatch[1].replace(',', '.')) * 100) || 0; // Convert to cents
-          }
-        }
-        
-        // Update conekta_settings with the new shipping information
-        conekta_settings.shipping_method_id = methodValue;
-        conekta_settings.shipping_method_label = methodLabel;
-        conekta_settings.shipping_cost = methodCost;
-      }
-    }
-    
-    setTimeout(conektaInitializer.initialize, POLLING_INTERVAL);
   };
+  document.addEventListener("change", (e) => {
+    if (e.target && e.target.id === 'billing_email') onEmailFieldChange();
+  });
+  document.addEventListener("blur", (e) => {
+    if (e.target && e.target.id === 'billing_email') onEmailFieldChange();
+  }, true);
 
-  // Detect WooCommerce checkout refreshes: WC replaces DOM fragments
-  // after AJAX; #conekta-cart-data lives outside the form, so we
-  // observe document.body and fire onUpdatedCheckout when it's added.
-  new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node.id === 'conekta-cart-data' ||
-            (node.querySelector && node.querySelector('#conekta-cart-data'))) {
-          onUpdatedCheckout();
-          return;
-        }
-      }
-    }
-  }).observe(document.body, { childList: true, subtree: true });
-  // Also support native event dispatch (used by tests)
-  document.body.addEventListener("updated_checkout", onUpdatedCheckout);
+  // WC fires `updated_checkout` via jQuery .trigger(), which doesn't always
+  // dispatch a native event for custom names — listen on both paths so we
+  // catch the cart refresh regardless of how it's emitted.
+  if (window.jQuery) {
+    window.jQuery(document.body).on('updated_checkout', orchestrator.scheduleRefresh);
+  }
+  document.body.addEventListener("updated_checkout", orchestrator.scheduleRefresh);
 });
