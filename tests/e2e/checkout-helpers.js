@@ -369,6 +369,7 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
   const mainFrame = page.mainFrame();
   const pickerDeadline = Date.now() + 15000;
   let pickerClicked = false;
+  let pickerSelectorUsed = null;
   while (!pickerClicked && Date.now() < pickerDeadline) {
     for (const frame of page.frames()) {
       if (frame === mainFrame) continue;
@@ -378,21 +379,44 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
       try {
         // The Card method element exposes a stable test-id in both layouts:
         // "payment-method-Card" for the tile layout and "accordion-item-Card"
-        // for the radio-accordion layout. Both wrap a Chakra <label> whose
-        // hidden <input type="radio"> drives the SDK selection on click.
-        const tile = frame.locator('[data-testid="payment-method-Card"], [data-testid="accordion-item-Card"]').first();
-        if (await tile.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // for the radio-accordion layout. The radio-accordion variant wraps
+        // a visually-hidden <input type=radio> (clip-rect:0) inside a Chakra
+        // <label> AND a Mantine <Accordion>. Two independent state machines
+        // need to flip together — Chakra's controlled radio AND Mantine's
+        // accordion-active. Calling the input's native HTMLElement.click()
+        // is the only path that triggers BOTH (it runs the default action,
+        // which flips `checked`, fires `input`/`change`, AND propagates a
+        // real `click` event up the tree where Mantine's onClick listens).
+        // Programmatic property assignment + synthetic Event dispatch only
+        // satisfies one of the two halves.
+        const inputSel = '[data-testid="accordion-item-Card"] input[type="radio"]';
+        const inputEl = frame.locator(inputSel).first();
+        if ((await inputEl.count().catch(() => 0)) > 0) {
+          await inputEl.evaluate((node) => node.click()).catch(() => {});
+          await page.waitForTimeout(1500);
+          pickerClicked = true;
+          pickerSelectorUsed = inputSel;
+          break;
+        }
+
+        // Tile layout: the whole card is the click target — works fine
+        // because the SDK listens on the card's onClick.
+        const tile = frame.locator('[data-testid="payment-method-Card"]').first();
+        if ((await tile.count().catch(() => 0)) > 0) {
           await tile.click({ force: true }).catch(() => {});
           await page.waitForTimeout(1500);
           pickerClicked = true;
+          pickerSelectorUsed = '[data-testid="payment-method-Card"]';
           break;
         }
-        // Fallback for SDK versions that don't expose the test-id yet.
+
+        // Last resort for SDK versions without test-ids.
         const label = frame.locator('label', { hasText: 'Tarjeta' }).first();
         if (await label.isVisible({ timeout: 1000 }).catch(() => false)) {
           await label.click({ force: true }).catch(() => {});
           await page.waitForTimeout(1500);
           pickerClicked = true;
+          pickerSelectorUsed = 'label:has-text("Tarjeta")';
           break;
         }
       } catch (_) { /* skip frame */ }
@@ -402,6 +426,29 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
 
   const start = Date.now();
   let cardForm = null;
+  let lastReclickAt = Date.now();
+
+  // Sometimes the first picker click lands while the SDK's React tree is
+  // still mounting (Mantine accordion + Chakra radio wire up asynchronously
+  // off an XHR), so the click is observed but ignored. Re-click periodically
+  // until the card form appears — that's what a real user would do.
+  const reclickPicker = async () => {
+    for (const frame of page.frames()) {
+      let hostname;
+      try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
+      if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
+      const inputEl = frame.locator('[data-testid="accordion-item-Card"] input[type="radio"]').first();
+      if ((await inputEl.count().catch(() => 0)) > 0) {
+        await inputEl.evaluate((node) => node.click()).catch(() => {});
+        return;
+      }
+      const tile = frame.locator('[data-testid="payment-method-Card"]').first();
+      if ((await tile.count().catch(() => 0)) > 0) {
+        await tile.click({ force: true }).catch(() => {});
+        return;
+      }
+    }
+  };
 
   while (Date.now() - start < timeoutMs && !cardForm) {
     for (const frame of page.frames()) {
@@ -413,25 +460,39 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
         }
       } catch (_) { /* skip frame */ }
     }
-    if (!cardForm) await page.waitForTimeout(1000);
+    if (!cardForm) {
+      if (Date.now() - lastReclickAt > 3000) {
+        await reclickPicker();
+        lastReclickAt = Date.now();
+      }
+      await page.waitForTimeout(1000);
+    }
   }
 
   if (!cardForm) {
-    // Diagnostic dump: capture screenshot + per-frame state so we can see
-    // what was actually on screen when the card form never appeared.
+    // Diagnostic dump: capture screenshot + per-frame state + picker click
+    // outcome so we can see exactly which step broke when the card form
+    // never appeared (selector miss vs click no-op vs SDK error).
     const shotPath = join(config.screenshot.dir, `card-iframe-fail-${Date.now()}.png`);
     await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
     console.log(`  [diag] screenshot: ${shotPath}`);
+    console.log(`  [diag] pickerClicked=${pickerClicked} selectorUsed=${pickerSelectorUsed || 'none'}`);
     for (const frame of page.frames()) {
       let host = 'unknown';
       try { host = new URL(frame.url()).hostname; } catch (_) {}
       const inputCount = await frame.locator('input').count().catch(() => -1);
       const tarjetaVisible = await frame.getByText('Tarjeta', { exact: true }).first()
         .isVisible({ timeout: 200 }).catch(() => false);
+      const testIds = await frame.locator('[data-testid]').evaluateAll(els =>
+        els.map(e => e.getAttribute('data-testid')).filter(t => t && (/Card|card|payment|accordion/.test(t)))
+      ).catch(() => []);
+      const radioStates = await frame.locator('input[type="radio"]').evaluateAll(els =>
+        els.map(e => ({ id: e.id, checked: e.checked, dataChecked: e.getAttribute('data-checked') }))
+      ).catch(() => []);
       const sample = await frame.locator('input').evaluateAll(els =>
         els.slice(0, 8).map(e => ({ id: e.id, name: e.name, placeholder: e.placeholder, type: e.type, visible: !!e.offsetParent }))
       ).catch(() => []);
-      console.log(`  [diag] frame host=${host} inputs=${inputCount} tarjeta=${tarjetaVisible} sample=${JSON.stringify(sample)}`);
+      console.log(`  [diag] frame host=${host} inputs=${inputCount} tarjeta=${tarjetaVisible} testIds=${JSON.stringify(testIds)} radios=${JSON.stringify(radioStates)} sample=${JSON.stringify(sample)}`);
     }
     throw new Error('Conekta card-number input never became visible');
   }
