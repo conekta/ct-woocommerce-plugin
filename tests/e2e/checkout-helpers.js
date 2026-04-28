@@ -143,9 +143,9 @@ async function setup(options = {}) {
   // Version gate: ensure the staging store runs the same plugin version as this branch.
   // Uses wp/v2/plugins (cheap WP core endpoint) instead of wc/v3/system_status, which
   // is heavy and intermittently returns without active_plugins on staging. Retries
-  // because staging occasionally drops the response (returns non-array or fewer rows)
-  // and because the rest-nonce can come back invalid right after login — reloading
-  // wp-admin re-establishes a fresh session before the next attempt.
+  // because the rest-nonce can come back invalid (403 rest_cookie_invalid_nonce)
+  // right after login — when that happens we re-login to get a fresh session;
+  // otherwise we just reload wp-admin in case the response was simply truncated.
   let storeVersion, lastResponse;
   for (let attempt = 1; attempt <= 4; attempt++) {
     lastResponse = await wcApi('GET', 'wp/v2/plugins');
@@ -154,8 +154,13 @@ async function setup(options = {}) {
       : null;
     storeVersion = conektaPlugin?.version;
     if (storeVersion) break;
-    await page.goto(`${STORE_URL}/wp-admin/`);
-    await page.waitForLoadState('domcontentloaded');
+    const nonceFailed = lastResponse?.code === 'rest_cookie_invalid_nonce';
+    if (nonceFailed) {
+      await loginAsAdmin();
+    } else {
+      await page.goto(`${STORE_URL}/wp-admin/`);
+      await page.waitForLoadState('domcontentloaded');
+    }
     await new Promise(r => setTimeout(r, 1000 * attempt));
   }
   if (storeVersion !== EXPECTED_VERSION) {
@@ -346,17 +351,21 @@ async function waitForIntegrationIframe() {
  * cart-change PUT). We poll every frame on the page until the card-number
  * field appears, then fill the four fields in whatever frame held it.
  */
-async function fillIntegrationCard(card, timeoutMs = 120000) {
-  const cardNumberSel = 'input[placeholder*="0000"], input[autocomplete="cc-number"], input[name*="number" i], input[id*="cardNumber" i], input[id*="card-number" i]';
-  const nameSel = 'input[placeholder*="ombre" i], input[autocomplete="cc-name"], input[name*="name" i], input[id*="cardholder" i], input[id*="card-name" i]';
-  const expSel = 'input[placeholder*="MM/AA"], input[placeholder*="MM/YY"], input[autocomplete="cc-exp"], input[name*="expir" i], input[id*="expiration" i], input[id*="exp" i]';
-  const cvcSel = 'input[placeholder*="CVV" i], input[placeholder*="CVC" i], input[autocomplete="cc-csc"], input[name*="cvc" i], input[name*="cvv" i], input[id*="cvc" i], input[id*="cvv" i]';
-  // The Conekta iframe may show a multi-method picker (Tarjeta, BBVA, Coppel,
-  // etc.). We need to click "Tarjeta" inside the Conekta-served frame to
-  // expand the card form. Skip mainFrame because WC's own "Tarjeta" radio
-  // shares the text but is unrelated. Retry the picker scan because the
-  // Tarjeta tile renders after the SDK finishes its initial XHR (sometimes
-  // several seconds after the iframe loads on a slow staging API).
+async function fillIntegrationCard(card, timeoutMs = 60000) {
+  // Conekta Integration uses these stable input ids in both layouts (tile picker
+  // and accordion). Targeting them directly avoids false positives from billing
+  // or coupon fields that share the broader autocomplete/placeholder regexes.
+  const cardNumberSel = '#cardNumber, input[name="cardNumber"], input[autocomplete="cc-number"]';
+  const nameSel = '#cardholderName, input[name="cardholderName"], input[autocomplete="cc-name"]';
+  const expSel = '#cardExpMonthYear, input[name="cardExpMonthYear"], input[autocomplete="cc-exp"]';
+  const cvcSel = '#cardVerificationValue, input[name="cardVerificationValue"], input[autocomplete="cc-csc"]';
+  // The Conekta iframe shows a multi-method picker (Tarjeta, BBVA, Coppel, etc.)
+  // that renders in two layouts (horizontal tiles or vertical radio accordion).
+  // Both wrap the "Card" method in a container with data-testid="payment-method-Card",
+  // so we click that element to expand the card form regardless of layout. Skip
+  // mainFrame because WC's own "Tarjeta" payment radio shares the text but is
+  // unrelated. Fall back to role/label selectors for older SDK versions that
+  // don't expose the test-id yet.
   const mainFrame = page.mainFrame();
   const pickerDeadline = Date.now() + 15000;
   let pickerClicked = false;
@@ -367,12 +376,22 @@ async function fillIntegrationCard(card, timeoutMs = 120000) {
       try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
       if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
       try {
-        const t = frame.getByText('Tarjeta', { exact: true }).first();
-        if (await t.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await t.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(800);
-          await t.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(1000);
+        // The Card method element exposes a stable test-id in both layouts:
+        // "payment-method-Card" for the tile layout and "accordion-item-Card"
+        // for the radio-accordion layout. Both wrap a Chakra <label> whose
+        // hidden <input type="radio"> drives the SDK selection on click.
+        const tile = frame.locator('[data-testid="payment-method-Card"], [data-testid="accordion-item-Card"]').first();
+        if (await tile.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await tile.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(1500);
+          pickerClicked = true;
+          break;
+        }
+        // Fallback for SDK versions that don't expose the test-id yet.
+        const label = frame.locator('label', { hasText: 'Tarjeta' }).first();
+        if (await label.isVisible({ timeout: 1000 }).catch(() => false)) {
+          await label.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(1500);
           pickerClicked = true;
           break;
         }
@@ -397,7 +416,25 @@ async function fillIntegrationCard(card, timeoutMs = 120000) {
     if (!cardForm) await page.waitForTimeout(1000);
   }
 
-  if (!cardForm) throw new Error('Conekta card-number input never became visible');
+  if (!cardForm) {
+    // Diagnostic dump: capture screenshot + per-frame state so we can see
+    // what was actually on screen when the card form never appeared.
+    const shotPath = join(config.screenshot.dir, `card-iframe-fail-${Date.now()}.png`);
+    await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+    console.log(`  [diag] screenshot: ${shotPath}`);
+    for (const frame of page.frames()) {
+      let host = 'unknown';
+      try { host = new URL(frame.url()).hostname; } catch (_) {}
+      const inputCount = await frame.locator('input').count().catch(() => -1);
+      const tarjetaVisible = await frame.getByText('Tarjeta', { exact: true }).first()
+        .isVisible({ timeout: 200 }).catch(() => false);
+      const sample = await frame.locator('input').evaluateAll(els =>
+        els.slice(0, 8).map(e => ({ id: e.id, name: e.name, placeholder: e.placeholder, type: e.type, visible: !!e.offsetParent }))
+      ).catch(() => []);
+      console.log(`  [diag] frame host=${host} inputs=${inputCount} tarjeta=${tarjetaVisible} sample=${JSON.stringify(sample)}`);
+    }
+    throw new Error('Conekta card-number input never became visible');
+  }
 
   await cardForm.locator(cardNumberSel).first().fill(card.number);
 
