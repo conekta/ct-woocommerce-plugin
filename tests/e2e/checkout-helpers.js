@@ -325,7 +325,9 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
   const mainFrame = page.mainFrame();
   for (const frame of page.frames()) {
     if (frame === mainFrame) continue;
-    if (!frame.url().includes('conekta.com')) continue;
+    let hostname;
+    try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
+    if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
     try {
       // Use getByText regardless of element type — Conekta wraps the row in
       // a <div> with its own click handler that role/label selectors miss.
@@ -441,8 +443,9 @@ async function waitForOrderReceivedWith3DS(timeoutMs = 240000) {
     // the flattened tree, but only frames the test main process knows about.
     for (const frame of page.frames()) {
       try {
-        if (frame.url().includes('3ds-pay.conekta.com') ||
-            frame.url().includes('3ds-acs.conekta.com')) {
+        let hostname;
+        try { hostname = new URL(frame.url()).hostname; } catch (_) { hostname = ''; }
+        if (hostname === '3ds-pay.conekta.com' || hostname === '3ds-acs.conekta.com') {
           last3dsFrame = frame;
           // Dump the 3DS DOM whenever its body changes. Catches the brief
           // window where the challenge UI is mounted before being detached.
