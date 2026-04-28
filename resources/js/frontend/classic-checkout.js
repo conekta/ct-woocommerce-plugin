@@ -317,12 +317,13 @@ const mounter = {
   }
 };
 
-// Hook into WC classic's `checkout_place_order_<method>` jQuery filter. This
-// filter fires AFTER WC has done its own field validation (required fields,
-// terms, etc.), so we never trigger Conekta when WC has already rejected the
-// form. Returning false halts WC's submission; once Conekta finalizes payment
-// we trigger another form submit, the filter runs again, the `paying` guard
-// lets it through, and WC posts the form normally.
+// Hook into WC classic's `checkout_place_order_<method>` jQuery filter to
+// intercept the place-order click. The filter fires BEFORE WC's server-side
+// validation, so we re-run that validation explicitly via /checkout-request
+// (validate mode) and only trigger the SDK charge when WC would let the
+// order through. Without this gate the iframe could charge against a form
+// WC was about to reject, leaving the customer paid for an order WC never
+// created.
 const submitInterceptor = {
   attach: () => {
     if (!window.jQuery || submitInterceptor._attached) return;
@@ -333,23 +334,88 @@ const submitInterceptor = {
 
     $form.on('checkout_place_order_conekta', function () {
       if (!utils.isConektaSelected()) return true;
-      if (state.payingInProgress) return true;
+      if (state.payingInProgress) return false;
       if (!state.currentCheckoutRequestId) {
         utils.showErrorMessage(utils.getTranslation('form_error'));
         return false;
       }
 
-      try {
-        state.payingInProgress = true;
-        utils.setLoading(true);
-        orderEmitter.submit();
-      } catch (err) {
-        state.payingInProgress = false;
-        utils.setLoading(false);
-        utils.showErrorMessage(err.message || utils.getTranslation('form_error'));
+      // HTML5 native gate: short-circuits empty required / bad pattern fields
+      // without paying for the validation roundtrip.
+      const form = document.querySelector(FORM_SELECTOR);
+      if (form && typeof form.checkValidity === 'function' && !form.checkValidity()) {
+        if (typeof form.reportValidity === 'function') form.reportValidity();
+        return false;
       }
+
+      // From here we always halt WC's native submission and drive the rest
+      // ourselves: server-side validation, then SDK charge, then formHandler
+      // posts to wc-ajax=checkout to create the actual WC order.
+      state.payingInProgress = true;
+      utils.setLoading(true);
+      submitInterceptor.runValidationAndCharge(form);
       return false;
     });
+  },
+
+  runValidationAndCharge: async (form) => {
+    try {
+      const errors = await submitInterceptor.fetchValidation(form);
+      if (errors && errors.length) {
+        submitInterceptor.renderValidationErrors(errors);
+        state.payingInProgress = false;
+        utils.setLoading(false);
+        return;
+      }
+      orderEmitter.submit();
+    } catch (err) {
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      utils.showErrorMessage(err.message || utils.getTranslation('form_error'));
+    }
+  },
+
+  fetchValidation: async (form) => {
+    const formData = {};
+    if (form) {
+      const fd = new FormData(form);
+      fd.forEach((value, key) => { formData[key] = value; });
+    }
+    const res = await fetch(conekta_settings.checkout_request_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nonce: conekta_settings.nonce,
+        validate: 1,
+        form_data: formData,
+      }),
+      credentials: 'same-origin',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data && Array.isArray(data.errors)) return data.errors;
+    if (!res.ok) throw new Error((data && data.message) || `HTTP ${res.status}`);
+    return [];
+  },
+
+  renderValidationErrors: (errors) => {
+    const form = document.querySelector(FORM_SELECTOR);
+    if (!form) return;
+    const existing = form.querySelector('.woocommerce-notices-wrapper');
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'woocommerce-notices-wrapper';
+    const list = document.createElement('ul');
+    list.className = 'woocommerce-error';
+    list.setAttribute('role', 'alert');
+    errors.forEach((e) => {
+      const li = document.createElement('li');
+      li.textContent = (e && e.message) || '';
+      list.appendChild(li);
+    });
+    wrapper.appendChild(list);
+    form.prepend(wrapper);
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
   },
 };
 

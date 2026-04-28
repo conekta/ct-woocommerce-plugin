@@ -89,6 +89,16 @@ class WC_Conekta_REST_API {
                 return new WP_REST_Response(['success' => false, 'message' => 'Conekta gateway not found'], 404);
             }
 
+            // Validate-only mode runs WC's full checkout validation chain
+            // (required fields, format, terms, plugin-added validators) and
+            // returns errors WITHOUT creating/updating the Conekta order or
+            // triggering the iframe charge. The classic JS calls this right
+            // before driving the SDK submit so we never charge a card while
+            // WC would have rejected the order on form errors.
+            if ($request && $request->get_param('validate')) {
+                return self::validate_only_response($request);
+            }
+
             // Classic checkout fires the email-change handler before WC's
             // update_order_review syncs the form to WC()->customer. The client
             // sends the typed email so we can backfill the customer object,
@@ -383,6 +393,84 @@ class WC_Conekta_REST_API {
         WC()->session->__unset(self::SESSION_ORDER_ID);
         WC()->session->__unset(self::SESSION_CHECKOUT_REQUEST_ID);
         WC()->session->__unset(self::SESSION_LAST_AMOUNT);
+    }
+
+    /**
+     * Run WC's checkout validation against the submitted form data and return
+     * any errors that would otherwise block process_checkout. We hook into
+     * woocommerce_after_checkout_validation at PHP_INT_MAX (so we observe
+     * errors collected by every other listener) and throw a sentinel exception
+     * to abort process_checkout before order creation / payment.
+     */
+    private static function validate_only_response($request): WP_REST_Response {
+        if (!class_exists('WC_Checkout')) {
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'WC checkout unavailable',
+            ], 500);
+        }
+
+        $form_data = $request->get_param('form_data');
+        if (!is_array($form_data) || empty($form_data)) {
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'form_data required',
+            ], 400);
+        }
+
+        $original_post = $_POST;
+        // process_checkout reads $_POST exclusively, so feed it the form
+        // values verbatim — including the customer's _wpnonce so WC's own
+        // checkout-process nonce check passes.
+        $_POST = $form_data;
+
+        $captured = new WP_Error();
+        $sentinel = 'CONEKTA_VALIDATE_ONLY';
+        $listener = function ($data, $errors) use ($captured, $sentinel) {
+            foreach ($errors->get_error_codes() as $code) {
+                foreach ($errors->get_error_messages($code) as $msg) {
+                    $captured->add($code, $msg);
+                }
+            }
+            throw new \Exception($sentinel);
+        };
+        add_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX, 2);
+
+        try {
+            WC()->checkout()->process_checkout();
+        } catch (\Exception $e) {
+            if ($e->getMessage() !== $sentinel) {
+                $captured->add('checkout_exception', wp_strip_all_tags($e->getMessage()));
+            }
+        } finally {
+            remove_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX);
+            $_POST = $original_post;
+            if (function_exists('wc_clear_notices')) {
+                wc_clear_notices();
+            }
+        }
+
+        if ($captured->has_errors()) {
+            $messages = [];
+            foreach ($captured->get_error_codes() as $code) {
+                foreach ($captured->get_error_messages($code) as $msg) {
+                    $messages[] = [
+                        'code'    => $code,
+                        'message' => wp_strip_all_tags($msg),
+                    ];
+                }
+            }
+            return new WP_REST_Response([
+                'success' => false,
+                'mode'    => 'validate',
+                'errors'  => $messages,
+            ], 422);
+        }
+
+        return new WP_REST_Response([
+            'success' => true,
+            'mode'    => 'validate',
+        ], 200);
     }
 }
 
