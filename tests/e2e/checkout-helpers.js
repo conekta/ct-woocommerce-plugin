@@ -140,13 +140,26 @@ async function setup(options = {}) {
   await page.goto(`${STORE_URL}/wp-admin/`);
   await page.waitForLoadState('domcontentloaded');
 
-  // Version gate: ensure the staging store runs the same plugin version as this branch
-  const sysStatus = await wcApi('GET', 'wc/v3/system_status');
-  const conektaPlugin = sysStatus?.active_plugins?.find(p => p.name === 'Conekta Payment Gateway');
-  const storeVersion = conektaPlugin?.version;
+  // Version gate: ensure the staging store runs the same plugin version as this branch.
+  // Uses wp/v2/plugins (cheap WP core endpoint) instead of wc/v3/system_status, which
+  // is heavy and intermittently returns without active_plugins on staging. Retries
+  // because staging occasionally drops the response (returns non-array or fewer rows).
+  let storeVersion, lastResponse;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    lastResponse = await wcApi('GET', 'wp/v2/plugins');
+    const conektaPlugin = Array.isArray(lastResponse)
+      ? lastResponse.find(p => p.name === 'Conekta Payment Gateway')
+      : null;
+    storeVersion = conektaPlugin?.version;
+    if (storeVersion) break;
+    await new Promise(r => setTimeout(r, 1000 * attempt));
+  }
   if (storeVersion !== EXPECTED_VERSION) {
+    const summary = Array.isArray(lastResponse)
+      ? `array(${lastResponse.length}) plugins=[${lastResponse.map(p => p.name).join(', ')}]`
+      : `non-array: ${JSON.stringify(lastResponse).slice(0, 300)}`;
     throw new Error(
-      `Plugin version mismatch: store has ${storeVersion || 'NOT FOUND'}, expected ${EXPECTED_VERSION}. Deploy the plugin before running E2E tests.`
+      `Plugin version mismatch: store has ${storeVersion || 'NOT FOUND'}, expected ${EXPECTED_VERSION}. Last response: ${summary}`
     );
   }
   console.log(`Setup: plugin version OK (${storeVersion})`);
