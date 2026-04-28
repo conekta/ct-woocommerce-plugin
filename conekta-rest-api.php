@@ -21,6 +21,29 @@ class WC_Conekta_REST_API {
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
         add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
+        add_action('template_redirect', [self::class, 'reset_session_on_checkout_entry']);
+    }
+
+    /**
+     * Force a fresh Conekta order each time the user enters the checkout page.
+     *
+     * Why: the cached conekta_order_id lives in the WC session (~48h cookie),
+     * so leaving the checkout and coming back used to reuse the previous order
+     * and only mutate it via PUT. That meant the customer could pay an amount
+     * tied to a stale snapshot. By clearing the session keys on a fresh GET of
+     * /checkout/ we guarantee the next checkout-request POST creates a brand
+     * new order; updates within the same page load still reuse it normally.
+     *
+     * Skipped on order-received / order-pay endpoints, on form submissions,
+     * and on AJAX so we never wipe state mid-flow.
+     */
+    public static function reset_session_on_checkout_entry(): void {
+        if (!function_exists('is_checkout') || !is_checkout()) return;
+        if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url()) return;
+        if (!empty($_POST)) return;
+        if (wp_doing_ajax()) return;
+        if (!WC()->session) return;
+        self::clear_session();
     }
 
     public static function register_routes() {
