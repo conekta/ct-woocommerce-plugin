@@ -179,6 +179,45 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertFalse($result, 'Null reference_id should be invalid');
     }
 
+    public function test_validate_reference_id_accepts_integration_payload_without_reference_id()
+    {
+        // Integration component creates the Conekta order before the WC
+        // order exists, so metadata.reference_id is absent. As long as the
+        // Conekta order id is present we can resolve via the
+        // `conekta-order-id` meta lookup downstream.
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => 'ord_2znsJ8YNbNoDDsN3p',
+            'metadata' => ['plugin' => 'woocommerce'],
+        ]);
+        $this->assertTrue($result, 'Payload with conekta id but no reference_id should be valid');
+    }
+
+    public function test_validate_reference_id_falls_back_to_conekta_id_when_reference_id_invalid()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => 'ord_xyz',
+            'metadata' => ['reference_id' => 'not-a-number'],
+        ]);
+        $this->assertTrue($result, 'Bogus reference_id with valid Conekta id should still validate');
+    }
+
+    public function test_validate_reference_id_rejects_payload_without_id_or_reference()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['plugin' => 'woocommerce'],
+        ]);
+        $this->assertFalse($result, 'Payload with neither id nor reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_rejects_empty_id()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => '',
+            'metadata' => [],
+        ]);
+        $this->assertFalse($result, 'Empty Conekta id with no reference_id should be invalid');
+    }
+
     // -------------------------------------------------------
     // Webhook order lookup — find_order_for_webhook()
     // -------------------------------------------------------

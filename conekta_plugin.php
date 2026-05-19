@@ -115,7 +115,11 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!$order) {
             http_response_code(404);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            echo json_encode([
+                'error'        => 'Order not found',
+                'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
+                'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
             exit;
         }
 
@@ -154,7 +158,11 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!$order) {
             http_response_code(404);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            echo json_encode([
+                'error'        => 'Order not found',
+                'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
+                'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
             exit;
         }
 
@@ -174,12 +182,31 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
     
+    /**
+     * Decide whether a webhook payload references a Conekta order we can
+     * look up in WooCommerce. Two valid shapes:
+     *
+     *  - Legacy / cash / bank-transfer flows: metadata.reference_id is the
+     *    numeric WC order id (the Conekta order was created from the WC
+     *    order, so reference_id was set at creation time).
+     *  - Integration component flow (cards / Apple Pay): the Conekta order
+     *    is created BEFORE the WC order exists, so metadata.reference_id
+     *    is absent — but the Conekta order id is present, and
+     *    find_order_for_webhook() can resolve the WC order through the
+     *    `conekta-order-id` meta on existing WC orders.
+     *
+     * Either shape is enough to proceed.
+     */
     public static function validate_reference_id(array $conekta_order): bool
     {
-        return isset($conekta_order['metadata'])
+        $has_valid_reference = isset($conekta_order['metadata'])
             && array_key_exists('reference_id', $conekta_order['metadata'])
             && is_numeric($conekta_order['metadata']['reference_id'])
             && (int) $conekta_order['metadata']['reference_id'] > 0;
+        if ($has_valid_reference) {
+            return true;
+        }
+        return !empty($conekta_order['id']) && is_string($conekta_order['id']);
     }
 
     /**
