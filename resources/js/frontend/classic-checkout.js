@@ -83,7 +83,11 @@ const buildScriptLoader = () => {
         onGetInfoSuccess: () => {},
         onUpdateSubmitTrigger: (fn) => orderEmitter.setSubmit(fn),
         onFinalizePayment: (order) => orderEmitter.setOrder(order),
+        // onErrorPayment = SDK/integration errors; onChargeFailed = backend
+        // declines (insufficient funds, fraud, etc.). Without the latter the
+        // place_order button used to spin indefinitely on soft declines.
         onErrorPayment: (error) => orderEmitter.setError(error),
+        onChargeFailed: (error) => orderEmitter.setError(error),
       };
       window.ConektaCheckoutComponents.Integration({ config, callbacks });
     };
