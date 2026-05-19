@@ -123,6 +123,21 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             exit;
         }
 
+        // Idempotency guard: Conekta retries webhooks, and the same event
+        // can also arrive after process_payment already marked the order
+        // processing. Skip re-running payment_complete + add_order_note so
+        // we don't pile up duplicate notes / meta on each retry. Return 200
+        // so Conekta marks the webhook delivered and stops retrying.
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'message'  => 'OK',
+                'order_id' => $order->get_id(),
+                'note'     => 'already paid (idempotent retry)',
+            ]);
+            exit;
+        }
+
         $charge = $conekta_order['charges']['data'][0];
         $paid_at = date("Y-m-d", $charge['paid_at']);
         self::update_conekta_order_meta($order, $paid_at, 'conekta-paid-at');
@@ -162,6 +177,30 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 'error'        => 'Order not found',
                 'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
                 'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
+            exit;
+        }
+
+        // Idempotency guard: don't cancel an order that's already paid.
+        // This protects against the 3DS temp-order edge case where the
+        // temporary Conekta order eventually expires while the real WC
+        // order was already charged through the actual conekta-order-id
+        // mapping; without this guard we'd cancel a successful order.
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'cancelled' => 'NO',
+                'order_id'  => $order->get_id(),
+                'note'      => 'already paid, ignoring cancel webhook',
+            ]);
+            exit;
+        }
+        if ($order->get_status() === 'cancelled') {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'cancelled' => 'OK',
+                'order_id'  => $order->get_id(),
+                'note'      => 'already cancelled (idempotent retry)',
             ]);
             exit;
         }
