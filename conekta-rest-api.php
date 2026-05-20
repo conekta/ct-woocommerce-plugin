@@ -193,7 +193,7 @@ class WC_Conekta_REST_API {
             ));
             $checkout_data = [
                 'type'                    => 'Integration',
-                'allowed_payment_methods' => ['card'],
+                'allowed_payment_methods' => ['card' , 'apple'],
                 'name'                    => 'WooCommerce checkout',
             ];
 
