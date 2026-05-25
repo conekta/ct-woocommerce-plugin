@@ -262,11 +262,37 @@ const requestCheckout = async () => {
 
 const mounter = {
   wireOrderListeners: () => {
-    orderEmitter.onOrder((order) => {
+    orderEmitter.onOrder(async (order) => {
       const form = document.querySelector(FORM_SELECTOR);
       if (!form) return;
       const hidden = form.querySelector('[name="conekta_order_id"]');
       if (hidden) hidden.value = (order && order.id) || "";
+
+      // Discriminate the source: payingInProgress is set by submitInterceptor
+      // when the user clicked "Realizar el pedido" (card path). If it's still
+      // false here, the charge came from a wallet button inside the iframe
+      // (Apple Pay / Google Pay) that bypassed our submitInterceptor — and
+      // therefore bypassed the server-side validation gate. In that case we
+      // must validate now or wc-ajax=checkout will silently reject the
+      // form behind the SDK's success card.
+      const cameFromWalletButton = !state.payingInProgress;
+      if (cameFromWalletButton) {
+        utils.setLoading(true);
+        try {
+          const errors = await submitInterceptor.fetchValidation(form);
+          if (errors && errors.length) {
+            submitInterceptor.renderValidationErrors(errors);
+            utils.setLoading(false);
+            mounter.wireOrderListeners();
+            return;
+          }
+        } catch (_) {
+          // Validation endpoint unreachable — fall through and submit anyway.
+          // The customer has already been charged; better to attempt the WC
+          // order than to strand them with a successful Conekta payment.
+        }
+      }
+
       const formData = new FormData(form);
       formData.append("wc-ajax", "checkout");
       formHandler.submitForm(formData).finally(() => {

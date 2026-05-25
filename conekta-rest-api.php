@@ -136,10 +136,18 @@ class WC_Conekta_REST_API {
                 }
 
                 try {
+                    $balanced = ckpg_check_balance([
+                        'line_items'     => $snapshot['line_items'],
+                        'shipping_lines' => $snapshot['shipping_lines'],
+                        'discount_lines' => $snapshot['discount_lines'],
+                        'tax_lines'      => $snapshot['tax_lines'],
+                    ], $current_amount);
+
                     $update = new OrderUpdateRequest([
                         'line_items'     => $snapshot['line_items'],
                         'discount_lines' => $snapshot['discount_lines'],
                         'shipping_lines' => $snapshot['shipping_lines'],
+                        'tax_lines'      => $balanced['tax_lines'],
                     ]);
                     $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
 
@@ -204,11 +212,19 @@ class WC_Conekta_REST_API {
 
             $checkout = new CheckoutRequest($checkout_data);
 
+            $balanced = ckpg_check_balance([
+                'line_items'     => $snapshot['line_items'],
+                'shipping_lines' => $snapshot['shipping_lines'],
+                'discount_lines' => $snapshot['discount_lines'],
+                'tax_lines'      => $snapshot['tax_lines'],
+            ], $current_amount);
+
             $order_request = new OrderRequest([
                 'currency'       => $snapshot['currency'],
                 'line_items'     => $snapshot['line_items'],
                 'discount_lines' => $snapshot['discount_lines'],
                 'shipping_lines' => $snapshot['shipping_lines'],
+                'tax_lines'      => $balanced['tax_lines'],
                 'customer_info'  => $snapshot['customer_info'],
                 'checkout'       => $checkout,
                 'metadata'       => [
@@ -259,10 +275,13 @@ class WC_Conekta_REST_API {
         $line_items     = [];
         $discount_lines = [];
         $shipping_lines = [];
+        $tax_lines      = [];
         $currency       = get_woocommerce_currency() ?: 'MXN';
 
         if (WC()->cart && !WC()->cart->is_empty()) {
             WC()->cart->calculate_totals();
+
+            $tax_lines = ckpg_build_tax_lines_from_cart(WC()->cart);
 
             $price_level_discount = 0;
             foreach (WC()->cart->get_cart() as $cart_item) {
@@ -378,6 +397,7 @@ class WC_Conekta_REST_API {
             'line_items'       => $line_items,
             'discount_lines'   => $discount_lines,
             'shipping_lines'   => $shipping_lines,
+            'tax_lines'        => $tax_lines,
             'customer_info'    => $customer_info,
             'shipping_contact' => $shipping_contact,
         ];

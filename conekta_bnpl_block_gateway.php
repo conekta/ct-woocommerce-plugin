@@ -201,6 +201,15 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
                 'payment_method' => $this->GATEWAY_NAME,
             )
         );
+
+        $balanced = ckpg_check_balance([
+            'line_items'     => $line_items,
+            'shipping_lines' => $shipping_lines,
+            'discount_lines' => $discount_lines,
+            'tax_lines'      => $tax_lines,
+        ], amount_validation((float) $order->get_total()));
+        $tax_lines = $balanced['tax_lines'];
+
         $rq = new OrderRequest([
             'currency' => $data['currency'],
             'checkout' => [

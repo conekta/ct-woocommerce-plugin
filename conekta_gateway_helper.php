@@ -29,6 +29,10 @@ function ckpg_check_balance($order, $total): array
     if ($amount != $total) {
         $adjustment = abs($amount - $total);
 
+        if (empty($order['tax_lines'])) {
+            $order['tax_lines'] = [['amount' => 0, 'description' => '']];
+        }
+
         $order['tax_lines'][0]['amount'] =
             $order['tax_lines'][0]['amount'] + intval($adjustment);
 
@@ -126,35 +130,57 @@ function ckpg_build_tax_lines($taxes): array
     $tax_lines = array();
 
     foreach ($taxes as $tax) {
+        $tax_name = esc_html((string)($tax['label'] ?? ''));
 
+        $tax_lines[] = array(
+            'description' => $tax_name,
+            'amount'      => amount_validation((float)($tax['tax_amount'] ?? 0)),
+        );
 
-        $tax_amount = floatval($tax['tax_amount']) * 1000;
-        $tax_name    = (string)$tax['label'];
-        $tax_name    = esc_html($tax_name);
-
-
-        $tax_lines  = array_merge($tax_lines, array(
-            array(
-                'description' => $tax_name,
-                'amount'      => intval(round(floatval($tax_amount) / 10), 2)
-            )
-        ));
-
-        if (isset($tax['shipping_tax_amount'])) {
-            $tax_amount = floatval($tax['shipping_tax_amount']) * 1000;
-            $amount     = intval(round(floatval($tax_amount) / 10), 2);
-            $tax_lines  = array_merge(
-                $tax_lines, array(
-                    array(
-                        'description' => 'Shipping tax',
-                        'amount'      => $amount
-                    )
-                )
+        // Only emit a separate "Shipping tax" line when the rate actually
+        // applied to shipping — WC keeps the key around as 0 when shipping
+        // is exempt for that rate, and a zero-amount line just adds noise.
+        if (!empty($tax['shipping_tax_amount']) && (float)$tax['shipping_tax_amount'] > 0) {
+            $tax_lines[] = array(
+                'description' => 'Shipping tax',
+                'amount'      => amount_validation((float)$tax['shipping_tax_amount']),
             );
         }
     }
 
     return $tax_lines;
+}
+
+/**
+ * Build Conekta tax_lines from a live WC_Cart (Integration component path).
+ *
+ * Adapts WC()->cart->get_tax_totals() — which is keyed by rate code and
+ * exposes ->label / ->amount (line-item tax in pesos) / ->shipping_amount
+ * — into the row shape ckpg_build_tax_lines() already consumes from
+ * $order->get_taxes(). Single source of truth for cents conversion and
+ * zero-shipping-tax guarding.
+ */
+function ckpg_build_tax_lines_from_cart($cart): array
+{
+    if (!$cart || !method_exists($cart, 'get_tax_totals')) {
+        return array();
+    }
+
+    $totals = $cart->get_tax_totals();
+    if (empty($totals)) {
+        return array();
+    }
+
+    $rows = array();
+    foreach ($totals as $entry) {
+        $rows[] = array(
+            'tax_amount'          => (float) ($entry->amount ?? 0),
+            'shipping_tax_amount' => (float) ($entry->shipping_amount ?? 0),
+            'label'               => (string) ($entry->label ?? ''),
+        );
+    }
+
+    return ckpg_build_tax_lines($rows);
 }
 
 function ckpg_build_shipping_lines($data)

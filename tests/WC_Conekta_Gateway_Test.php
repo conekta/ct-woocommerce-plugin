@@ -1154,6 +1154,87 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(0, $result[0]['amount']);
     }
 
+    public function test_build_tax_lines_with_zero_shipping_tax()
+    {
+        // shipping_tax_amount === 0 should NOT emit a "Shipping tax" line.
+        $taxes = [
+            ['tax_amount' => 16.00, 'label' => 'IVA', 'shipping_tax_amount' => 0],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_tax_lines_from_cart
+    // -------------------------------------------------------
+
+    public function test_build_tax_lines_from_cart_single_rate()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_multi_rate()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00)
+            ->withTaxTotal('ieps', 'IEPS', 3.00);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('IEPS', $result[1]['description']);
+        $this->assertEquals(300, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_with_shipping_tax()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00, 2.40);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[1]['description']);
+        $this->assertEquals(240, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_zero_shipping_tax_guarded()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00, 0.0);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+    }
+
+    public function test_build_tax_lines_from_cart_empty_returns_empty()
+    {
+        $cart = WC_Cart_Test_Helper::create();
+
+        $this->assertEmpty(ckpg_build_tax_lines_from_cart($cart));
+    }
+
+    public function test_build_tax_lines_from_cart_null_cart_returns_empty()
+    {
+        $this->assertEmpty(ckpg_build_tax_lines_from_cart(null));
+    }
+
     // -------------------------------------------------------
     // ckpg_build_shipping_lines
     // -------------------------------------------------------
@@ -1501,6 +1582,23 @@ class WC_Conekta_Gateway_Test extends TestCase
         // Adjusted by 100, but description 'IVA' should remain
         $this->assertEquals(1600, $result['tax_lines'][0]['amount']);
         $this->assertEquals('IVA', $result['tax_lines'][0]['description']);
+    }
+
+    public function test_check_balance_appends_when_tax_lines_empty()
+    {
+        // sum = 10000, total = 10001 → synthesize a tax_line for the 1-cent diff.
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [],
+            'discount_lines' => [],
+            'tax_lines'      => [],
+        ];
+
+        $result = ckpg_check_balance($order, 10001);
+
+        $this->assertCount(1, $result['tax_lines']);
+        $this->assertEquals(1, $result['tax_lines'][0]['amount']);
+        $this->assertEquals('Round Adjustment', $result['tax_lines'][0]['description']);
     }
 
     // -------------------------------------------------------

@@ -292,6 +292,7 @@ if (!class_exists('WC_Cart_Test_Helper')) {
         private array $coupon_amounts = [];
         private array $coupon_tax_amounts = [];
         private array $fees = [];
+        private array $tax_totals = [];
         private float $total = 0.0;
 
         public static function create(): self { return new self(); }
@@ -339,6 +340,15 @@ if (!class_exists('WC_Cart_Test_Helper')) {
             return $this;
         }
 
+        public function withTaxTotal(string $code, string $label, float $amount, float $shipping_amount = 0.0): self {
+            $this->tax_totals[$code] = (object) [
+                'label'           => $label,
+                'amount'          => $amount,
+                'shipping_amount' => $shipping_amount,
+            ];
+            return $this;
+        }
+
         // --- WC_Cart interface ---
         public function is_empty(): bool { return empty($this->items); }
         public function get_cart(): array { return $this->items; }
@@ -359,6 +369,7 @@ if (!class_exists('WC_Cart_Test_Helper')) {
             }
             return $result;
         }
+        public function get_tax_totals(): array { return $this->tax_totals; }
         public function calculate_totals(): void { /* no-op in tests */ }
     }
 }
