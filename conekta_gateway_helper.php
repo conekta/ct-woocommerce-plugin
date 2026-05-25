@@ -130,20 +130,24 @@ function ckpg_build_tax_lines($taxes): array
     $tax_lines = array();
 
     foreach ($taxes as $tax) {
-        $tax_name = esc_html((string)($tax['label'] ?? ''));
+        // WooCommerce >= 3.0 returns WC_Order_Item_Tax objects whose ArrayAccess
+        // keys are `tax_total` / `shipping_tax_total`. Older code paths (and the
+        // legacy test fixtures) used `tax_amount` / `shipping_tax_amount`.
+        $items_tax    = (float) ($tax['tax_total'] ?? $tax['tax_amount'] ?? 0);
+        $shipping_tax = (float) ($tax['shipping_tax_total'] ?? $tax['shipping_tax_amount'] ?? 0);
+        $label        = esc_html((string) ($tax['label'] ?? ''));
 
-        $tax_lines[] = array(
-            'description' => $tax_name,
-            'amount'      => amount_validation((float)($tax['tax_amount'] ?? 0)),
-        );
+        if ($items_tax != 0) {
+            $tax_lines[] = array(
+                'description' => $label,
+                'amount'      => amount_validation($items_tax),
+            );
+        }
 
-        // Only emit a separate "Shipping tax" line when the rate actually
-        // applied to shipping — WC keeps the key around as 0 when shipping
-        // is exempt for that rate, and a zero-amount line just adds noise.
-        if (!empty($tax['shipping_tax_amount']) && (float)$tax['shipping_tax_amount'] > 0) {
+        if ($shipping_tax != 0) {
             $tax_lines[] = array(
                 'description' => 'Shipping tax',
-                'amount'      => amount_validation((float)$tax['shipping_tax_amount']),
+                'amount'      => amount_validation($shipping_tax),
             );
         }
     }

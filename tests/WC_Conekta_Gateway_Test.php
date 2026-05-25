@@ -1142,16 +1142,145 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(300, $result[1]['amount']);
     }
 
-    public function test_build_tax_lines_zero_amount()
+    public function test_build_tax_lines_zero_amount_is_omitted()
     {
+        // Zero-amount taxes should NOT be sent to Conekta.
         $taxes = [
             ['tax_amount' => 0, 'label' => 'Exempt'],
         ];
 
         $result = ckpg_build_tax_lines($taxes);
 
+        $this->assertEmpty($result, 'Zero-amount tax should be omitted from tax_lines');
+    }
+
+    public function test_build_tax_lines_zero_items_with_nonzero_shipping_emits_only_shipping()
+    {
+        $taxes = [
+            new WC_Order_Item_Tax([
+                'label'              => 'IVA',
+                'tax_total'          => 0,
+                'shipping_tax_total' => 2.40,
+            ]),
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
         $this->assertCount(1, $result);
-        $this->assertEquals(0, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[0]['description']);
+        $this->assertEquals(240, $result[0]['amount']);
+    }
+
+    // -------------------------------------------------------
+    // BE-839: ckpg_build_tax_lines must accept real WC_Order_Item_Tax objects
+    // -------------------------------------------------------
+
+    /**
+     * Real WooCommerce >= 3.0 returns WC_Order_Item_Tax objects from
+     * $order->get_taxes(). Those objects expose `tax_total`/`shipping_tax_total`
+     * via ArrayAccess — NOT the legacy `tax_amount`/`shipping_tax_amount` keys.
+     */
+    public function test_build_tax_lines_reads_tax_total_from_wc_order_item_tax()
+    {
+        $taxes = [
+            new WC_Order_Item_Tax([
+                'label'     => 'IVA',
+                'tax_total' => 16.00,
+            ]),
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount'], 'IVA over items must be 1600 cents, not 0');
+    }
+
+    public function test_build_tax_lines_reads_shipping_tax_total_from_wc_order_item_tax()
+    {
+        $taxes = [
+            new WC_Order_Item_Tax([
+                'label'              => 'IVA',
+                'tax_total'          => 16.00,
+                'shipping_tax_total' => 2.40,
+            ]),
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[1]['description']);
+        $this->assertEquals(240, $result[1]['amount'], 'Shipping IVA must be 240 cents, not 0');
+    }
+
+    public function test_build_tax_lines_omits_zero_shipping_tax_from_object()
+    {
+        // A WC_Order_Item_Tax always exposes shipping_tax_total (defaults to 0).
+        // We should NOT emit a "Shipping tax" line when the value is 0.
+        $taxes = [
+            new WC_Order_Item_Tax([
+                'label'              => 'IVA',
+                'tax_total'          => 16.00,
+                'shipping_tax_total' => 0,
+            ]),
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result, 'Zero shipping_tax_total should not produce a Shipping tax line');
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+    }
+
+    public function test_build_tax_lines_multiple_real_objects()
+    {
+        $taxes = [
+            new WC_Order_Item_Tax([
+                'label'              => 'IVA',
+                'tax_total'          => 16.00,
+                'shipping_tax_total' => 2.40,
+            ]),
+            new WC_Order_Item_Tax([
+                'label'     => 'IEPS',
+                'tax_total' => 3.00,
+            ]),
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(3, $result); // IVA + Shipping tax + IEPS
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[1]['description']);
+        $this->assertEquals(240, $result[1]['amount']);
+        $this->assertEquals('IEPS', $result[2]['description']);
+        $this->assertEquals(300, $result[2]['amount']);
+    }
+
+    /**
+     * End-to-end: $order->get_taxes() returns WC_Order_Item_Tax objects and the
+     * resulting tax_lines must carry the correct IVA amount, NOT 0.
+     */
+    public function test_order_taxes_pipeline_reports_iva_for_items_and_shipping()
+    {
+        $order = new WC_Order(700);
+        $order->set_taxes([
+            new WC_Order_Item_Tax([
+                'label'              => 'IVA',
+                'tax_total'          => 80.00,   // IVA over items
+                'shipping_tax_total' => 16.00,   // IVA over shipping
+            ]),
+        ]);
+
+        $tax_lines = ckpg_build_tax_lines($order->get_taxes());
+
+        $this->assertCount(2, $tax_lines);
+        $this->assertEquals('IVA', $tax_lines[0]['description']);
+        $this->assertEquals(8000, $tax_lines[0]['amount']);
+        $this->assertEquals('Shipping tax', $tax_lines[1]['description']);
+        $this->assertEquals(1600, $tax_lines[1]['amount']);
     }
 
     public function test_build_tax_lines_with_zero_shipping_tax()

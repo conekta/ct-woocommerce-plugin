@@ -58,6 +58,8 @@ By following these steps, you'll successfully install and configure the Conekta 
 * Cleanup: conekta_settings localized to classic JS reduced from 11 keys to 5. Token + MSI hidden fields replaced by a single conekta_order_id hidden field.
 * Compat: WooCommerce Blocks checkout migrated to the same flow — paymentMethodData is now { conekta_order_id }.
 
+= 5.4.15 =
+* Fix: `ckpg_build_tax_lines` now reads `tax_total`/`shipping_tax_total` from `WC_Order_Item_Tax` objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
 = 5.4.14 =
 * Fix: Webhook `order.paid`/`order.expired` now uses `wc_get_order()` with fallback lookup by `conekta-order-id` meta, fixing HPOS compatibility and 3DS temp order mismatch
 * Fix: `validate_reference_id` now rejects empty, non-numeric, zero, and negative values

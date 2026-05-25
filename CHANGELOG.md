@@ -13,6 +13,9 @@
 - Tests: PHPUnit suite trimmed of legacy 3DS/MSI/token tests; 105 tests / 226 assertions pass against the Mockoon sandbox. E2E specs reshaped around the Integration flow (cart-change triggers PUT, paid order completes WC order, amount mismatch rejected).
 - Net diff vs 5.4.14: ~ -1000 lines.
 
+## [5.4.15]() - 2026-05-25
+- Fix: `ckpg_build_tax_lines` now reads `tax_total`/`shipping_tax_total` from `WC_Order_Item_Tax` objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
+
 ## [5.4.14]() - 2026-04-10
 - Fix: Webhook `order.paid`/`order.expired` now uses `wc_get_order()` with fallback lookup by `conekta-order-id` meta, fixing HPOS compatibility and 3DS temp order mismatch
 - Fix: `validate_reference_id` now rejects empty, non-numeric, zero, and negative values

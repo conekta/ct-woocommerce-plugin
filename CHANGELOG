@@ -13,6 +13,10 @@
 - Compat: WooCommerce Blocks checkout migrated to the same flow — paymentMethodData is now { conekta_order_id }.
 - Tests: PHPUnit trimmed of legacy 3DS/MSI/token tests; 105 tests / 226 assertions pass against the Mockoon sandbox.
 - Net diff vs 5.4.14: ~ -1000 lines.
+5.4.15, 2026-05-25
+-------------------------------------
+- Fix: ckpg_build_tax_lines now reads tax_total/shipping_tax_total from WC_Order_Item_Tax objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
+
 
 5.4.14, 2026-04-10
 -------------------------------------

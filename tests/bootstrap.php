@@ -191,6 +191,37 @@ if (!class_exists('WC_Payment_Gateway')) {
     }
 }
 
+// WC_Order_Item_Tax stub — emulates the ArrayAccess interface of WC 3.0+
+if (!class_exists('WC_Order_Item_Tax')) {
+    class WC_Order_Item_Tax implements ArrayAccess {
+        private $data;
+
+        public function __construct(array $data = []) {
+            $this->data = array_merge([
+                'rate_code'          => '',
+                'rate_id'            => 0,
+                'label'              => '',
+                'compound'           => false,
+                'tax_total'          => 0,
+                'shipping_tax_total' => 0,
+                'rate_percent'       => 0,
+            ], $data);
+        }
+
+        public function get_label() { return $this->data['label']; }
+        public function get_tax_total() { return $this->data['tax_total']; }
+        public function get_shipping_tax_total() { return $this->data['shipping_tax_total']; }
+        public function get_rate_code() { return $this->data['rate_code']; }
+        public function get_rate_id() { return $this->data['rate_id']; }
+
+        public function offsetExists($offset): bool { return array_key_exists($offset, $this->data); }
+        #[\ReturnTypeWillChange]
+        public function offsetGet($offset) { return $this->data[$offset] ?? null; }
+        public function offsetSet($offset, $value): void { $this->data[$offset] = $value; }
+        public function offsetUnset($offset): void { unset($this->data[$offset]); }
+    }
+}
+
 // WC_Order stub
 if (!class_exists('WC_Order')) {
     class WC_Order {
@@ -198,6 +229,7 @@ if (!class_exists('WC_Order')) {
         private $status = 'pending';
         private $meta = [];
         private $coupons = [];
+        private $taxes = [];
 
         public function __construct($id = 0) {
             $this->id = $id;
@@ -205,6 +237,10 @@ if (!class_exists('WC_Order')) {
 
         public function set_coupons(array $coupons) {
             $this->coupons = $coupons;
+        }
+
+        public function set_taxes(array $taxes) {
+            $this->taxes = $taxes;
         }
 
         public function get_id() { return $this->id; }
@@ -217,7 +253,7 @@ if (!class_exists('WC_Order')) {
             }
             return [];
         }
-        public function get_taxes() { return []; }
+        public function get_taxes() { return $this->taxes; }
         public function get_fees() { return []; }
 
         // Totals
