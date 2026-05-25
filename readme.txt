@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 5.4.14
+Stable tag: 5.4.15
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,8 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 5.4.15 =
+* Fix: `ckpg_build_tax_lines` now reads `tax_total`/`shipping_tax_total` from `WC_Order_Item_Tax` objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
 = 5.4.14 =
 * Fix: Webhook `order.paid`/`order.expired` now uses `wc_get_order()` with fallback lookup by `conekta-order-id` meta, fixing HPOS compatibility and 3DS temp order mismatch
 * Fix: `validate_reference_id` now rejects empty, non-numeric, zero, and negative values
