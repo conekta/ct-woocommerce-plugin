@@ -194,7 +194,7 @@ if (!class_exists('WC_Payment_Gateway')) {
 // WC_Order_Item_Tax stub — emulates the ArrayAccess interface of WC 3.0+
 if (!class_exists('WC_Order_Item_Tax')) {
     class WC_Order_Item_Tax implements ArrayAccess {
-        private array $data;
+        private $data;
 
         public function __construct(array $data = []) {
             $this->data = array_merge([
@@ -215,7 +215,8 @@ if (!class_exists('WC_Order_Item_Tax')) {
         public function get_rate_id() { return $this->data['rate_id']; }
 
         public function offsetExists($offset): bool { return array_key_exists($offset, $this->data); }
-        public function offsetGet($offset): mixed { return $this->data[$offset] ?? null; }
+        #[\ReturnTypeWillChange]
+        public function offsetGet($offset) { return $this->data[$offset] ?? null; }
         public function offsetSet($offset, $value): void { $this->data[$offset] = $value; }
         public function offsetUnset($offset): void { unset($this->data[$offset]); }
     }
