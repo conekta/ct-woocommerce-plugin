@@ -126,30 +126,24 @@ function ckpg_build_tax_lines($taxes): array
     $tax_lines = array();
 
     foreach ($taxes as $tax) {
+        // WooCommerce >= 3.0 returns WC_Order_Item_Tax objects whose ArrayAccess
+        // keys are `tax_total` / `shipping_tax_total`. Older code paths (and the
+        // legacy test fixtures) used `tax_amount` / `shipping_tax_amount`.
+        $items_tax    = (float) ($tax['tax_total'] ?? $tax['tax_amount'] ?? 0);
+        $shipping_tax = (float) ($tax['shipping_tax_total'] ?? $tax['shipping_tax_amount'] ?? 0);
+        $label        = esc_html((string) ($tax['label'] ?? ''));
 
+        if ($items_tax != 0) {
+            $tax_lines[] = array(
+                'description' => $label,
+                'amount'      => amount_validation($items_tax),
+            );
+        }
 
-        $tax_amount = floatval($tax['tax_amount']) * 1000;
-        $tax_name    = (string)$tax['label'];
-        $tax_name    = esc_html($tax_name);
-
-
-        $tax_lines  = array_merge($tax_lines, array(
-            array(
-                'description' => $tax_name,
-                'amount'      => intval(round(floatval($tax_amount) / 10), 2)
-            )
-        ));
-
-        if (isset($tax['shipping_tax_amount'])) {
-            $tax_amount = floatval($tax['shipping_tax_amount']) * 1000;
-            $amount     = intval(round(floatval($tax_amount) / 10), 2);
-            $tax_lines  = array_merge(
-                $tax_lines, array(
-                    array(
-                        'description' => 'Shipping tax',
-                        'amount'      => $amount
-                    )
-                )
+        if ($shipping_tax != 0) {
+            $tax_lines[] = array(
+                'description' => 'Shipping tax',
+                'amount'      => amount_validation($shipping_tax),
             );
         }
     }
