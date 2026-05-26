@@ -1863,6 +1863,54 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // wallets_enabled → allowed_payment_methods
+    // -------------------------------------------------------
+
+    /**
+     * @return object stand-in for a WC_Payment_Gateway with custom settings
+     */
+    private function gatewayWithSettings(array $settings)
+    {
+        return new class($settings) {
+            public $settings;
+            public function __construct(array $settings) { $this->settings = $settings; }
+        };
+    }
+
+    public function test_build_allowed_payment_methods_includes_wallets_when_enabled()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'yes']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(['card', 'apple', 'google'], $methods);
+    }
+
+    public function test_build_allowed_payment_methods_excludes_wallets_when_disabled()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(['card'], $methods);
+    }
+
+    public function test_build_allowed_payment_methods_defaults_to_enabled_for_legacy_settings()
+    {
+        // Merchants who upgrade without re-saving settings have no
+        // wallets_enabled key — must keep wallets ON by default so existing
+        // checkouts don't lose Apple/Google Pay silently.
+        $gateway = $this->gatewayWithSettings([]);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertContains('apple', $methods);
+        $this->assertContains('google', $methods);
+        $this->assertContains('card', $methods);
+    }
+
+    public function test_build_allowed_payment_methods_uses_sdk_constant_for_card()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(\Conekta\Model\CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, $methods[0]);
+    }
+
+    // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------
 

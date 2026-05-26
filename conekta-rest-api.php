@@ -199,14 +199,9 @@ class WC_Conekta_REST_API {
                 array_map('intval', (array) ($gateway->settings['months'] ?? [])),
                 fn($v) => $v > 0
             ));
-            $wallets_enabled = ($gateway->settings['wallets_enabled'] ?? 'yes') === 'yes';
-            $allowed_payment_methods = $wallets_enabled
-                ? [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
-                : [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
-
             $checkout_data = [
                 'type'                    => 'Integration',
-                'allowed_payment_methods' => $allowed_payment_methods,
+                'allowed_payment_methods' => self::build_allowed_payment_methods($gateway),
                 'name'                    => 'WooCommerce checkout',
             ];
 
@@ -411,6 +406,21 @@ class WC_Conekta_REST_API {
     private static function get_gateway() {
         $gateways = WC()->payment_gateways->payment_gateways();
         return $gateways['conekta'] ?? null;
+    }
+
+    /**
+     * Translate the gateway's wallets_enabled setting into the
+     * allowed_payment_methods array sent to Conekta. Apple/Google are kept
+     * as raw strings because the SDK enum doesn't expose constants for them.
+     */
+    public static function build_allowed_payment_methods($gateway): array {
+        $wallets_enabled = isset($gateway->settings['wallets_enabled'])
+            ? $gateway->settings['wallets_enabled'] === 'yes'
+            : true;
+
+        return $wallets_enabled
+            ? [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
+            : [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
     }
 
     public static function clear_session(): void {

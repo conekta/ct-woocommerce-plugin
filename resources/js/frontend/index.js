@@ -12,7 +12,7 @@ const labelConekta = decodeEntities(settings.title);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEBOUNCE_MS = 500;
 
-const pickSelectedShipping = (props) => {
+export const pickSelectedShipping = (props) => {
     let shippingRates = props?.shippingData?.shippingRates || [];
     if (!shippingRates.length) {
         shippingRates = props?.shipping?.shippingRates || [];
