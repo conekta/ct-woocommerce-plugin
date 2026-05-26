@@ -7,10 +7,15 @@ export class OrderEmitter {
       this.submitFn = null;
   }
 
+  // Reset state BEFORE dispatching so listeners that re-subscribe
+  // synchronously (e.g. classic-checkout's wireOrderListeners) don't
+  // re-trigger via the `if (this.order)` / `if (this.error)` branch
+  // in onOrder/onError — that path used to recurse infinitely and blew
+  // the stack on SDK error.
   setOrder(newOrder) {
-      this.order = newOrder;
-      this.listeners.forEach((callback) => callback(newOrder));
+      const listeners = this.listeners;
       this.resetStates();
+      listeners.forEach((callback) => callback(newOrder));
   }
 
   onOrder(callback) {
@@ -22,9 +27,9 @@ export class OrderEmitter {
   }
 
   setError(newError) {
-      this.error = newError;
-      this.errorListeners.forEach((callback) => callback(newError));
+      const listeners = this.errorListeners;
       this.resetStates();
+      listeners.forEach((callback) => callback(newError));
   }
 
   onError(callback) {

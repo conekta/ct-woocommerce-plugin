@@ -185,6 +185,16 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                     'multiple'         => 'multiple',
                 ),
             ),
+            'wallets_enabled' => array(
+                'type'        => 'checkbox',
+                'title'       => __('Wallets (Apple Pay / Google Pay)', 'woothemes'),
+                'label'       => __('Mostrar botones de Apple Pay y Google Pay en el checkout', 'woothemes'),
+                'description' => __(
+                    'Consulta los pasos de activación: <a href="https://developers.conekta.com/docs/gu%C3%ADa-de-activaci%C3%B3n-apple-pay" target="_blank">Apple Pay</a> · <a href="https://developers.conekta.com/docs/gu%C3%ADa-de-activaci%C3%B3n-google-pay" target="_blank">Google Pay</a>.',
+                    'woothemes'
+                ),
+                'default'     => 'yes',
+            ),
             'webhook_url' => array(
                 'type' => 'text',
                 'title' => __('URL webhook', 'woothemes'),

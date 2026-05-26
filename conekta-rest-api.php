@@ -199,9 +199,14 @@ class WC_Conekta_REST_API {
                 array_map('intval', (array) ($gateway->settings['months'] ?? [])),
                 fn($v) => $v > 0
             ));
+            $wallets_enabled = ($gateway->settings['wallets_enabled'] ?? 'yes') === 'yes';
+            $allowed_payment_methods = $wallets_enabled
+                ? [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
+                : [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
+
             $checkout_data = [
                 'type'                    => 'Integration',
-                'allowed_payment_methods' => ['card' , 'apple'],
+                'allowed_payment_methods' => $allowed_payment_methods,
                 'name'                    => 'WooCommerce checkout',
             ];
 

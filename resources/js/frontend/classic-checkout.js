@@ -1,3 +1,6 @@
+import { OrderEmitter } from './OrderEmitter';
+import { loadConektaScript } from './loadConektaScript';
+
 const CONTAINER_SELECTOR = "#conektaITokenizerframeContainer";
 const FORM_SELECTOR = "form.checkout";
 const PAYMENT_METHOD_SELECTOR = 'input[name="payment_method"]:checked';
@@ -6,98 +9,6 @@ const POLLING_INTERVAL = 100;
 const MAX_WAIT_TIME = 5000;
 const REFRESH_DEBOUNCE_MS = 500;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Inlined twin of resources/js/frontend/OrderEmitter.js — kept here because
-// classic-checkout.js is loaded directly by WordPress (no webpack bundle).
-class OrderEmitter {
-  constructor() {
-    this.listeners = [];
-    this.errorListeners = [];
-    this.order = null;
-    this.error = null;
-    this.submitFn = null;
-  }
-  setOrder(newOrder) {
-    this.order = newOrder;
-    this.listeners.forEach((cb) => cb(newOrder));
-    this.resetStates();
-  }
-  onOrder(cb) {
-    this.listeners.push(cb);
-    if (this.order) {
-      cb(this.order);
-      this.resetStates();
-    }
-  }
-  setError(newError) {
-    this.error = newError;
-    this.errorListeners.forEach((cb) => cb(newError));
-    this.resetStates();
-  }
-  onError(cb) {
-    this.errorListeners.push(cb);
-    if (this.error) {
-      cb(this.error);
-      this.resetStates();
-    }
-  }
-  setSubmit(fn) {
-    this.submitFn = typeof fn === 'function' ? fn : null;
-  }
-  submit() {
-    if (typeof this.submitFn !== 'function') {
-      throw new Error('Conekta submit not ready');
-    }
-    return this.submitFn();
-  }
-  clearSubmit() {
-    this.submitFn = null;
-  }
-  resetStates() {
-    this.listeners = [];
-    this.errorListeners = [];
-    this.error = null;
-    this.order = null;
-  }
-}
-
-// Inlined twin of resources/js/frontend/useComponentScript.js for the same reason.
-const buildScriptLoader = () => {
-  const loadScript = (publicKey, checkoutRequestId, locale, orderEmitter, onScriptError) => {
-    const script = document.createElement('script');
-    script.src = "https://pay.conekta.com/v1.0/js/conekta-checkout.min.js";
-    script.async = true;
-    script.onload = () => {
-      if (!window.ConektaCheckoutComponents) {
-        onScriptError && onScriptError(new Error('Conekta SDK not available'));
-        return;
-      }
-      const config = {
-        targetIFrame: CONTAINER_SELECTOR,
-        publicKey,
-        locale,
-        checkoutRequestId,
-        useExternalSubmit: true,
-      };
-      const callbacks = {
-        onGetInfoSuccess: () => {},
-        onUpdateSubmitTrigger: (fn) => orderEmitter.setSubmit(fn),
-        onFinalizePayment: (order) => orderEmitter.setOrder(order),
-        // onErrorPayment = SDK/integration errors; onChargeFailed = backend
-        // declines (insufficient funds, fraud, etc.). Without the latter the
-        // place_order button used to spin indefinitely on soft declines.
-        onErrorPayment: (error) => orderEmitter.setError(error),
-        onChargeFailed: (error) => orderEmitter.setError(error),
-      };
-      window.ConektaCheckoutComponents.Integration({ config, callbacks });
-    };
-    script.onerror = () => {
-      onScriptError && onScriptError(new Error('Failed to load Conekta SDK'));
-    };
-    return script;
-  };
-  return { loadScript };
-};
 
 const utils = {
   getSelectedPaymentMethod: () =>
@@ -182,7 +93,6 @@ const utils = {
 };
 
 const orderEmitter = new OrderEmitter();
-const { loadScript } = buildScriptLoader();
 
 const state = {
   currentScriptEl: null,
@@ -320,7 +230,7 @@ const mounter = {
     utils.clearContainer();
 
     state.currentCheckoutRequestId = checkoutRequestId;
-    const scriptEl = loadScript(
+    const scriptEl = loadConektaScript(
       conekta_settings.public_key,
       checkoutRequestId,
       conekta_settings.locale || 'es',
@@ -328,7 +238,8 @@ const mounter = {
       (error) => {
         console.warn('Conekta script failed to load:', error);
         utils.showErrorMessage(utils.getTranslation('form_error'));
-      }
+      },
+      CONTAINER_SELECTOR
     );
     state.currentScriptEl = scriptEl;
     document.body.appendChild(scriptEl);

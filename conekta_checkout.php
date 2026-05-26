@@ -75,7 +75,7 @@ function ckpg_enqueue_classic_checkout_script() {
                 true
             );
 
-            $script_path = 'resources/js/frontend/classic-checkout.js';
+            $script_path = 'build/js/frontend/classic-checkout.js';
             $script_url = plugin_dir_url(__FILE__) . $script_path;
             $script_path = plugin_dir_path(__FILE__) . $script_path;
 

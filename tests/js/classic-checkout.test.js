@@ -1,20 +1,20 @@
 /**
  * @jest-environment jsdom
  */
-const fs = require('fs');
 const path = require('path');
 
 const SCRIPT_PATH = path.resolve(__dirname, '../../resources/js/frontend/classic-checkout.js');
-const scriptSource = fs.readFileSync(SCRIPT_PATH, 'utf-8');
 
 /**
- * Load classic-checkout.js into the current jsdom context and trigger
- * DOMContentLoaded so the event listeners are registered.
+ * Load classic-checkout.js (and its ES module deps) into the current jsdom
+ * context and trigger DOMContentLoaded so the event listeners are registered.
+ * isolateModules forces re-evaluation per call so listeners and emitter state
+ * don't leak between tests.
  */
 function loadScript() {
-  const fn = new Function(scriptSource);
-  fn();
-  // The script registers listeners inside DOMContentLoaded — fire it
+  jest.isolateModules(() => {
+    require(SCRIPT_PATH);
+  });
   document.dispatchEvent(new Event('DOMContentLoaded'));
 }
 

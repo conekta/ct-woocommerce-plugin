@@ -3,7 +3,8 @@ import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef, useState } from '@wordpress/element';
 import { OrderEmitter } from './OrderEmitter';
-import { useComponentScript } from './useComponentScript';
+import { loadConektaScript } from './loadConektaScript';
+import { useWalletAutoSubmit } from './useWalletAutoSubmit';
 
 const settings = getSetting('conekta_data', {});
 const labelConekta = decodeEntities(settings.title);
@@ -48,7 +49,6 @@ const ContentConekta = (props) => {
     const locale = settings.locale ?? 'es';
     const { eventRegistration, emitResponse } = props;
     const { onPaymentSetup } = eventRegistration;
-    const { loadScript } = useComponentScript();
 
     const [checkoutRequestId, setCheckoutRequestId] = useState(null);
     const [mountToken, setMountToken] = useState(0);
@@ -65,6 +65,14 @@ const ContentConekta = (props) => {
     const checkoutRequestIdRef = useRef(null);
     refreshingRef.current = refreshing;
     checkoutRequestIdRef.current = checkoutRequestId;
+
+    // Bridges Apple/Google Pay completion (which fires inside the SDK iframe,
+    // bypassing WC's Place Order button) to WC's checkout pipeline. See
+    // useWalletAutoSubmit for the full contract.
+    const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(
+        orderEmitterRef,
+        checkoutRequestId
+    );
 
     const billingAddress = props.billing?.billingAddress || {};
     const cartItems = props.cartData?.cartItems || [];
@@ -173,7 +181,7 @@ const ContentConekta = (props) => {
             setErrorMessage(err?.message || 'No se pudo cargar el componente de pago.');
         };
 
-        const script = loadScript(
+        const script = loadConektaScript(
             settings.api_key,
             checkoutRequestId,
             locale,
@@ -208,6 +216,23 @@ const ContentConekta = (props) => {
                 };
             }
 
+            // Short-circuit when a wallet button (Apple Pay / Google Pay)
+            // already charged: return the existing Conekta order id so WC
+            // proceeds to process_payment_api without asking the SDK to
+            // charge again.
+            if (walletOrderRef.current) {
+                const order = walletOrderRef.current;
+                walletOrderRef.current = null;
+                return {
+                    type: emitResponse.responseTypes.SUCCESS,
+                    meta: {
+                        paymentMethodData: {
+                            conekta_order_id: String(order.id),
+                        },
+                    },
+                };
+            }
+
             // Bail if WC's validation store has any errors — that's WC's own
             // generic record of "checkout fields are not valid yet". This avoids
             // calling Conekta (and charging the customer) for a checkout that
@@ -221,6 +246,7 @@ const ContentConekta = (props) => {
                 };
             }
 
+            expectingChargeRef.current = true;
             try {
                 const orderPromise = new Promise((resolve, reject) => {
                     orderEmitterRef.current.onOrder((o) => resolve(o));
@@ -242,6 +268,8 @@ const ContentConekta = (props) => {
                     type: emitResponse.responseTypes.ERROR,
                     message: error?.message || 'Error procesando el pago',
                 };
+            } finally {
+                expectingChargeRef.current = false;
             }
         });
 
