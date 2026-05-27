@@ -8,9 +8,9 @@ if (!defined('ABSPATH')) {
 }
 
 use Conekta\Model\OrderRequest;
-use Conekta\Model\OrderUpdateRequest;
-use Conekta\Model\CheckoutRequest;
-use Conekta\Model\CustomerShippingContacts;
+use Conekta\Model\OrderUpdate;
+use Conekta\Model\OrderCheckoutRequest;
+use Conekta\Model\CustomerShippingContactsRequest;
 
 class WC_Conekta_REST_API {
 
@@ -149,7 +149,7 @@ class WC_Conekta_REST_API {
                         'tax_lines'      => $snapshot['tax_lines'],
                     ], $current_amount);
 
-                    $update = new OrderUpdateRequest([
+                    $update = new OrderUpdate([
                         'line_items'     => $snapshot['line_items'],
                         'discount_lines' => $snapshot['discount_lines'],
                         'shipping_lines' => $snapshot['shipping_lines'],
@@ -216,7 +216,7 @@ class WC_Conekta_REST_API {
                 $checkout_data['monthly_installments_options'] = $msi_options;
             }
 
-            $checkout = new CheckoutRequest($checkout_data);
+            $checkout = new OrderCheckoutRequest($checkout_data);
 
             $balanced = ckpg_check_balance([
                 'line_items'     => $snapshot['line_items'],
@@ -242,7 +242,7 @@ class WC_Conekta_REST_API {
             ]);
 
             if (!empty($snapshot['shipping_contact'])) {
-                $order_request->setShippingContact(new CustomerShippingContacts($snapshot['shipping_contact']));
+                $order_request->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
             }
 
             $conekta_order = $api->createOrder($order_request, $gateway->get_user_locale());
@@ -425,8 +425,8 @@ class WC_Conekta_REST_API {
             : true;
 
         return $wallets_enabled
-            ? [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
-            : [CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
+            ? [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
+            : [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
     }
 
     public static function clear_session(): void {

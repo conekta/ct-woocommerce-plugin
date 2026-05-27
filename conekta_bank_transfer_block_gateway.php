@@ -12,7 +12,7 @@ use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
 use Conekta\Configuration;
 use Conekta\Model\OrderRequest;
-use Conekta\Model\CustomerShippingContacts;
+use Conekta\Model\CustomerShippingContactsRequest;
 use Conekta\Model\EventTypes;
 
 class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
@@ -312,7 +312,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
             'metadata' => $order_metadata
         ]);
         if (!empty($shipping_contact)) {
-            $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
+            $rq->setShippingContact(new CustomerShippingContactsRequest($shipping_contact));
         }
         try {
             $orderCreated = $this->get_api_instance($this->settings['api_key'], $this->version)->createOrder($rq);

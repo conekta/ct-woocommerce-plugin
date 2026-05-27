@@ -12,7 +12,6 @@ use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
 use Conekta\Configuration;
 use Conekta\Model\OrderRequest;
-use Conekta\Model\CustomerShippingContacts;
 use Conekta\Model\EventTypes;
 
 class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin

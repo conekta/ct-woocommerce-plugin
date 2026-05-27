@@ -1907,7 +1907,7 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
         $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
-        $this->assertEquals(\Conekta\Model\CheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, $methods[0]);
+        $this->assertEquals(\Conekta\Model\OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, $methods[0]);
     }
 
     // -------------------------------------------------------
