@@ -206,7 +206,7 @@ class WC_Conekta_REST_API {
                 fn($v) => $v > 0
             ));
             $checkout_data = [
-                'type'                    => 'Integration',
+                'type'                    => OrderCheckoutRequest::TYPE_INTEGRATION,
                 'allowed_payment_methods' => self::build_allowed_payment_methods($gateway),
                 'name'                    => 'WooCommerce checkout',
             ];
