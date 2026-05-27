@@ -38,6 +38,12 @@ class WC_Conekta_REST_API {
      * and on AJAX so we never wipe state mid-flow.
      */
     public static function reset_session_on_checkout_entry(): void {
+        // Store API / WP REST calls (e.g. wc/store/v1/cart/apply-coupon from
+        // Blocks) don't fire template_redirect normally, but some setups still
+        // route through it. Skip explicitly — clearing our session mid-flow
+        // forces a CREATE on the next checkout-request POST and breaks the
+        // update-reuse invariant the e2e relies on.
+        if (defined('REST_REQUEST') && REST_REQUEST) return;
         if (!function_exists('is_checkout') || !is_checkout()) return;
         if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url()) return;
         if (!empty($_POST)) return;
