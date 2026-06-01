@@ -328,6 +328,20 @@ class WC_Conekta_REST_API {
             // propagated, session cleared between requests — and (2) the
             // update threw and the catch cleared the session (signalled by
             // update_error above). This block answers (1).
+            // Capture session identity so we can prove (or disprove) the
+            // "WC rotated the session between POSTs" theory. customer_id
+            // is the stable bucket key; if it differs between requests
+            // the two posts ran against different sessions.
+            $sess_customer_id = null;
+            $sess_keys = [];
+            if (WC()->session) {
+                if (method_exists(WC()->session, 'get_customer_id')) {
+                    $sess_customer_id = WC()->session->get_customer_id();
+                }
+                if (method_exists(WC()->session, 'get_session_data')) {
+                    $sess_keys = array_keys(WC()->session->get_session_data() ?: []);
+                }
+            }
             $create_response['debug_session'] = [
                 'had_existing_order_id'   => !empty($existing_order_id),
                 'had_existing_request_id' => !empty($existing_request_id),
@@ -336,6 +350,9 @@ class WC_Conekta_REST_API {
                 'last_shipping_hash8'     => is_string($last_shipping_hash) ? substr($last_shipping_hash, 0, 8) : null,
                 'current_shipping_hash8'  => substr($current_shipping_hash, 0, 8),
                 'session_available'       => (bool) WC()->session,
+                'session_customer_id'     => $sess_customer_id,
+                'session_keys'            => $sess_keys,
+                'cookies_present'         => array_keys($_COOKIE ?: []),
             ];
             return new WP_REST_Response($create_response, 200);
 

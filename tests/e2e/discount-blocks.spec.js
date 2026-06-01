@@ -68,6 +68,7 @@ h.run('Blocks Checkout — Integration component', { checkoutType: 'blocks' }, a
 
   const firstResp = await createResponse;
   const firstBody = await firstResp.json();
+  console.log('  [first POST body] ' + JSON.stringify(firstBody));
   // Accept either 'create' or 'update' — for logged-in admin sessions WC keeps
   // session data tied to the user_id even after cookie cleanup, so a previous
   // run can leave a conekta_order_id behind. We assert reuse semantics below.
