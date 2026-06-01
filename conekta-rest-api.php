@@ -17,6 +17,7 @@ class WC_Conekta_REST_API {
     const SESSION_ORDER_ID            = 'conekta_checkout_order_id';
     const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
     const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
+    const SESSION_LAST_SHIPPING_HASH  = 'conekta_checkout_last_shipping_hash';
 
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
@@ -124,15 +125,25 @@ class WC_Conekta_REST_API {
                 return new WP_REST_Response(['success' => false, 'message' => 'Cart is empty'], 400);
             }
 
-            $existing_order_id   = WC()->session ? WC()->session->get(self::SESSION_ORDER_ID) : null;
-            $existing_request_id = WC()->session ? WC()->session->get(self::SESSION_CHECKOUT_REQUEST_ID) : null;
-            $last_amount         = WC()->session ? WC()->session->get(self::SESSION_LAST_AMOUNT) : null;
-            $current_amount      = WC()->cart ? amount_validation((float) WC()->cart->get_total('edit')) : 0;
+            $existing_order_id    = WC()->session ? WC()->session->get(self::SESSION_ORDER_ID) : null;
+            $existing_request_id  = WC()->session ? WC()->session->get(self::SESSION_CHECKOUT_REQUEST_ID) : null;
+            $last_amount          = WC()->session ? WC()->session->get(self::SESSION_LAST_AMOUNT) : null;
+            $last_shipping_hash   = WC()->session ? (WC()->session->get(self::SESSION_LAST_SHIPPING_HASH) ?: '') : '';
+            $current_amount       = WC()->cart ? amount_validation((float) WC()->cart->get_total('edit')) : 0;
+            // Hash the real shipping_contact from build_snapshot (NOT the
+            // placeholder we may inject below on create). Lets the update
+            // path detect "amount unchanged but the customer just typed
+            // their address" and replace the 'Pendiente' fallback.
+            $current_shipping_hash = self::shipping_contact_hash($snapshot['shipping_contact'] ?? []);
 
             $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
             if ($existing_order_id && $existing_request_id) {
-                if ($last_amount !== null && (int) $last_amount === (int) $current_amount) {
+                if (
+                    $last_amount !== null
+                    && (int) $last_amount === (int) $current_amount
+                    && $current_shipping_hash === $last_shipping_hash
+                ) {
                     return new WP_REST_Response([
                         'success'             => true,
                         'mode'                => 'unchanged',
@@ -155,10 +166,22 @@ class WC_Conekta_REST_API {
                         'shipping_lines' => $snapshot['shipping_lines'],
                         'tax_lines'      => $balanced['tax_lines'],
                     ]);
+
+                    // Backfill the real shipping_contact when it becomes
+                    // available. The order may have been created with the
+                    // 'Pendiente' placeholder (see below) before the customer
+                    // typed the address. Without this update Conekta keeps the
+                    // placeholder forever — visible on the merchant dashboard
+                    // and breaks antifraud rules that key on the address.
+                    if (!empty($snapshot['shipping_contact'])) {
+                        $update->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
+                    }
+
                     $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
 
                     if (WC()->session) {
                         WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
+                        WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
                     }
 
                     return new WP_REST_Response([
@@ -182,11 +205,12 @@ class WC_Conekta_REST_API {
                 ], 422);
             }
 
-            // shipping_contact must be set at creation time — Conekta's
-            // OrderUpdateRequest doesn't accept it, so we can't backfill via
-            // PUT later. If the customer hasn't entered an address yet, fall
-            // back to a placeholder so the SDK can charge; the WC order
-            // captures the real address at process_payment time.
+            // shipping_contact must be set at creation time so the SDK can
+            // mount and render the payment form. If the customer hasn't typed
+            // the address yet, seed it with the 'Pendiente' placeholder — the
+            // update branch above will overwrite it with the real address
+            // once WC()->customer has it. The WC order itself captures the
+            // real address at process_payment time regardless.
             if (empty($snapshot['shipping_contact'])) {
                 $snapshot['shipping_contact'] = [
                     'phone'    => '0000000000',
@@ -254,6 +278,7 @@ class WC_Conekta_REST_API {
                 WC()->session->set(self::SESSION_ORDER_ID, $conekta_order_id);
                 WC()->session->set(self::SESSION_CHECKOUT_REQUEST_ID, $checkout_request_id);
                 WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
+                WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
             }
 
             return new WP_REST_Response([
@@ -429,11 +454,22 @@ class WC_Conekta_REST_API {
             : [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
     }
 
+    /**
+     * Stable hash of the shipping_contact array — used to detect address
+     * changes between checkout-request POSTs. Empty/missing contact returns
+     * an empty string so the "first POST with placeholder" path keeps the
+     * stored hash empty until a real address arrives.
+     */
+    public static function shipping_contact_hash(array $contact): string {
+        return !empty($contact) ? md5(json_encode($contact)) : '';
+    }
+
     public static function clear_session(): void {
         if (!WC()->session) return;
         WC()->session->__unset(self::SESSION_ORDER_ID);
         WC()->session->__unset(self::SESSION_CHECKOUT_REQUEST_ID);
         WC()->session->__unset(self::SESSION_LAST_AMOUNT);
+        WC()->session->__unset(self::SESSION_LAST_SHIPPING_HASH);
     }
 
     /**

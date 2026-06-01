@@ -1911,6 +1911,137 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // shipping_contact_hash — detects address changes across
+    // checkout-request POSTs so the placeholder "Pendiente" gets
+    // replaced once the customer types the real address.
+    // -------------------------------------------------------
+
+    public function test_shipping_contact_hash_empty_returns_empty_string()
+    {
+        // First POST before the customer types the address: the snapshot
+        // returns shipping_contact=[] and the stored hash must be the empty
+        // string so a later real address compares as "changed".
+        $this->assertSame('', WC_Conekta_REST_API::shipping_contact_hash([]));
+    }
+
+    public function test_shipping_contact_hash_is_stable_for_same_input()
+    {
+        $contact = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Av Test 123',
+                'city'        => 'CDMX',
+                'state'       => 'DF',
+                'country'     => 'MX',
+                'postal_code' => '11010',
+            ],
+        ];
+
+        $this->assertSame(
+            WC_Conekta_REST_API::shipping_contact_hash($contact),
+            WC_Conekta_REST_API::shipping_contact_hash($contact)
+        );
+    }
+
+    public function test_shipping_contact_hash_changes_when_address_changes()
+    {
+        $a = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => ['street1' => 'Av Test 123', 'postal_code' => '11010', 'country' => 'MX'],
+        ];
+        $b = $a;
+        $b['address']['street1'] = 'Calle Otra 456';
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($a),
+            WC_Conekta_REST_API::shipping_contact_hash($b)
+        );
+    }
+
+    public function test_shipping_contact_hash_placeholder_differs_from_real_address()
+    {
+        // The 'Pendiente' placeholder is the seeded value the create path
+        // injects when the snapshot is still empty. Once the customer types
+        // a real address, the hash MUST differ so the unchanged short-circuit
+        // does not skip the update that would overwrite the placeholder.
+        $placeholder = [
+            'phone'    => '0000000000',
+            'receiver' => 'Cliente',
+            'address'  => [
+                'street1'     => 'Pendiente',
+                'postal_code' => '00000',
+                'city'        => 'Pendiente',
+                'state'       => 'Pendiente',
+                'country'     => 'MX',
+            ],
+        ];
+        $real = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Av Test 123',
+                'postal_code' => '11010',
+                'city'        => 'CDMX',
+                'state'       => 'DF',
+                'country'     => 'MX',
+            ],
+        ];
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($placeholder),
+            WC_Conekta_REST_API::shipping_contact_hash($real)
+        );
+    }
+
+    public function test_shipping_contact_hash_is_sensitive_to_key_order_in_address()
+    {
+        // md5(json_encode(...)) hashes the serialized form, which preserves
+        // PHP array order. This is acceptable because build_snapshot always
+        // emits the same key order — the test pins that contract so a future
+        // refactor that reorders keys doesn't silently break the cache hit.
+        $a = ['address' => ['street1' => 'Av 1', 'postal_code' => '11010']];
+        $b = ['address' => ['postal_code' => '11010', 'street1' => 'Av 1']];
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($a),
+            WC_Conekta_REST_API::shipping_contact_hash($b)
+        );
+    }
+
+    // -------------------------------------------------------
+    // clear_session
+    // -------------------------------------------------------
+
+    public function test_clear_session_removes_all_four_session_keys()
+    {
+        WC()->session->set(WC_Conekta_REST_API::SESSION_ORDER_ID, 'ord_123');
+        WC()->session->set(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID, 'cr_123');
+        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_AMOUNT, 12345);
+        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH, 'abc123');
+
+        WC_Conekta_REST_API::clear_session();
+
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_ORDER_ID));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_AMOUNT));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH));
+    }
+
+    public function test_session_last_shipping_hash_constant_exists()
+    {
+        // Regression: the unchanged short-circuit in handle_checkout_request
+        // reads this constant. Renaming it without also updating the read
+        // sites would silently downgrade the cache to amount-only and let
+        // the 'Pendiente' placeholder survive.
+        $this->assertSame(
+            'conekta_checkout_last_shipping_hash',
+            WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH
+        );
+    }
+
+    // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------
 
