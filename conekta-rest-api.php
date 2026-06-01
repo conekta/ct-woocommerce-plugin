@@ -92,6 +92,21 @@ class WC_Conekta_REST_API {
      */
     public static function handle_checkout_request($request) {
         try {
+            // Snapshot of the session AS LOADED by WC at request start, before
+            // any of our writes — answers the question "did the previous POST's
+            // keys actually survive into this request?" The end-of-request
+            // session_keys dump shows the LATEST state and is misleading
+            // when we fall back into create (our write then overwrites the
+            // values we were trying to read).
+            $session_keys_on_entry = [];
+            $session_order_id_on_entry = null;
+            if (WC()->session) {
+                if (method_exists(WC()->session, 'get_session_data')) {
+                    $session_keys_on_entry = array_keys(WC()->session->get_session_data() ?: []);
+                }
+                $session_order_id_on_entry = WC()->session->get(self::SESSION_ORDER_ID);
+            }
+
             $gateway = self::get_gateway();
             if (!$gateway) {
                 return new WP_REST_Response(['success' => false, 'message' => 'Conekta gateway not found'], 404);
@@ -372,16 +387,21 @@ class WC_Conekta_REST_API {
                 }
             }
             $create_response['debug_session'] = [
-                'had_existing_order_id'   => !empty($existing_order_id),
-                'had_existing_request_id' => !empty($existing_request_id),
-                'last_amount'             => $last_amount,
-                'current_amount'          => (int) $current_amount,
-                'last_shipping_hash8'     => is_string($last_shipping_hash) ? substr($last_shipping_hash, 0, 8) : null,
-                'current_shipping_hash8'  => substr($current_shipping_hash, 0, 8),
-                'session_available'       => (bool) WC()->session,
-                'session_customer_id'     => $sess_customer_id,
-                'session_keys'            => $sess_keys,
-                'cookies_present'         => array_keys($_COOKIE ?: []),
+                'had_existing_order_id'        => !empty($existing_order_id),
+                'had_existing_request_id'      => !empty($existing_request_id),
+                'last_amount'                  => $last_amount,
+                'current_amount'               => (int) $current_amount,
+                'last_shipping_hash8'          => is_string($last_shipping_hash) ? substr($last_shipping_hash, 0, 8) : null,
+                'current_shipping_hash8'       => substr($current_shipping_hash, 0, 8),
+                'session_available'            => (bool) WC()->session,
+                'session_customer_id'          => $sess_customer_id,
+                'session_keys'                 => $sess_keys,
+                'cookies_present'              => array_keys($_COOKIE ?: []),
+                // The two crucial fields for the read-vs-write question:
+                // what did the session look like AT THE START of this
+                // request, before any of our writes overwrote things?
+                'session_keys_on_entry'        => $session_keys_on_entry,
+                'session_order_id_on_entry'    => $session_order_id_on_entry,
             ];
             return new WP_REST_Response($create_response, 200);
 
