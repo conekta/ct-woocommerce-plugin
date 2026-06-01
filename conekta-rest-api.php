@@ -150,6 +150,11 @@ class WC_Conekta_REST_API {
 
             $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
+            // Captures any updateOrder exception so it can be surfaced on
+            // the fallback create response — silent catches used to mask
+            // the root cause of "update failed, recreating" loops in CI.
+            $update_error = null;
+
             if ($existing_order_id && $existing_request_id) {
                 if (
                     $last_amount !== null
@@ -214,7 +219,8 @@ class WC_Conekta_REST_API {
                         'checkout_request_id' => $existing_request_id,
                     ], 200);
                 } catch (\Exception $e) {
-                    error_log('Conekta - update order failed, recreating: ' . $e->getMessage());
+                    $update_error = $e->getMessage();
+                    error_log('Conekta - update order failed, recreating: ' . $update_error);
                     self::clear_session();
                 }
             }
@@ -304,12 +310,19 @@ class WC_Conekta_REST_API {
                 WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
             }
 
-            return new WP_REST_Response([
+            $create_response = [
                 'success'             => true,
                 'mode'                => 'create',
                 'conekta_order_id'    => $conekta_order_id,
                 'checkout_request_id' => $checkout_request_id,
-            ], 200);
+            ];
+            if ($update_error !== null) {
+                // The fallback into create masks an update failure;
+                // surface the underlying SDK/API message so the e2e log
+                // (and DevTools) can see why update lost the race.
+                $create_response['update_error'] = $update_error;
+            }
+            return new WP_REST_Response($create_response, 200);
 
         } catch (\Exception $e) {
             error_log('Conekta - checkout-request failed: ' . $e->getMessage());

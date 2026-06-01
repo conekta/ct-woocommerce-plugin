@@ -87,6 +87,11 @@ h.run('Blocks Checkout — Integration component', { checkoutType: 'blocks' }, a
   // Accept update or unchanged: when running against a long-lived staging
   // session the cached last_amount can coincidentally match the post-coupon
   // total. The key invariant we care about is reuse of the same order id.
+  // When the server falls back into 'create' it now attaches the original
+  // update_error — surface it so CI logs show why update lost the race.
+  if (!['update', 'unchanged'].includes(secondBody.mode)) {
+    console.log('  [second POST body] ' + JSON.stringify(secondBody));
+  }
   assert(['update', 'unchanged'].includes(secondBody.mode), `second POST mode = ${secondBody.mode}`);
   assert(secondBody.conekta_order_id === firstBody.conekta_order_id,
     `same conekta_order_id reused (${secondBody.conekta_order_id})`);
