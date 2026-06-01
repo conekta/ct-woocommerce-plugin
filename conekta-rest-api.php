@@ -15,6 +15,18 @@ use Conekta\Model\CustomerShippingContactsRequest;
 
 class WC_Conekta_REST_API {
 
+    // State for the in-flight Integration component checkout lives in a
+    // WP transient instead of WC()->session. The Store API endpoints that
+    // Blocks fires between our POSTs (e.g. wc/store/v1/cart/apply-coupon)
+    // load wp_woocommerce_session, write back only their known cart keys,
+    // and silently drop anything else — including the conekta_checkout_*
+    // keys we tried to keep there. The transient sidesteps that race
+    // entirely. TTL matches WC's 48h session expiry.
+    const STATE_TRANSIENT_PREFIX = 'conekta_checkout_state_';
+    const STATE_TRANSIENT_TTL    = 48 * HOUR_IN_SECONDS;
+    // Kept ONLY for backwards compatibility with read sites elsewhere
+    // (e.g. block_gateway) that still reference these constants; nothing
+    // is written under these keys anymore.
     const SESSION_ORDER_ID            = 'conekta_checkout_order_id';
     const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
     const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
@@ -92,12 +104,11 @@ class WC_Conekta_REST_API {
      */
     public static function handle_checkout_request($request) {
         try {
-            // Snapshot of the session AS LOADED by WC at request start, before
-            // any of our writes — answers the question "did the previous POST's
-            // keys actually survive into this request?" The end-of-request
-            // session_keys dump shows the LATEST state and is misleading
-            // when we fall back into create (our write then overwrites the
-            // values we were trying to read).
+            // Snapshot of the state AT REQUEST START, before any of our
+            // writes. Diagnostic only — proved that the WC Blocks Store API
+            // was wiping wp_woocommerce_session unknown keys between POSTs,
+            // which is why we moved to transients (see state_get/set).
+            $state_on_entry = self::state_get();
             $session_keys_on_entry = [];
             $session_order_id_on_entry = null;
             if (WC()->session) {
@@ -152,10 +163,11 @@ class WC_Conekta_REST_API {
                 return new WP_REST_Response(['success' => false, 'message' => 'Cart is empty'], 400);
             }
 
-            $existing_order_id    = WC()->session ? WC()->session->get(self::SESSION_ORDER_ID) : null;
-            $existing_request_id  = WC()->session ? WC()->session->get(self::SESSION_CHECKOUT_REQUEST_ID) : null;
-            $last_amount          = WC()->session ? WC()->session->get(self::SESSION_LAST_AMOUNT) : null;
-            $last_shipping_hash   = WC()->session ? (WC()->session->get(self::SESSION_LAST_SHIPPING_HASH) ?: '') : '';
+            $state                = self::state_get();
+            $existing_order_id    = $state['order_id']           ?? null;
+            $existing_request_id  = $state['checkout_request_id'] ?? null;
+            $last_amount          = $state['last_amount']        ?? null;
+            $last_shipping_hash   = $state['last_shipping_hash'] ?? '';
             $current_amount       = WC()->cart ? amount_validation((float) WC()->cart->get_total('edit')) : 0;
             // Hash the real shipping_contact from build_snapshot (NOT the
             // placeholder we may inject below on create). Lets the update
@@ -236,15 +248,12 @@ class WC_Conekta_REST_API {
 
                     $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
 
-                    if (WC()->session) {
-                        WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
-                        WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
-                        // Same synchronous-persist rationale as the create
-                        // branch — see the long comment there.
-                        if (method_exists(WC()->session, 'save_data')) {
-                            WC()->session->save_data();
-                        }
-                    }
+                    self::state_set([
+                        'order_id'           => $existing_order_id,
+                        'checkout_request_id'=> $existing_request_id,
+                        'last_amount'        => (int) $current_amount,
+                        'last_shipping_hash' => $current_shipping_hash,
+                    ]);
 
                     return new WP_REST_Response([
                         'success'             => true,
@@ -337,22 +346,12 @@ class WC_Conekta_REST_API {
             $conekta_order_id    = $conekta_order->getId();
             $checkout_request_id = $conekta_order->getCheckout() ? $conekta_order->getCheckout()->getId() : null;
 
-            if (WC()->session) {
-                WC()->session->set(self::SESSION_ORDER_ID, $conekta_order_id);
-                WC()->session->set(self::SESSION_CHECKOUT_REQUEST_ID, $checkout_request_id);
-                WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
-                WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
-                // Persist synchronously instead of waiting for the shutdown
-                // auto-save: the very next request (wc/store/v1/cart/* from
-                // Blocks) reads the session row directly via $wpdb, and on
-                // some hosts the shutdown handler hadn't finished writing
-                // by then. When that happens Blocks finds an empty row,
-                // creates a fresh session, and its save overwrites ours
-                // with the conekta_checkout_* keys missing.
-                if (method_exists(WC()->session, 'save_data')) {
-                    WC()->session->save_data();
-                }
-            }
+            self::state_set([
+                'order_id'           => $conekta_order_id,
+                'checkout_request_id'=> $checkout_request_id,
+                'last_amount'        => (int) $current_amount,
+                'last_shipping_hash' => $current_shipping_hash,
+            ]);
 
             $create_response = [
                 'success'             => true,
@@ -402,6 +401,12 @@ class WC_Conekta_REST_API {
                 // request, before any of our writes overwrote things?
                 'session_keys_on_entry'        => $session_keys_on_entry,
                 'session_order_id_on_entry'    => $session_order_id_on_entry,
+                // Source of truth now: the transient. If
+                // state_on_entry.order_id is populated, the persistence
+                // worked and the unchanged short-circuit / update path
+                // should have run.
+                'state_on_entry'               => $state_on_entry,
+                'state_after_write'            => self::state_get(),
             ];
             return new WP_REST_Response($create_response, 200);
 
@@ -642,7 +647,52 @@ class WC_Conekta_REST_API {
         return $written;
     }
 
+    /**
+     * Stable bucket key for the checkout-state transient. Uses WC's
+     * customer_id which is cookie-derived for guests and user_id for
+     * logged-in users — survives across our POSTs in the same browser
+     * session, independent of WC Blocks' wp_woocommerce_session writes.
+     */
+    private static function state_transient_key(): ?string {
+        if (!WC()->session || !method_exists(WC()->session, 'get_customer_id')) return null;
+        $customer_id = WC()->session->get_customer_id();
+        if (empty($customer_id)) return null;
+        return self::STATE_TRANSIENT_PREFIX . $customer_id;
+    }
+
+    /**
+     * Read the full checkout state blob. Returns an array (possibly empty)
+     * to keep call sites uniform.
+     */
+    public static function state_get(): array {
+        $key = self::state_transient_key();
+        if (!$key) return [];
+        $value = get_transient($key);
+        return is_array($value) ? $value : [];
+    }
+
+    /**
+     * Write the full state blob. We persist on every successful create or
+     * update — set_transient itself goes straight to wp_options /
+     * external object cache, no race with the Store API session writes.
+     */
+    public static function state_set(array $data): void {
+        $key = self::state_transient_key();
+        if (!$key) return;
+        set_transient($key, $data, self::STATE_TRANSIENT_TTL);
+    }
+
+    public static function state_delete(): void {
+        $key = self::state_transient_key();
+        if (!$key) return;
+        delete_transient($key);
+    }
+
     public static function clear_session(): void {
+        // Primary path: drop the transient.
+        self::state_delete();
+        // Backward-compat: also clear any keys an older plugin version may
+        // still have in wp_woocommerce_session. Cheap and safe.
         if (!WC()->session) return;
         WC()->session->__unset(self::SESSION_ORDER_ID);
         WC()->session->__unset(self::SESSION_CHECKOUT_REQUEST_ID);
