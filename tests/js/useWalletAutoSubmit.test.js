@@ -1,160 +1,238 @@
 /**
  * @jest-environment jsdom
  *
- * Tests the wallet-button → place-order bridge that lets Apple/Google Pay
- * orders ride through WC Blocks' checkout pipeline. Mocks @wordpress/element
- * so useEffect / useRef / useCallback run synchronously in plain JS — the
- * hook is then a normal function we can call and assert on.
+ * Tests the wallet-button → place-order bridge for blocks. Uses real React
+ * via @testing-library/react so useEffect dependency arrays, useRef
+ * stability, and cleanup ordering all behave exactly as they will in
+ * production.
+ *
+ * Why not stub @wordpress/element hooks: a hand-rolled mock can't replicate
+ * React's deps-aware effect scheduling or ref-identity-across-renders. A
+ * stale-trigger regression like "effect re-runs every render, opening a
+ * teardown window where Apple Pay events get lost" passes a naive mock
+ * but breaks under real React.
  */
 
 const mockInternalSetBeforeProcessing = jest.fn();
 
+// @wordpress/element is a webpack external in production. Map it to real
+// React in tests so useEffect / useRef / useCallback have full semantics.
 jest.mock(
     '@wordpress/element',
-    () => ({
-        useEffect: (fn) => fn(),
-        useRef: (init) => ({ current: init }),
-    }),
+    () => {
+        const React = require('react');
+        return {
+            useEffect:   React.useEffect,
+            useRef:      React.useRef,
+            useCallback: React.useCallback,
+        };
+    },
     { virtual: true }
 );
 
 jest.mock(
     '@wordpress/data',
     () => ({
+        // Return a NEW dispatch object on every call — this is the exact
+        // shape of the production bug we're guarding against. If the hook's
+        // useEffect deps include this object (directly or via useCallback)
+        // the effect will re-run on every render and leak a teardown window.
         useDispatch: () => ({ __internalSetBeforeProcessing: mockInternalSetBeforeProcessing }),
     }),
     { virtual: true }
 );
 
+const React = require('react');
+const { render, act } = require('@testing-library/react');
+
 const { OrderEmitter } = require('../../resources/js/frontend/OrderEmitter');
 const { useWalletAutoSubmit } = require('../../resources/js/frontend/useWalletAutoSubmit');
 
+/**
+ * Renders a harness component that exercises useWalletAutoSubmit and
+ * surfaces the returned refs to the test. Each call to rerender() drives
+ * React through a real commit — the same way blocks would re-render
+ * ContentConekta when its parent state changes.
+ */
+const renderHarness = ({ initialKey = 'cr_1', emitter } = {}) => {
+    const emitterRef = { current: emitter };
+    const captured = { refs: null, renderCount: 0 };
+
+    const Harness = ({ rebindKey }) => {
+        captured.renderCount++;
+        captured.refs = useWalletAutoSubmit(emitterRef, rebindKey);
+        return null;
+    };
+
+    const result = render(React.createElement(Harness, { rebindKey: initialKey }));
+
+    return {
+        get refs() { return captured.refs; },
+        get renderCount() { return captured.renderCount; },
+        update: (newKey) => result.rerender(React.createElement(Harness, { rebindKey: newKey })),
+        unmount: () => result.unmount(),
+    };
+};
+
 describe('useWalletAutoSubmit', () => {
     let emitter;
-    let emitterRef;
 
     beforeEach(() => {
         jest.useFakeTimers();
         mockInternalSetBeforeProcessing.mockReset();
         emitter = new OrderEmitter();
-        emitterRef = { current: emitter };
     });
 
     afterEach(() => {
         jest.useRealTimers();
     });
 
-    test('returns walletOrderRef and expectingChargeRef refs', () => {
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
-        expect(walletOrderRef).toEqual({ current: null });
-        expect(expectingChargeRef).toEqual({ current: false });
+    test('exposes walletOrderRef and expectingChargeRef initialised to null/false', () => {
+        const h = renderHarness({ emitter });
+        expect(h.refs.walletOrderRef.current).toBeNull();
+        expect(h.refs.expectingChargeRef.current).toBe(false);
+        h.unmount();
     });
 
-    test('subscribes a listener that stashes the order AND triggers checkout when expectingChargeRef=false', () => {
-        // The "wallet button charged" path: nobody set expectingChargeRef to
-        // true (no Place Order click in flight), so we recognize this as a
-        // wallet flow and have to start the checkout pipeline ourselves.
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
+    test('captures wallet-button charges and triggers checkout when expectingChargeRef=false', () => {
+        const h = renderHarness({ emitter });
 
-        expectingChargeRef.current = false;
-        emitter.setOrder({ id: 'ord_wallet' });
+        h.refs.expectingChargeRef.current = false;
+        act(() => emitter.setOrder({ id: 'ord_wallet' }));
 
-        expect(walletOrderRef.current).toEqual({ id: 'ord_wallet' });
+        expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_wallet' });
         expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+        h.unmount();
     });
 
-    test('subscribed listener stands down when expectingChargeRef=true (card path)', () => {
-        // The card path already drove orderEmitter.submit() from
-        // onPaymentSetup — its own orderPromise will resolve and we must
-        // NOT also click the Place Order button or we charge twice.
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
+    test('stands down on the card path (expectingChargeRef=true)', () => {
+        // The Place Order button is driving the SDK charge — our listener
+        // must NOT double-trigger checkout or the customer charges twice.
+        const h = renderHarness({ emitter });
 
-        expectingChargeRef.current = true;
-        emitter.setOrder({ id: 'ord_card' });
+        h.refs.expectingChargeRef.current = true;
+        act(() => emitter.setOrder({ id: 'ord_card' }));
 
-        expect(walletOrderRef.current).toBeNull();
+        expect(h.refs.walletOrderRef.current).toBeNull();
         expect(mockInternalSetBeforeProcessing).not.toHaveBeenCalled();
+        h.unmount();
     });
 
-    test('rebinds after each event so subsequent wallet payments still get caught', () => {
-        // OrderEmitter clears listeners after every setOrder. Without the
-        // rebind, a customer who clicks Apple Pay twice (e.g. retry after
-        // a failed 3DS) on the same iframe instance would silently not
-        // trigger checkout the second time.
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
+    test('rebinds after each event so a retry-after-failure also gets caught', () => {
+        // OrderEmitter clears listeners on every setOrder; the setTimeout
+        // rebind keeps us alive for the next wallet click.
+        const h = renderHarness({ emitter });
+        h.refs.expectingChargeRef.current = false;
 
-        expectingChargeRef.current = false;
-        emitter.setOrder({ id: 'ord_first' });
-        expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+        act(() => emitter.setOrder({ id: 'ord_first' }));
+        act(() => jest.runAllTimers());
+        act(() => emitter.setOrder({ id: 'ord_second' }));
 
-        // Flush the setTimeout(rebind, 0) so the listener is wired again.
-        jest.runAllTimers();
-
-        emitter.setOrder({ id: 'ord_second' });
-        expect(walletOrderRef.current).toEqual({ id: 'ord_second' });
+        expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_second' });
         expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(2);
+        h.unmount();
     });
 
-    test('swallows errors thrown by mockInternalSetBeforeProcessing', () => {
-        // WC blocks throws when checkout state isn't ready (e.g. validation
-        // pending). We let WC surface that error in its own UI rather than
-        // crashing the iframe listener — failure to swallow used to leave
-        // the customer charged but stranded.
+    test('swallows errors thrown by __internalSetBeforeProcessing', () => {
+        // WC throws when checkout state isn't ready (e.g. mid-validation).
+        // We let WC surface its own UI rather than crashing the listener
+        // — but still stash the order so onPaymentSetup can replay it
+        // when blocks recovers.
         mockInternalSetBeforeProcessing.mockImplementationOnce(() => {
             throw new Error('blocks not ready');
         });
 
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
+        const h = renderHarness({ emitter });
+        h.refs.expectingChargeRef.current = false;
 
-        expectingChargeRef.current = false;
-        expect(() => emitter.setOrder({ id: 'ord_x' })).not.toThrow();
-        // Order is still stashed so onPaymentSetup can short-circuit on it
-        // once blocks recovers.
-        expect(walletOrderRef.current).toEqual({ id: 'ord_x' });
+        expect(() => act(() => emitter.setOrder({ id: 'ord_x' }))).not.toThrow();
+        expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_x' });
+        h.unmount();
     });
 
-    test('no-op when orderEmitterRef.current is null', () => {
-        // Defensive: the parent component may render before OrderEmitter is
-        // constructed. The hook should bail cleanly instead of crashing.
-        const refs = useWalletAutoSubmit({ current: null }, 'cr_1');
-        expect(refs.walletOrderRef.current).toBeNull();
-        expect(refs.expectingChargeRef.current).toBe(false);
-        // And it should NOT fire anything that depends on the emitter.
+    test('effect runs exactly once across multiple re-renders with same iframeRebindKey', () => {
+        // Regression test for the production bug: useDispatch returns a
+        // fresh object on every render in some @wordpress/data versions.
+        // The earlier implementation included that object (via useCallback)
+        // in the effect's deps, so each re-render tore the listener down
+        // and re-subscribed it. The narrow window between cleanup and
+        // setup was where Apple Pay onFinalizePayment events got lost.
+        //
+        // The fix keeps the dispatch in a mutable ref and depends only on
+        // iframeRebindKey. We count subscriptions: with the bug we'd see
+        // N+1 (initial + N re-renders); with the fix we see exactly 1.
+        const onOrderSpy = jest.spyOn(emitter, 'onOrder');
+
+        const h = renderHarness({ emitter });
+        const subsAfterMount = onOrderSpy.mock.calls.length;
+        expect(subsAfterMount).toBe(1);
+
+        h.update('cr_1');
+        h.update('cr_1');
+        h.update('cr_1');
+
+        expect(onOrderSpy.mock.calls.length).toBe(subsAfterMount);
+
+        // Sanity check: events still get caught after the re-render storm.
+        h.refs.expectingChargeRef.current = false;
+        act(() => emitter.setOrder({ id: 'ord_after_rerenders' }));
+        expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_after_rerenders' });
+        expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+
+        h.unmount();
+    });
+
+    test('listener re-subscribes when iframeRebindKey changes (iframe remount)', () => {
+        // The legitimate reason to tear down: the SDK iframe got
+        // remounted with a fresh checkoutRequestId. OrderEmitter is
+        // reset by the iframe cleanup, so our listener must re-subscribe
+        // against the live emitter.
+        const onOrderSpy = jest.spyOn(emitter, 'onOrder');
+
+        const h = renderHarness({ emitter });
+        const subsAfterMount = onOrderSpy.mock.calls.length;
+
+        h.update('cr_2'); // simulates iframe remount
+
+        // A real remount must produce a fresh subscription.
+        expect(onOrderSpy.mock.calls.length).toBeGreaterThan(subsAfterMount);
+
+        h.refs.expectingChargeRef.current = false;
+        act(() => emitter.setOrder({ id: 'ord_after_remount' }));
+
+        expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_after_remount' });
+        expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+        h.unmount();
+    });
+
+    test('cleanup deactivates the listener on unmount', () => {
+        // If the component unmounts (e.g. customer navigates away from
+        // checkout) the persistent listener must not keep firing — it
+        // would write to refs that the next mount no longer owns.
+        const h = renderHarness({ emitter });
+        h.refs.expectingChargeRef.current = false;
+        h.unmount();
+
+        // After unmount, dispatching an order through the emitter must
+        // NOT trigger any wallet logic.
+        act(() => emitter.setOrder({ id: 'ord_after_unmount' }));
+
         expect(mockInternalSetBeforeProcessing).not.toHaveBeenCalled();
     });
 
-    test('refs are independent between hook invocations (no module-level leak)', () => {
-        // Each iframe mount creates a fresh OrderEmitter and a fresh set of
-        // refs. A stale walletOrderRef from a previous order would short-
-        // circuit onPaymentSetup with the WRONG conekta_order_id.
-        const a = useWalletAutoSubmit(emitterRef, 'cr_a');
-        const b = useWalletAutoSubmit(emitterRef, 'cr_b');
-        a.walletOrderRef.current = { id: 'ord_a' };
-        expect(b.walletOrderRef.current).toBeNull();
-    });
+    test('no-op when orderEmitterRef.current is null (defensive)', () => {
+        // The parent may render before the OrderEmitter is constructed.
+        const captured = { refs: null };
+        const NullHarness = () => {
+            captured.refs = useWalletAutoSubmit({ current: null }, 'cr_1');
+            return null;
+        };
+        const { unmount } = render(React.createElement(NullHarness));
 
-    test('listener survives unrelated parent re-renders (no teardown window)', () => {
-        // Regression: useDispatch from @wordpress/data used to return a new
-        // object on every render in some versions. If the effect's deps
-        // included that object (directly or via useCallback) the listener
-        // got torn down + re-subscribed each render — and an Apple Pay
-        // onFinalizePayment that landed between teardown and resetup was
-        // silently lost. The effect now keeps the trigger in a ref so it
-        // only re-runs when iframeRebindKey changes.
-        const { walletOrderRef, expectingChargeRef } = useWalletAutoSubmit(emitterRef, 'cr_1');
+        expect(captured.refs.walletOrderRef.current).toBeNull();
+        expect(captured.refs.expectingChargeRef.current).toBe(false);
+        expect(mockInternalSetBeforeProcessing).not.toHaveBeenCalled();
 
-        // Simulate parent re-render that does NOT remount the iframe by
-        // calling the hook again with the SAME key. With the bug, the
-        // effect would re-run and (in this test setup) re-subscribe the
-        // SAME handler twice — but the critical regression is that during
-        // the teardown window between renders, setOrder events were lost.
-        // We can at least assert the live refs continue to work.
-        useWalletAutoSubmit(emitterRef, 'cr_1');
-
-        expectingChargeRef.current = false;
-        emitter.setOrder({ id: 'ord_after_rerender' });
-
-        expect(walletOrderRef.current).toEqual({ id: 'ord_after_rerender' });
-        expect(mockInternalSetBeforeProcessing).toHaveBeenCalled();
+        unmount();
     });
 });
