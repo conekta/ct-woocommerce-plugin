@@ -224,6 +224,11 @@ class WC_Conekta_REST_API {
                     if (WC()->session) {
                         WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
                         WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
+                        // Same synchronous-persist rationale as the create
+                        // branch — see the long comment there.
+                        if (method_exists(WC()->session, 'save_data')) {
+                            WC()->session->save_data();
+                        }
                     }
 
                     return new WP_REST_Response([
@@ -322,6 +327,16 @@ class WC_Conekta_REST_API {
                 WC()->session->set(self::SESSION_CHECKOUT_REQUEST_ID, $checkout_request_id);
                 WC()->session->set(self::SESSION_LAST_AMOUNT, $current_amount);
                 WC()->session->set(self::SESSION_LAST_SHIPPING_HASH, $current_shipping_hash);
+                // Persist synchronously instead of waiting for the shutdown
+                // auto-save: the very next request (wc/store/v1/cart/* from
+                // Blocks) reads the session row directly via $wpdb, and on
+                // some hosts the shutdown handler hadn't finished writing
+                // by then. When that happens Blocks finds an empty row,
+                // creates a fresh session, and its save overwrites ours
+                // with the conekta_checkout_* keys missing.
+                if (method_exists(WC()->session, 'save_data')) {
+                    WC()->session->save_data();
+                }
             }
 
             $create_response = [
