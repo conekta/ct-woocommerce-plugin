@@ -11,10 +11,6 @@ on:
 
 jobs:
   build-and-test:
-    # TEMP: paused while iterating on the e2e checkout. The matrix runs 6
-    # parallel PHP versions and burns minutes — flip this back to `true`
-    # (or remove the line) before merging the PR.
-    if: false
     runs-on: ubuntu-latest
     strategy:
       matrix:

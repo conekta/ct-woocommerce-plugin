@@ -104,20 +104,6 @@ class WC_Conekta_REST_API {
      */
     public static function handle_checkout_request($request) {
         try {
-            // Snapshot of the state AT REQUEST START, before any of our
-            // writes. Diagnostic only — proved that the WC Blocks Store API
-            // was wiping wp_woocommerce_session unknown keys between POSTs,
-            // which is why we moved to transients (see state_get/set).
-            $state_on_entry = self::state_get();
-            $session_keys_on_entry = [];
-            $session_order_id_on_entry = null;
-            if (WC()->session) {
-                if (method_exists(WC()->session, 'get_session_data')) {
-                    $session_keys_on_entry = array_keys(WC()->session->get_session_data() ?: []);
-                }
-                $session_order_id_on_entry = WC()->session->get(self::SESSION_ORDER_ID);
-            }
-
             $gateway = self::get_gateway();
             if (!$gateway) {
                 return new WP_REST_Response(['success' => false, 'message' => 'Conekta gateway not found'], 404);
@@ -191,11 +177,6 @@ class WC_Conekta_REST_API {
                 WC()->session->set_customer_session_cookie(true);
             }
 
-            // Captures any updateOrder exception so it can be surfaced on
-            // the fallback create response — silent catches used to mask
-            // the root cause of "update failed, recreating" loops in CI.
-            $update_error = null;
-
             if ($existing_order_id && $existing_request_id) {
                 if (
                     $last_amount !== null
@@ -262,8 +243,7 @@ class WC_Conekta_REST_API {
                         'checkout_request_id' => $existing_request_id,
                     ], 200);
                 } catch (\Exception $e) {
-                    $update_error = $e->getMessage();
-                    error_log('Conekta - update order failed, recreating: ' . $update_error);
+                    error_log('Conekta - update order failed, recreating: ' . $e->getMessage());
                     self::clear_session();
                 }
             }
@@ -353,62 +333,12 @@ class WC_Conekta_REST_API {
                 'last_shipping_hash' => $current_shipping_hash,
             ]);
 
-            $create_response = [
+            return new WP_REST_Response([
                 'success'             => true,
                 'mode'                => 'create',
                 'conekta_order_id'    => $conekta_order_id,
                 'checkout_request_id' => $checkout_request_id,
-            ];
-            if ($update_error !== null) {
-                // The fallback into create masks an update failure;
-                // surface the underlying SDK/API message so the e2e log
-                // (and DevTools) can see why update lost the race.
-                $create_response['update_error'] = $update_error;
-            }
-            // Diagnostic: when the second POST in a session falls into the
-            // create branch instead of update, expose WHY. The two common
-            // failure modes are (1) session keys missing — cookie not
-            // propagated, session cleared between requests — and (2) the
-            // update threw and the catch cleared the session (signalled by
-            // update_error above). This block answers (1).
-            // Capture session identity so we can prove (or disprove) the
-            // "WC rotated the session between POSTs" theory. customer_id
-            // is the stable bucket key; if it differs between requests
-            // the two posts ran against different sessions.
-            $sess_customer_id = null;
-            $sess_keys = [];
-            if (WC()->session) {
-                if (method_exists(WC()->session, 'get_customer_id')) {
-                    $sess_customer_id = WC()->session->get_customer_id();
-                }
-                if (method_exists(WC()->session, 'get_session_data')) {
-                    $sess_keys = array_keys(WC()->session->get_session_data() ?: []);
-                }
-            }
-            $create_response['debug_session'] = [
-                'had_existing_order_id'        => !empty($existing_order_id),
-                'had_existing_request_id'      => !empty($existing_request_id),
-                'last_amount'                  => $last_amount,
-                'current_amount'               => (int) $current_amount,
-                'last_shipping_hash8'          => is_string($last_shipping_hash) ? substr($last_shipping_hash, 0, 8) : null,
-                'current_shipping_hash8'       => substr($current_shipping_hash, 0, 8),
-                'session_available'            => (bool) WC()->session,
-                'session_customer_id'          => $sess_customer_id,
-                'session_keys'                 => $sess_keys,
-                'cookies_present'              => array_keys($_COOKIE ?: []),
-                // The two crucial fields for the read-vs-write question:
-                // what did the session look like AT THE START of this
-                // request, before any of our writes overwrote things?
-                'session_keys_on_entry'        => $session_keys_on_entry,
-                'session_order_id_on_entry'    => $session_order_id_on_entry,
-                // Source of truth now: the transient. If
-                // state_on_entry.order_id is populated, the persistence
-                // worked and the unchanged short-circuit / update path
-                // should have run.
-                'state_on_entry'               => $state_on_entry,
-                'state_after_write'            => self::state_get(),
-            ];
-            return new WP_REST_Response($create_response, 200);
+            ], 200);
 
         } catch (\Exception $e) {
             error_log('Conekta - checkout-request failed: ' . $e->getMessage());
