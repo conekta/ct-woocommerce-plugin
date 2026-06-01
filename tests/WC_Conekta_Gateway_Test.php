@@ -2042,6 +2042,237 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // resolve_phone — shipping wins over billing because WC
+    // Blocks does NOT sync the phone field on the "use same
+    // address for billing" toggle, so billing_phone is often
+    // stale relative to what the customer just typed.
+    // -------------------------------------------------------
+
+    public function test_resolve_phone_shipping_wins_when_both_present()
+    {
+        // The bug scenario: WC Blocks left billing_phone='5555555555'
+        // from a previous interaction, the customer typed '3143159054'
+        // in the shipping block, and the toggle is on. Conekta must
+        // receive the new number, not the stale one.
+        $this->assertSame(
+            '3143159054',
+            WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054')
+        );
+    }
+
+    public function test_resolve_phone_falls_back_to_billing_when_shipping_empty()
+    {
+        // Classic checkout has only one phone field — it lands in
+        // billing_phone and shipping_phone never gets set.
+        $this->assertSame(
+            '5555555555',
+            WC_Conekta_REST_API::resolve_phone('5555555555', '')
+        );
+    }
+
+    public function test_resolve_phone_uses_shipping_when_billing_empty()
+    {
+        $this->assertSame(
+            '3143159054',
+            WC_Conekta_REST_API::resolve_phone('', '3143159054')
+        );
+    }
+
+    public function test_resolve_phone_returns_empty_string_when_both_empty()
+    {
+        // The caller is responsible for substituting the '0000000000'
+        // placeholder — resolve_phone is purely a preference picker so
+        // that decision lives at the call site where the placeholder
+        // policy is visible.
+        $this->assertSame('', WC_Conekta_REST_API::resolve_phone('', ''));
+    }
+
+    // -------------------------------------------------------
+    // OrderUpdate customer_info regression — pin the SDK
+    // contract that lets the update path push a fresh
+    // customer_info.phone to Conekta. Without this support
+    // a stale phone left over from the create call would
+    // never be replaced and the merchant dashboard / Conekta
+    // antifraud would see the wrong number.
+    // -------------------------------------------------------
+
+    public function test_order_update_accepts_customer_info_via_sdk()
+    {
+        // Locks the conekta-php >= 7.1.0 contract: OrderUpdate must accept
+        // customer_info with phone. If the SDK is rolled back to a version
+        // that doesn't expose this setter (early 7.0.x lacked it on the
+        // PUT model) the test fails BEFORE the silent regression — phone
+        // stuck at the create-time value — ships to production.
+        $update = new \Conekta\Model\OrderUpdate();
+        $update->setCustomerInfo(new \Conekta\Model\OrderUpdateCustomerInfo([
+            'name'  => 'Test User',
+            'phone' => '3143159054',
+        ]));
+        $info = $update->getCustomerInfo();
+        $this->assertNotNull($info, 'OrderUpdate must hold the customer_info we set');
+        $this->assertSame('3143159054', $info->getPhone());
+        $this->assertSame('Test User',  $info->getName());
+    }
+
+    public function test_order_update_accepts_shipping_contact_via_sdk()
+    {
+        // Same contract pin for the shipping_contact path — without it the
+        // 'Pendiente' placeholder never gets replaced on PUT.
+        $update = new \Conekta\Model\OrderUpdate();
+        $update->setShippingContact(new \Conekta\Model\CustomerShippingContactsRequest([
+            'phone'    => '3143159054',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Calle Test 123',
+                'postal_code' => '11010',
+                'country'     => 'MX',
+            ],
+        ]));
+        $contact = $update->getShippingContact();
+        $this->assertNotNull($contact);
+        $this->assertSame('3143159054', $contact->getPhone());
+    }
+
+    public function test_resolve_phone_user_scenario_blocks_does_not_sync_phone()
+    {
+        // Documents the exact reproduction the merchant hit on staging:
+        //   - billing_phone='5555555555' was left in WC()->customer from a
+        //     previous interaction.
+        //   - The customer typed '3143159054' in Dirección de envío.
+        //   - "Usar la misma dirección para facturación" was on.
+        //   - WC Blocks copied the shipping address to billing but DID NOT
+        //     sync billing_phone, so build_snapshot saw both phones diverge.
+        // resolve_phone must return the shipping one so customer_info.phone
+        // (and shipping_contact.phone, which uses the same helper) reflect
+        // what the customer just typed instead of the stale leftover.
+        $resolved = WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054');
+        $this->assertSame('3143159054', $resolved);
+    }
+
+    // -------------------------------------------------------
+    // apply_address_from_body — closes the race where WC Blocks
+    // debounces its own `update-customer` REST call AFTER our
+    // /checkout-request POST has already hit the server. Without
+    // this helper, build_snapshot would read a stale
+    // WC()->customer and the cache-key would match the previous
+    // hash, returning mode=unchanged and leaving the Conekta
+    // order with the old shipping address.
+    // -------------------------------------------------------
+
+    private function freshCustomer()
+    {
+        // Lightweight stand-in. Setters are declared explicitly because
+        // apply_address_from_body() uses method_exists() to gate writes,
+        // and method_exists() ignores PHP's __call magic.
+        return new class {
+            public string $billing_first_name = '';
+            public string $billing_last_name = '';
+            public string $billing_address_1 = '';
+            public string $billing_city = '';
+            public string $billing_state = '';
+            public string $billing_postcode = '';
+            public string $billing_country = '';
+            public string $billing_phone = '';
+            public string $shipping_first_name = '';
+            public string $shipping_last_name = '';
+            public string $shipping_address_1 = '';
+            public string $shipping_city = '';
+            public string $shipping_state = '';
+            public string $shipping_postcode = '';
+            public string $shipping_country = '';
+            public string $shipping_phone = '';
+            public function set_billing_first_name($v)  { $this->billing_first_name  = $v; }
+            public function set_billing_last_name($v)   { $this->billing_last_name   = $v; }
+            public function set_billing_address_1($v)   { $this->billing_address_1   = $v; }
+            public function set_billing_city($v)        { $this->billing_city        = $v; }
+            public function set_billing_state($v)       { $this->billing_state       = $v; }
+            public function set_billing_postcode($v)    { $this->billing_postcode    = $v; }
+            public function set_billing_country($v)     { $this->billing_country     = $v; }
+            public function set_billing_phone($v)       { $this->billing_phone       = $v; }
+            public function set_shipping_first_name($v) { $this->shipping_first_name = $v; }
+            public function set_shipping_last_name($v)  { $this->shipping_last_name  = $v; }
+            public function set_shipping_address_1($v)  { $this->shipping_address_1  = $v; }
+            public function set_shipping_city($v)       { $this->shipping_city       = $v; }
+            public function set_shipping_state($v)      { $this->shipping_state      = $v; }
+            public function set_shipping_postcode($v)   { $this->shipping_postcode   = $v; }
+            public function set_shipping_country($v)    { $this->shipping_country    = $v; }
+            public function set_shipping_phone($v)      { $this->shipping_phone      = $v; }
+        };
+    }
+
+    public function test_apply_address_from_body_writes_only_non_empty_fields()
+    {
+        $customer = $this->freshCustomer();
+        $written = WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', [
+            'first_name' => 'Test',
+            'address_1'  => 'Calle Test chavito',
+            'city'       => '',   // empty — should be skipped
+            'phone'      => '3143159054',
+        ]);
+
+        $this->assertSame(['first_name', 'address_1', 'phone'], $written);
+        $this->assertSame('Test',                $customer->shipping_first_name);
+        $this->assertSame('Calle Test chavito',  $customer->shipping_address_1);
+        $this->assertSame('3143159054',          $customer->shipping_phone);
+    }
+
+    public function test_apply_address_from_body_overrides_stale_value_in_customer()
+    {
+        // Exact scenario from the merchant: WC()->customer had the old
+        // address "lisa" because Blocks hadn't synced yet, the user typed
+        // "chavito", and our POST landed first. The body override must win.
+        $customer = $this->freshCustomer();
+        $customer->shipping_address_1 = 'Calle Test lisa'; // stale
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', [
+            'address_1' => 'Calle Test chavito',
+        ]);
+        $this->assertSame('Calle Test chavito', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_writes_separate_billing_and_shipping_setters()
+    {
+        // The helper must use set_billing_<field> vs set_shipping_<field>
+        // — sending billing values into shipping slots would silently
+        // duplicate the address and break checkouts where the user has
+        // distinct billing and shipping.
+        $customer = $this->freshCustomer();
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'billing',  ['address_1' => 'Calle Bill 1']);
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', ['address_1' => 'Calle Ship 1']);
+        $this->assertSame('Calle Bill 1', $customer->billing_address_1);
+        $this->assertSame('Calle Ship 1', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_no_op_for_empty_or_invalid_input()
+    {
+        $customer = $this->freshCustomer();
+        $customer->shipping_address_1 = 'Calle Test lisa'; // existing value must survive
+
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', []));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', null));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'invalid_type', ['address_1' => 'X']));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body(null,      'shipping', ['address_1' => 'X']));
+
+        $this->assertSame('Calle Test lisa', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_ignores_fields_outside_allowlist()
+    {
+        // Defense-in-depth: a malicious client can't write arbitrary
+        // setters via this endpoint (e.g. set_billing_email). Only the
+        // known address fields go through — the returned list reflects
+        // exactly what was applied, so non-allowlisted keys are absent.
+        $customer = $this->freshCustomer();
+        $written = WC_Conekta_REST_API::apply_address_from_body($customer, 'billing', [
+            'first_name' => 'A',
+            'email'      => 'evil@example.com',
+            'admin'      => true,
+            'role'       => 'administrator',
+        ]);
+        $this->assertSame(['first_name'], $written);
+        $this->assertSame('A', $customer->billing_first_name);
+    }
+
+    // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------
 

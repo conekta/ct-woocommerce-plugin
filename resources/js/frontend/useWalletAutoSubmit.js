@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from '@wordpress/element';
+import { useEffect, useRef } from '@wordpress/element';
 import { useDispatch } from '@wordpress/data';
 
 /**
@@ -45,9 +45,17 @@ export const useWalletAutoSubmit = (orderEmitterRef, iframeRebindKey) => {
     const expectingChargeRef = useRef(false);
     const checkoutDispatch = useDispatch('wc/store/checkout');
 
-    const triggerCheckoutSubmit = useCallback(() => {
+    // Keep the latest dispatch in a ref so the listener-setup effect below
+    // can stay stable. Putting checkoutDispatch (or a useCallback that
+    // closes over it) in the effect's deps caused the effect to re-run on
+    // every render in versions of @wordpress/data that hand back a fresh
+    // object — between teardown and resetup there was a window with NO
+    // listener on OrderEmitter, and an Apple Pay onFinalizePayment that
+    // landed in that window was silently lost.
+    const triggerRef = useRef(null);
+    triggerRef.current = () => {
         checkoutDispatch?.__internalSetBeforeProcessing?.();
-    }, [checkoutDispatch]);
+    };
 
     useEffect(() => {
         if (!orderEmitterRef?.current) return undefined;
@@ -58,7 +66,7 @@ export const useWalletAutoSubmit = (orderEmitterRef, iframeRebindKey) => {
             if (!expectingChargeRef.current) {
                 walletOrderRef.current = order;
                 try {
-                    triggerCheckoutSubmit();
+                    triggerRef.current?.();
                 } catch (_) {
                     // WC surfaces its own error state if the dispatch can't
                     // run (e.g. validation pending) — nothing to do here.
@@ -84,7 +92,7 @@ export const useWalletAutoSubmit = (orderEmitterRef, iframeRebindKey) => {
         return () => {
             active = false;
         };
-    }, [triggerCheckoutSubmit, iframeRebindKey, orderEmitterRef]);
+    }, [iframeRebindKey]);
 
     return { walletOrderRef, expectingChargeRef };
 };

@@ -49,7 +49,10 @@ jest.mock(
 
 jest.mock(
     '@wordpress/data',
-    () => ({ useDispatch: () => ({ __internalSetBeforeProcessing: jest.fn() }) }),
+    () => ({
+        useDispatch: () => ({ __internalSetBeforeProcessing: jest.fn() }),
+        useSelect: jest.fn(() => ({ billing: null, shipping: null })),
+    }),
     { virtual: true }
 );
 
@@ -62,7 +65,11 @@ jest.mock('../../resources/js/frontend/loadConektaScript', () => ({
 }));
 
 const { registerPaymentMethod } = require('@woocommerce/blocks-registry');
-const { pickSelectedShipping } = require('../../resources/js/frontend/index.js');
+const {
+    pickSelectedShipping,
+    addrFields,
+    buildCheckoutCacheHash,
+} = require('../../resources/js/frontend/index.js');
 
 describe('index.js (Blocks)', () => {
     describe('registerPaymentMethod', () => {
@@ -202,6 +209,139 @@ describe('index.js (Blocks)', () => {
                 },
             };
             expect(pickSelectedShipping(props2).label).toBe('By Rate Label');
+        });
+    });
+
+    describe('addrFields', () => {
+        // 8 projected fields → join('|') yields 7 separators.
+        test('returns 7 pipes (8 empty slots) for an empty address', () => {
+            expect(addrFields({})).toBe('|||||||');
+        });
+
+        test('handles missing address argument', () => {
+            expect(addrFields()).toBe('|||||||');
+        });
+
+        test('joins all 8 fields in fixed order, phone last', () => {
+            const result = addrFields({
+                first_name: 'Test',
+                last_name:  'User',
+                address_1:  'Calle Test 123',
+                city:       'CDMX',
+                state:      'DF',
+                postcode:   '11010',
+                country:    'MX',
+                phone:      '3143159054',
+            });
+            expect(result).toBe('Test|User|Calle Test 123|CDMX|DF|11010|MX|3143159054');
+        });
+
+        test('partial address fills missing slots with empty strings', () => {
+            // 8 fields, 7 separators. Slots in order:
+            // first_name | last_name | address_1 | city | state | postcode | country | phone
+            //   "A"      |    ""     |    ""     |  ""  |  ""   |    ""    |  "MX"   |   ""
+            // → "A||||||MX|"
+            expect(addrFields({ first_name: 'A', country: 'MX' })).toBe('A||||||MX|');
+        });
+
+        test('different addresses produce different output', () => {
+            const a = { address_1: 'Calle 1', city: 'CDMX' };
+            const b = { address_1: 'Calle 2', city: 'CDMX' };
+            expect(addrFields(a)).not.toBe(addrFields(b));
+        });
+
+        // Phone is part of the change-detection fingerprint so a customer
+        // who changes only their shipping phone (different delivery contact)
+        // still bumps the hash and re-fires /checkout-request before the
+        // wallet button charges against a stale Conekta order.
+        test('different phone produces different output', () => {
+            const a = { phone: '5555555555' };
+            const b = { phone: '3143159054' };
+            expect(addrFields(a)).not.toBe(addrFields(b));
+        });
+    });
+
+    describe('buildCheckoutCacheHash', () => {
+        const baseInput = {
+            cartTotal: 100,
+            currencyCode: 'MXN',
+            cartItems: [{ id: 7, quantity: 1, variation: { id: 0 } }],
+            shippingRateId: 'flat_rate:1',
+            billingEmail: 'test@example.com',
+            billingAddress: { first_name: 'Bill', address_1: 'Calle Bill 1' },
+            shippingAddress: { first_name: 'Ship', address_1: 'Calle Ship 1' },
+        };
+
+        test('produces the same hash for equal inputs (cache hit)', () => {
+            expect(buildCheckoutCacheHash(baseInput))
+                .toBe(buildCheckoutCacheHash({ ...baseInput }));
+        });
+
+        // This is the regression test for the actual bug the user hit:
+        // changing only the shipping address (everything else identical,
+        // including cart total) MUST invalidate the cache so the checkout
+        // -request POST re-fires and Conekta receives the new
+        // shipping_contact before Apple/Google Pay charges.
+        test('shipping address change invalidates the cache when total is unchanged', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({
+                ...baseInput,
+                shippingAddress: { first_name: 'Ship', address_1: 'Calle Ship 2 (edited)' },
+            });
+            expect(after).not.toBe(before);
+        });
+
+        test('billing address change invalidates the cache', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({
+                ...baseInput,
+                billingAddress: { ...baseInput.billingAddress, address_1: 'Calle Bill 2' },
+            });
+            expect(after).not.toBe(before);
+        });
+
+        test('cart total change invalidates the cache (coupon applied, etc.)', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({ ...baseInput, cartTotal: 80 });
+            expect(after).not.toBe(before);
+        });
+
+        test('item set change invalidates the cache', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({
+                ...baseInput,
+                cartItems: [{ id: 7, quantity: 2, variation: { id: 0 } }],
+            });
+            expect(after).not.toBe(before);
+        });
+
+        test('shipping method change invalidates the cache', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({ ...baseInput, shippingRateId: 'free_shipping:1' });
+            expect(after).not.toBe(before);
+        });
+
+        test('email change invalidates the cache', () => {
+            const before = buildCheckoutCacheHash(baseInput);
+            const after  = buildCheckoutCacheHash({ ...baseInput, billingEmail: 'other@example.com' });
+            expect(after).not.toBe(before);
+        });
+
+        test('billing and shipping with same fields produce DIFFERENT hashes than swapping them', () => {
+            // Ensures the two address blocks are positional and not summed —
+            // swapping billing<->shipping must yield a different hash so
+            // "shipping moved to billing slot" is observed as a change.
+            const swapped = buildCheckoutCacheHash({
+                ...baseInput,
+                billingAddress: baseInput.shippingAddress,
+                shippingAddress: baseInput.billingAddress,
+            });
+            expect(swapped).not.toBe(buildCheckoutCacheHash(baseInput));
+        });
+
+        test('empty input still produces a deterministic string', () => {
+            expect(buildCheckoutCacheHash()).toBe(buildCheckoutCacheHash());
+            expect(typeof buildCheckoutCacheHash()).toBe('string');
         });
     });
 });

@@ -9,6 +9,7 @@ if (!defined('ABSPATH')) {
 
 use Conekta\Model\OrderRequest;
 use Conekta\Model\OrderUpdate;
+use Conekta\Model\OrderUpdateCustomerInfo;
 use Conekta\Model\OrderCheckoutRequest;
 use Conekta\Model\CustomerShippingContactsRequest;
 
@@ -119,6 +120,17 @@ class WC_Conekta_REST_API {
                 }
             }
 
+            // Blocks: WC Blocks debounces its `wc/store/v1/cart/update-customer`
+            // call separately from our useEffect, so when our POST hits the
+            // server WC()->customer may still hold a stale shipping address.
+            // The client now sends the live billing+shipping snapshot — apply
+            // it directly so build_snapshot reads what the customer actually
+            // typed, not what Blocks happened to sync last.
+            $billing_body  = $request ? $request->get_param('billing')  : null;
+            $shipping_body = $request ? $request->get_param('shipping') : null;
+            self::apply_address_from_body(WC()->customer, 'billing',  $billing_body);
+            self::apply_address_from_body(WC()->customer, 'shipping', $shipping_body);
+
             $snapshot = self::build_snapshot();
 
             if (empty($snapshot['line_items'])) {
@@ -175,6 +187,17 @@ class WC_Conekta_REST_API {
                     // and breaks antifraud rules that key on the address.
                     if (!empty($snapshot['shipping_contact'])) {
                         $update->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
+                    }
+
+                    // Customer info (name + phone) can also drift after the
+                    // initial create — e.g. the customer typed their phone in
+                    // the shipping block (so build_snapshot resolves it via
+                    // resolve_phone()) but the Conekta order was created
+                    // earlier with billing_phone or the 0000000000 fallback.
+                    // OrderUpdate accepts customer_info as of conekta-php
+                    // 7.1.0, so push the latest values through.
+                    if (!empty($snapshot['customer_info']['email'])) {
+                        $update->setCustomerInfo(new OrderUpdateCustomerInfo($snapshot['customer_info']));
                     }
 
                     $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
@@ -388,12 +411,31 @@ class WC_Conekta_REST_API {
         if (WC()->customer) {
             $email = sanitize_email(WC()->customer->get_billing_email());
             if (!empty($email)) {
-                $name  = trim(WC()->customer->get_billing_first_name() . ' ' . WC()->customer->get_billing_last_name());
-                $phone = sanitize_text_field(WC()->customer->get_billing_phone());
+                $name = trim(WC()->customer->get_billing_first_name() . ' ' . WC()->customer->get_billing_last_name());
+                // Both phone slots prefer the shipping_phone with billing as
+                // fallback. Why shipping first for BOTH:
+                //   - When "use same address for billing" is on, WC Blocks
+                //     copies the shipping address to billing but does NOT
+                //     sync the phone field — billing_phone keeps its previous
+                //     (often stale) value. Preferring shipping_phone makes
+                //     customer_info reflect what the customer just typed.
+                //   - When the customer enters distinct addresses with
+                //     distinct phones, shipping_phone is the freshly-entered
+                //     one in the visible Dirección de envío block; that is a
+                //     reasonable default contact for the order.
+                //   - Falling back to billing_phone covers the legacy classic
+                //     checkout flow that only has a single phone field.
+                $billing_phone  = sanitize_text_field(WC()->customer->get_billing_phone());
+                $shipping_phone = method_exists(WC()->customer, 'get_shipping_phone')
+                    ? sanitize_text_field(WC()->customer->get_shipping_phone())
+                    : '';
+                $customer_phone = self::resolve_phone($billing_phone, $shipping_phone);
+                $contact_phone  = self::resolve_phone($billing_phone, $shipping_phone);
+
                 $customer_info = [
                     'email' => $email,
                     'name'  => $name ?: 'Cliente',
-                    'phone' => $phone ?: '0000000000',
+                    'phone' => $customer_phone ?: '0000000000',
                 ];
 
                 // Conekta requires shipping_contact to charge an order. Fall back
@@ -409,7 +451,7 @@ class WC_Conekta_REST_API {
 
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
-                        'phone'    => $phone ?: '0000000000',
+                        'phone'    => $contact_phone ?: '0000000000',
                         'receiver' => trim("$first $last") ?: ($name ?: 'Cliente'),
                         'address'  => [
                             'street1'     => $address1,
@@ -462,6 +504,48 @@ class WC_Conekta_REST_API {
      */
     public static function shipping_contact_hash(array $contact): string {
         return !empty($contact) ? md5(json_encode($contact)) : '';
+    }
+
+    /**
+     * Pick the phone that should be sent to Conekta when we have two
+     * candidates from WC()->customer. The shipping phone wins because
+     * WC Blocks does NOT sync the phone field on the "use same address for
+     * billing" toggle (only addresses), so billing_phone is frequently
+     * stale relative to what the customer just typed. Billing is the
+     * fallback for the classic flow that only has one phone field.
+     */
+    public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
+        return $shipping_phone ?: $billing_phone;
+    }
+
+    /**
+     * Hydrate WC()->customer with a billing/shipping address sent in the
+     * /checkout-request body. Each field is only applied when non-empty —
+     * we want to fill stale slots, not blank out fields the customer
+     * already set elsewhere. Returns the list of field keys that were
+     * actually written, so callers (and tests) can verify the effect.
+     *
+     * Why we bypass WC()->customer: WC Blocks debounces its own server
+     * sync via `wc/store/v1/cart/update-customer`. Our debounced POST can
+     * win that race and observe a stale shipping address, which produces
+     * a cache-hit ("mode=unchanged") and leaves the Conekta order with
+     * the old shipping_contact.
+     */
+    public static function apply_address_from_body($customer, string $type, $address): array {
+        if (!$customer || !in_array($type, ['billing', 'shipping'], true) || !is_array($address)) {
+            return [];
+        }
+        $fields = ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'];
+        $written = [];
+        foreach ($fields as $field) {
+            if (empty($address[$field])) continue;
+            $setter = "set_{$type}_{$field}";
+            if (method_exists($customer, $setter)) {
+                $customer->{$setter}(sanitize_text_field((string) $address[$field]));
+                $written[] = $field;
+            }
+        }
+        return $written;
     }
 
     public static function clear_session(): void {

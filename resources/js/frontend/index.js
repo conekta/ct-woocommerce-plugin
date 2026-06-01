@@ -2,6 +2,7 @@ import { registerPaymentMethod } from '@woocommerce/blocks-registry';
 import { decodeEntities } from '@wordpress/html-entities';
 import { getSetting } from '@woocommerce/settings';
 import { useEffect, useRef, useState } from '@wordpress/element';
+import { useSelect } from '@wordpress/data';
 import { OrderEmitter } from './OrderEmitter';
 import { loadConektaScript } from './loadConektaScript';
 import { useWalletAutoSubmit } from './useWalletAutoSubmit';
@@ -11,6 +12,53 @@ const labelConekta = decodeEntities(settings.title);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEBOUNCE_MS = 500;
+
+/**
+ * Project an address object into a stable, pipe-joined string of the fields
+ * we care about for change detection. Missing fields become empty strings so
+ * a partial address still produces a stable hash with the right shape.
+ */
+export const addrFields = (a = {}) => [
+    a.first_name || '',
+    a.last_name  || '',
+    a.address_1  || '',
+    a.city       || '',
+    a.state      || '',
+    a.postcode   || '',
+    a.country    || '',
+    a.phone      || '',
+].join('|');
+
+/**
+ * Build the cache-key used by the /checkout-request useEffect. Both billing
+ * AND shipping addresses are folded in so a "different shipping address"
+ * edit always invalidates the cache — without it, a shipping-only change
+ * with unchanged totals leaves the Conekta order with stale shipping_contact
+ * (critical for wallet flows where Apple/Google Pay charges immediately
+ * against the order at click time).
+ */
+export const buildCheckoutCacheHash = ({
+    cartTotal,
+    currencyCode,
+    cartItems = [],
+    shippingRateId = '',
+    billingEmail = '',
+    billingAddress = {},
+    shippingAddress = {},
+} = {}) => {
+    const itemsHashSource = cartItems
+        .map((i) => `${i.id}:${i.quantity}:${i.variation?.id ?? ''}`)
+        .join('|');
+    return [
+        cartTotal,
+        currencyCode,
+        itemsHashSource,
+        shippingRateId,
+        billingEmail,
+        addrFields(billingAddress),
+        addrFields(shippingAddress),
+    ].join('|');
+};
 
 export const pickSelectedShipping = (props) => {
     let shippingRates = props?.shippingData?.shippingRates || [];
@@ -74,30 +122,38 @@ const ContentConekta = (props) => {
         checkoutRequestId
     );
 
-    const billingAddress = props.billing?.billingAddress || {};
+    // Read both addresses from the wc/store/cart store via getCustomerData()
+    // — WC Blocks does NOT expose getBillingAddress / getShippingAddress as
+    // top-level selectors; the addresses live inside the customerData blob
+    // and that selector IS subscribed, so useSelect re-renders this
+    // component every time blocks commits an address change (on blur, save,
+    // or the "use same as billing" toggle). That re-render is what bumps
+    // the hash below and re-fires the /checkout-request POST, which is the
+    // only path that pushes the new shipping_contact to Conekta before a
+    // wallet button (Apple/Google Pay) charges against the order.
+    const customerData = useSelect((select) => {
+        const store = select?.('wc/store/cart');
+        return store?.getCustomerData?.() || null;
+    }, []);
+    const billingAddress  = customerData?.billingAddress  || props.billing?.billingAddress || {};
+    const shippingAddress = customerData?.shippingAddress || {};
     const cartItems = props.cartData?.cartItems || [];
     const cartTotal = props.billing?.cartTotal?.value || 0;
     const currencyCode = props.billing?.currency?.code || 'MXN';
 
     const selectedShipping = pickSelectedShipping(props);
     const shippingRateId = selectedShipping?.id ?? '';
-    const itemsHashSource = cartItems
-        .map((i) => `${i.id}:${i.quantity}:${i.variation?.id ?? ''}`)
-        .join('|');
     const billingEmail = billingAddress.email || '';
-    // Address fields go in the hash so the checkout-request POST re-fires
-    // when the address completes — the create call requires shipping_contact
-    // and Conekta's update path can't backfill it.
-    const addrHashSource = [
-        billingAddress.first_name || '',
-        billingAddress.last_name || '',
-        billingAddress.address_1 || '',
-        billingAddress.city || '',
-        billingAddress.state || '',
-        billingAddress.postcode || '',
-        billingAddress.country || '',
-    ].join('|');
-    const hash = `${cartTotal}|${currencyCode}|${itemsHashSource}|${shippingRateId}|${billingEmail}|${addrHashSource}`;
+
+    const hash = buildCheckoutCacheHash({
+        cartTotal,
+        currencyCode,
+        cartItems,
+        shippingRateId,
+        billingEmail,
+        billingAddress,
+        shippingAddress,
+    });
 
     useEffect(() => {
         if (!billingEmail || !EMAIL_REGEX.test(billingEmail)) {
@@ -110,6 +166,14 @@ const ContentConekta = (props) => {
         const timer = setTimeout(async () => {
             setRefreshing(true);
             try {
+                // Send billing + shipping in the body so the server doesn't
+                // have to rely on WC()->customer being already-synced. WC
+                // Blocks debounces its own `wc/store/v1/cart/update-customer`
+                // sync, so our POST can hit the server BEFORE Blocks has
+                // pushed the latest address — and build_snapshot would then
+                // read the stale address, produce the same shipping_hash as
+                // before, and return mode=unchanged (silently leaving the
+                // old address on the Conekta order).
                 const response = await fetch(settings.checkout_request_url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -117,6 +181,8 @@ const ContentConekta = (props) => {
                     body: JSON.stringify({
                         nonce: settings.nonce,
                         email: billingEmail,
+                        billing:  billingAddress,
+                        shipping: shippingAddress,
                     }),
                 });
 
