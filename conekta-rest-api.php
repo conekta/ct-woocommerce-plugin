@@ -150,6 +150,20 @@ class WC_Conekta_REST_API {
 
             $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
+            // Force WC to commit the session cookie so our writes below
+            // persist. For a brand-new guest with no wp_woocommerce_session
+            // cookie yet, WC_Session_Handler::has_session() returns false,
+            // and save_data() is a no-op even after we ->set() keys. The
+            // upshot is silent: the response succeeds, the keys appear set
+            // in memory, but the next request loads an empty session and
+            // our existing_order_id lookup returns null — falling back
+            // into a create with a brand-new Conekta order on every POST.
+            // set_customer_session_cookie(true) flips _has_cookie and
+            // sends Set-Cookie in the response so the shutdown save runs.
+            if (WC()->session && method_exists(WC()->session, 'set_customer_session_cookie')) {
+                WC()->session->set_customer_session_cookie(true);
+            }
+
             // Captures any updateOrder exception so it can be surfaced on
             // the fallback create response — silent catches used to mask
             // the root cause of "update failed, recreating" loops in CI.
