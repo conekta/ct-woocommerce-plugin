@@ -322,6 +322,21 @@ class WC_Conekta_REST_API {
                 // (and DevTools) can see why update lost the race.
                 $create_response['update_error'] = $update_error;
             }
+            // Diagnostic: when the second POST in a session falls into the
+            // create branch instead of update, expose WHY. The two common
+            // failure modes are (1) session keys missing — cookie not
+            // propagated, session cleared between requests — and (2) the
+            // update threw and the catch cleared the session (signalled by
+            // update_error above). This block answers (1).
+            $create_response['debug_session'] = [
+                'had_existing_order_id'   => !empty($existing_order_id),
+                'had_existing_request_id' => !empty($existing_request_id),
+                'last_amount'             => $last_amount,
+                'current_amount'          => (int) $current_amount,
+                'last_shipping_hash8'     => is_string($last_shipping_hash) ? substr($last_shipping_hash, 0, 8) : null,
+                'current_shipping_hash8'  => substr($current_shipping_hash, 0, 8),
+                'session_available'       => (bool) WC()->session,
+            ];
             return new WP_REST_Response($create_response, 200);
 
         } catch (\Exception $e) {
