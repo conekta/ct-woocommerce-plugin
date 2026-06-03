@@ -1,542 +1,712 @@
 <?php
 /**
- * Conekta REST API endpoints for 3DS integration
+ * Conekta REST API endpoints for the Integration component checkout request.
  */
 
 if (!defined('ABSPATH')) {
-    exit; // Exit if accessed directly
+    exit;
 }
 
+use Conekta\Model\OrderRequest;
+use Conekta\Model\OrderUpdate;
+use Conekta\Model\OrderUpdateCustomerInfo;
+use Conekta\Model\OrderCheckoutRequest;
+use Conekta\Model\CustomerShippingContactsRequest;
+
 class WC_Conekta_REST_API {
-    
-    /**
-     * Initialize the REST API endpoints
-     */
+
+    // State for the in-flight Integration component checkout lives in a
+    // WP transient instead of WC()->session. The Store API endpoints that
+    // Blocks fires between our POSTs (e.g. wc/store/v1/cart/apply-coupon)
+    // load wp_woocommerce_session, write back only their known cart keys,
+    // and silently drop anything else — including the conekta_checkout_*
+    // keys we tried to keep there. The transient sidesteps that race
+    // entirely. TTL matches WC's 48h session expiry.
+    const STATE_TRANSIENT_PREFIX = 'conekta_checkout_state_';
+    const STATE_TRANSIENT_TTL    = 48 * HOUR_IN_SECONDS;
+    // Kept ONLY for backwards compatibility with read sites elsewhere
+    // (e.g. block_gateway) that still reference these constants; nothing
+    // is written under these keys anymore.
+    const SESSION_ORDER_ID            = 'conekta_checkout_order_id';
+    const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
+    const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
+    const SESSION_LAST_SHIPPING_HASH  = 'conekta_checkout_last_shipping_hash';
+
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
-
-        // WC AJAX endpoint — runs in the frontend session context,
-        // so WC()->cart (including applied coupons) is available.
-        add_action('wc_ajax_conekta_create_3ds_order', [self::class, 'wc_ajax_create_3ds_order']);
+        add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
+        add_action('template_redirect', [self::class, 'reset_session_on_checkout_entry']);
     }
-    
+
     /**
-     * Register the REST API routes
+     * Force a fresh Conekta order each time the user enters the checkout page.
+     *
+     * Why: the cached conekta_order_id lives in the WC session (~48h cookie),
+     * so leaving the checkout and coming back used to reuse the previous order
+     * and only mutate it via PUT. That meant the customer could pay an amount
+     * tied to a stale snapshot. By clearing the session keys on a fresh GET of
+     * /checkout/ we guarantee the next checkout-request POST creates a brand
+     * new order; updates within the same page load still reuse it normally.
+     *
+     * Skipped on order-received / order-pay endpoints, on form submissions,
+     * and on AJAX so we never wipe state mid-flow.
      */
+    public static function reset_session_on_checkout_entry(): void {
+        // Store API / WP REST calls (e.g. wc/store/v1/cart/apply-coupon from
+        // Blocks) don't fire template_redirect normally, but some setups still
+        // route through it. Skip explicitly — clearing our session mid-flow
+        // forces a CREATE on the next checkout-request POST and breaks the
+        // update-reuse invariant the e2e relies on.
+        if (defined('REST_REQUEST') && REST_REQUEST) return;
+        if (!function_exists('is_checkout') || !is_checkout()) return;
+        if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url()) return;
+        if (!empty($_POST)) return;
+        if (wp_doing_ajax()) return;
+        if (!WC()->session) return;
+        self::clear_session();
+    }
+
     public static function register_routes() {
-        register_rest_route('conekta/v1', '/create-3ds-order', [
-            'methods' => 'POST',
-            'callback' => [self::class, 'create_3ds_order'],
+        register_rest_route('conekta/v1', '/checkout-request', [
+            'methods'             => 'POST',
+            'callback'            => [self::class, 'handle_checkout_request'],
             'permission_callback' => '__return_true',
         ]);
     }
-    
+
     /**
-     * Create an order with 3DS in Conekta
-     * 
-     * @param WP_REST_Request $request Request object
-     * @return WP_REST_Response
+     * AJAX entry — runs in the WC frontend session so WC()->cart and WC()->customer are populated.
      */
-    public static function create_3ds_order($request) {
+    public static function wc_ajax_checkout_request() {
+        $json   = file_get_contents('php://input');
+        $params = json_decode($json, true) ?: [];
+
+        if (empty($params['nonce']) || !wp_verify_nonce(sanitize_text_field($params['nonce']), 'conekta-checkout-request')) {
+            wp_send_json(['success' => false, 'message' => 'Invalid nonce'], 403);
+            return;
+        }
+
+        $request = new WP_REST_Request('POST');
+        $request->set_body_params($params);
+        $response = self::handle_checkout_request($request);
+        wp_send_json($response->get_data(), $response->get_status());
+    }
+
+    /**
+     * Create-or-update the Conekta order that backs the Integration component.
+     *
+     *  - First call in a WC session  -> POST /orders (with checkout: Integration, card)
+     *  - Subsequent calls            -> PUT  /orders/{id} (line_items + discount_lines + shipping_lines only)
+     *
+     * Reads everything from WC()->cart + WC()->customer — no payload-shape data.
+     * customer_info and currency are NEVER sent on the update path: the Conekta
+     * order keeps the customer it was created with.
+     */
+    public static function handle_checkout_request($request) {
         try {
-            $params = $request->get_params();
+            $gateway = self::get_gateway();
+            if (!$gateway) {
+                return new WP_REST_Response(['success' => false, 'message' => 'Conekta gateway not found'], 404);
+            }
 
-            // Validate token is required
-            if (empty($params['token'])) {
-                return new WP_REST_Response([
-                    'success' => false,
-                    'message' => 'Token is required',
-                ], 400);
+            // Validate-only mode runs WC's full checkout validation chain
+            // (required fields, format, terms, plugin-added validators) and
+            // returns errors WITHOUT creating/updating the Conekta order or
+            // triggering the iframe charge. The classic JS calls this right
+            // before driving the SDK submit so we never charge a card while
+            // WC would have rejected the order on form errors.
+            if ($request && $request->get_param('validate')) {
+                return self::validate_only_response($request);
             }
-            
-            $token = sanitize_text_field($params['token']);
-            $msi_option = isset($params['msi_option']) ? intval($params['msi_option']) : 1;
-            
-            // Get Conekta gateway
-            $gateways = WC()->payment_gateways->get_available_payment_gateways();
-            if (!isset($gateways['conekta'])) {
-                return new WP_REST_Response([
-                    'success' => false,
-                    'message' => 'Conekta gateway not found',
-                ], 404);
+
+            // Classic checkout fires the email-change handler before WC's
+            // update_order_review syncs the form to WC()->customer. The client
+            // sends the typed email so we can backfill the customer object,
+            // keeping the snapshot read fully server-authoritative downstream.
+            $email_from_body = $request ? $request->get_param('email') : null;
+            if ($email_from_body && WC()->customer && !WC()->customer->get_billing_email()) {
+                $clean_email = sanitize_email($email_from_body);
+                if ($clean_email) {
+                    WC()->customer->set_billing_email($clean_email);
+                    WC()->customer->save();
+                }
             }
-            
-            $gateway = $gateways['conekta'];
-            
-            // Check if we have an order_id
-            if (!empty($params['order_id'])) {
-                // Use existing WooCommerce order
-                try {
-                    $order_id = intval($params['order_id']);
-                    $order = wc_get_order($order_id);
-                    
-                    if (!$order) {
-                        error_log('Order not found: ' . $order_id);
-                        return new WP_REST_Response([
-                            'success' => false,
-                            'message' => 'Order not found',
-                        ], 404);
-                    }
-                    info_log('Using existing order: ' . $order_id);
-                } catch (\Exception $e) {
-                    error_log('Error getting order: ' . $e->getMessage());
+
+            // Blocks: WC Blocks debounces its `wc/store/v1/cart/update-customer`
+            // call separately from our useEffect, so when our POST hits the
+            // server WC()->customer may still hold a stale shipping address.
+            // The client now sends the live billing+shipping snapshot — apply
+            // it directly so build_snapshot reads what the customer actually
+            // typed, not what Blocks happened to sync last.
+            $billing_body  = $request ? $request->get_param('billing')  : null;
+            $shipping_body = $request ? $request->get_param('shipping') : null;
+            self::apply_address_from_body(WC()->customer, 'billing',  $billing_body);
+            self::apply_address_from_body(WC()->customer, 'shipping', $shipping_body);
+
+            $snapshot = self::build_snapshot();
+
+            if (empty($snapshot['line_items'])) {
+                return new WP_REST_Response(['success' => false, 'message' => 'Cart is empty'], 400);
+            }
+
+            $state                = self::state_get();
+            $existing_order_id    = $state['order_id']           ?? null;
+            $existing_request_id  = $state['checkout_request_id'] ?? null;
+            $last_amount          = $state['last_amount']        ?? null;
+            $last_shipping_hash   = $state['last_shipping_hash'] ?? '';
+            $current_amount       = WC()->cart ? amount_validation((float) WC()->cart->get_total('edit')) : 0;
+            // Hash the real shipping_contact from build_snapshot (NOT the
+            // placeholder we may inject below on create). Lets the update
+            // path detect "amount unchanged but the customer just typed
+            // their address" and replace the 'Pendiente' fallback.
+            $current_shipping_hash = self::shipping_contact_hash($snapshot['shipping_contact'] ?? []);
+
+            $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
+
+            // Force WC to commit the session cookie so our writes below
+            // persist. For a brand-new guest with no wp_woocommerce_session
+            // cookie yet, WC_Session_Handler::has_session() returns false,
+            // and save_data() is a no-op even after we ->set() keys. The
+            // upshot is silent: the response succeeds, the keys appear set
+            // in memory, but the next request loads an empty session and
+            // our existing_order_id lookup returns null — falling back
+            // into a create with a brand-new Conekta order on every POST.
+            // set_customer_session_cookie(true) flips _has_cookie and
+            // sends Set-Cookie in the response so the shutdown save runs.
+            if (WC()->session && method_exists(WC()->session, 'set_customer_session_cookie')) {
+                WC()->session->set_customer_session_cookie(true);
+            }
+
+            if ($existing_order_id && $existing_request_id) {
+                if (
+                    $last_amount !== null
+                    && (int) $last_amount === (int) $current_amount
+                    && $current_shipping_hash === $last_shipping_hash
+                ) {
                     return new WP_REST_Response([
-                        'success' => false,
-                        'message' => 'Error getting order: ' . $e->getMessage(),
-                    ], 500);
+                        'success'             => true,
+                        'mode'                => 'unchanged',
+                        'conekta_order_id'    => $existing_order_id,
+                        'checkout_request_id' => $existing_request_id,
+                    ], 200);
                 }
-            } else {
-                // Check if we're in a WooCommerce Blocks context or Classic checkout context
-                $is_blocks_context = isset($params['is_blocks_context']) && $params['is_blocks_context'];
-                $is_classic_context = isset($params['is_classic_context']) && $params['is_classic_context'];
-                $cart_data = isset($params['cart_data']) ? $params['cart_data'] : null;
-                $billing_data = isset($params['billing_data']) ? $params['billing_data'] : null;
-                $shipping_data = isset($params['shipping_data']) ? $params['shipping_data'] : null;
-                $shipping_method = isset($params['shipping_method']) ? $params['shipping_method'] : null;
-                
-                if (($cart_data || $billing_data) && ($is_blocks_context || $is_classic_context)) {
-                    // Create an order from the cart and billing data provided by blocks or classic checkout
-                    try {
-                        $context = $is_blocks_context ? 'blocks' : 'classic checkout';
-                        info_log("Creating order from {$context} with provided data");
-                        
-                        // Create order
-                        $order = wc_create_order();
-                        
-                        // Set billing info from provided data
-                        if ($billing_data) {
-                            $order->set_billing_first_name($billing_data['first_name'] ?? 'Guest');
-                            $order->set_billing_last_name($billing_data['last_name'] ?? 'Customer');
-                            $order->set_billing_company($billing_data['company'] ?? '');
-                            $order->set_billing_address_1($billing_data['address_1'] ?? '');
-                            $order->set_billing_address_2($billing_data['address_2'] ?? '');
-                            $order->set_billing_city($billing_data['city'] ?? '');
-                            $order->set_billing_state($billing_data['state'] ?? '');
-                            $order->set_billing_postcode($billing_data['postcode'] ?? '');
-                            $order->set_billing_country($billing_data['country'] ?? 'MX');
-                            $order->set_billing_email($billing_data['email'] ?? 'guest@example.com');
-                            $order->set_billing_phone($billing_data['phone'] ?? '');
-                        }
-                        
-                        // Set shipping info from provided data
-                        if ($shipping_data) {
-                            $order->set_shipping_first_name($shipping_data['first_name'] ?? '');
-                            $order->set_shipping_last_name($shipping_data['last_name'] ?? '');
-                            $order->set_shipping_company($shipping_data['company'] ?? '');
-                            $order->set_shipping_address_1($shipping_data['address_1'] ?? '');
-                            $order->set_shipping_address_2($shipping_data['address_2'] ?? '');
-                            $order->set_shipping_city($shipping_data['city'] ?? '');
-                            $order->set_shipping_state($shipping_data['state'] ?? '');
-                            $order->set_shipping_postcode($shipping_data['postcode'] ?? '');
-                            $order->set_shipping_country($shipping_data['country'] ?? 'MX');
-                        }
-                        
-                        // Set shipping method from provided data
-                        if ($shipping_method) {
-                            $shipping_item = new WC_Order_Item_Shipping();
-                            $shipping_cost = isset($shipping_method['cost']) ? ($shipping_method['cost'] / 100) : 0;
-                            $shipping_item->set_props([
-                                'method_title' => $shipping_method['label'] ?? 'Shipping',
-                                'method_id' => $shipping_method['id'] ?? 'flat_rate',
-                                'total' => $shipping_cost
-                            ]);
-                            $order->add_item($shipping_item);
-                        }
-                        
-                        // Add items from cart — prefer WC()->cart when available
-                        // so that dynamic pricing / discount plugins are respected.
-                        $cart_used = false;
-                        if (WC()->cart && !WC()->cart->is_empty()) {
-                            // Recalculate so dynamic-pricing hooks fire
-                            WC()->cart->calculate_totals();
 
-                            foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
-                                $product = $cart_item['data'];
-                                if ($product) {
-                                    $order->add_product(
-                                        $product,
-                                        $cart_item['quantity'],
-                                        [
-                                            'subtotal' => $cart_item['line_subtotal'],
-                                            'total'    => $cart_item['line_total'],
-                                        ]
-                                    );
-                                    $cart_used = true;
-                                }
-                            }
-                        }
+                try {
+                    $balanced = ckpg_check_balance([
+                        'line_items'     => $snapshot['line_items'],
+                        'shipping_lines' => $snapshot['shipping_lines'],
+                        'discount_lines' => $snapshot['discount_lines'],
+                        'tax_lines'      => $snapshot['tax_lines'],
+                    ], $current_amount);
 
-                        // Fallback: use items sent from the JS payload
-                        if (!$cart_used) {
-                            if (isset($cart_data['items']) && is_array($cart_data['items']) && !empty($cart_data['items'])) {
-                                foreach ($cart_data['items'] as $item) {
-                                    if (isset($item['id'], $item['quantity'])) {
-                                        $product = wc_get_product($item['id']);
-                                        if ($product) {
-                                            $order->add_product(
-                                                $product,
-                                                $item['quantity'],
-                                                [
-                                                    'variation' => isset($item['variation_id']) ? wc_get_product($item['variation_id']) : null,
-                                                ]
-                                            );
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Last resort: placeholder item
-                                $item = new WC_Order_Item_Product();
-                                $total = isset($cart_data['total']) ? ($cart_data['total'] / 100) : 1.00;
-                                $item->set_props([
-                                    'name' => 'Temporary 3DS validation',
-                                    'quantity' => 1,
-                                    'total' => $total,
-                                ]);
-                                $order->add_item($item);
-                            }
-                        }
+                    $update = new OrderUpdate([
+                        'line_items'     => $snapshot['line_items'],
+                        'discount_lines' => $snapshot['discount_lines'],
+                        'shipping_lines' => $snapshot['shipping_lines'],
+                        'tax_lines'      => $balanced['tax_lines'],
+                    ]);
 
-                        // Set payment method
-                        $order->set_payment_method('conekta');
-
-                        // Apply coupons from the WooCommerce cart
-                        if (WC()->cart) {
-                            foreach (WC()->cart->get_applied_coupons() as $coupon_code) {
-                                $coupon = new \WC_Coupon($coupon_code);
-                                $discount_amount = WC()->cart->get_coupon_discount_amount($coupon_code, false);
-                                $discount_tax    = WC()->cart->get_coupon_discount_tax_amount($coupon_code);
-
-                                $coupon_item = new \WC_Order_Item_Coupon();
-                                $coupon_item->set_props([
-                                    'code'         => $coupon_code,
-                                    'discount'     => $discount_amount,
-                                    'discount_tax' => $discount_tax,
-                                ]);
-                                $coupon_item->add_meta_data('coupon_data', $coupon->get_data());
-                                $order->add_item($coupon_item);
-                            }
-
-                            // Copy cart fees (negative fees are discounts from dynamic pricing plugins)
-                            foreach (WC()->cart->get_fees() as $fee) {
-                                $item_fee = new \WC_Order_Item_Fee();
-                                $item_fee->set_props([
-                                    'name'      => $fee->name,
-                                    'tax_class' => $fee->taxable ? $fee->tax_class : '',
-                                    'amount'    => $fee->amount,
-                                    'total'     => $fee->total,
-                                    'total_tax' => $fee->tax,
-                                ]);
-                                $order->add_item($item_fee);
-                            }
-                        }
-
-                        // Calculate totals and save
-                        $order->calculate_totals();
-                        $status_note = $is_blocks_context ? 'Orden creada para verificación 3DS desde Blocks' : 'Orden creada para verificación 3DS desde Classic Checkout';
-                        $order->set_status('pending', $status_note);
-                        $order->save();
-                        
-                        info_log("{$context} order created: " . $order->get_id());
-                    } catch (\Exception $e) {
-                        error_log("Error creating order from {$context} data: " . $e->getMessage());
-                        return new WP_REST_Response([
-                            'success' => false,
-                            'message' => "Error creating order from {$context} data: " . $e->getMessage(),
-                        ], 500);
+                    // Backfill the real shipping_contact when it becomes
+                    // available. The order may have been created with the
+                    // 'Pendiente' placeholder (see below) before the customer
+                    // typed the address. Without this update Conekta keeps the
+                    // placeholder forever — visible on the merchant dashboard
+                    // and breaks antifraud rules that key on the address.
+                    if (!empty($snapshot['shipping_contact'])) {
+                        $update->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
                     }
-                } else {
-                    // Create a minimal order for 3DS verification
-                    try {
-                        info_log('Creating minimal order for 3DS verification');
-                        
-                        // Create simple order
-                        $order = wc_create_order();
-                        
-                        // Add basic product
-                        $item = new WC_Order_Item_Product();
-                        $item->set_props([
-                            'name' => 'Temporary 3DS validation',
-                            'quantity' => 1,
-                            'total' => 1.00,
-                        ]);
-                        $order->add_item($item);
-                        
-                        // Set basic billing info
-                        $order->set_billing_email('temp_' . uniqid() . '@example.com');
-                        $order->set_billing_first_name('Temporary');
-                        $order->set_billing_last_name('Customer');
-                        $order->set_billing_country('MX');
-                        $order->set_billing_address_1('Test Address');
-                        $order->set_billing_city('Ciudad de México');
-                        $order->set_billing_state('DF');
-                        $order->set_billing_postcode('11000');
-                        $order->set_billing_phone('5555555555');
-                        
-                        // Set payment method
-                        $order->set_payment_method('conekta');
-                        
-                        // Calculate totals and save
-                        $order->calculate_totals();
-                        $order->set_status('pending', 'Orden creada para verificación 3DS');
-                        $order->save();
-                        
-                        info_log('Minimal 3DS validation order created: ' . $order->get_id());
-                    } catch (\Exception $e) {
-                        error_log('Error creating minimal order: ' . $e->getMessage());
-                        return new WP_REST_Response([
-                            'success' => false,
-                            'message' => 'Error creating minimal order: ' . $e->getMessage(),
-                        ], 500);
+
+                    // Customer info (name + phone) can also drift after the
+                    // initial create — e.g. the customer typed their phone in
+                    // the shipping block (so build_snapshot resolves it via
+                    // resolve_phone()) but the Conekta order was created
+                    // earlier with billing_phone or the 0000000000 fallback.
+                    // OrderUpdate accepts customer_info as of conekta-php
+                    // 7.1.0, so push the latest values through.
+                    if (!empty($snapshot['customer_info']['email'])) {
+                        $update->setCustomerInfo(new OrderUpdateCustomerInfo($snapshot['customer_info']));
                     }
+
+                    $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
+
+                    self::state_set([
+                        'order_id'           => $existing_order_id,
+                        'checkout_request_id'=> $existing_request_id,
+                        'last_amount'        => (int) $current_amount,
+                        'last_shipping_hash' => $current_shipping_hash,
+                    ]);
+
+                    return new WP_REST_Response([
+                        'success'             => true,
+                        'mode'                => 'update',
+                        'conekta_order_id'    => $existing_order_id,
+                        'checkout_request_id' => $existing_request_id,
+                    ], 200);
+                } catch (\Exception $e) {
+                    error_log('Conekta - update order failed, recreating: ' . $e->getMessage());
+                    self::clear_session();
                 }
             }
-            
-            // Build request data
-            try {
-                info_log('Building request data for order: ' . $order->get_id());
-                
-                // Build request data from order
-                $data = ckpg_get_request_data($order);
-                
-                // Handle case where order might not have all required fields
-                if (empty($data) || !isset($data['customer_info']) || !isset($data['amount'])) {
-                    info_log('Order lacks required data, using minimal valid data');
-                    
-                    // Get minimal required customer info
-                    $email = $order->get_billing_email();
-                    if (empty($email)) $email = 'temp_' . $order->get_id() . '@example.com';
-                    
-                    $name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
-                    if (empty($name)) $name = 'Temporary Customer';
-                    
-                    $phone = $order->get_billing_phone();
-                    if (empty($phone)) $phone = '5555555555';
-                    
-                    // Create minimal valid data
-                    $data = [
-                        'order_id' => $order->get_id(),
-                        'amount' => $order->get_total() * 100 ?: 100, // Use order total or 1.00 if empty
-                        'currency' => $order->get_currency() ?: 'MXN',
-                        'description' => 'Order #' . $order->get_id(),
-                        'customer_info' => [
-                            'name' => $name,
-                            'phone' => $phone,
-                            'email' => $email
-                        ],
-                    ];
-                    
-                    // Add shipping lines even for minimal data
-                    $amountShipping = amount_validation($order->get_shipping_total());
-                    $shipping_method = $order->get_shipping_method();
-                    $carrier = !empty($shipping_method) ? $shipping_method : 'carrier';
-                    $method = !empty($shipping_method) ? $shipping_method : 'pickup';
 
-                    $data['shipping_lines'] = [
-                        [
-                            'amount'  => $amountShipping,
-                            'carrier' => $carrier,
-                            'method'  => $method
-                        ]
-                    ];
-                }
-                
-                $items = $order->get_items();
-                $taxes = $order->get_taxes();
-                $fees = $order->get_fees();
-                
-                // Use existing functions to build data
-                $fees_formatted = ckpg_build_get_fees($fees);
-                $discounts_data = $fees_formatted['discounts'];
-                $fees_data = $fees_formatted['fees'];
-                $tax_lines = ckpg_build_tax_lines($taxes);
-                $tax_lines = array_merge($tax_lines, $fees_data);
-                $discount_lines = ckpg_build_discount_lines($data);
-                $discount_lines = array_merge($discount_lines, $discounts_data);
-                $price_level_discount = 0;
-                $line_items = ckpg_build_line_items($items, $gateway->version, $price_level_discount);
-                ckpg_add_price_level_discount($discount_lines, $price_level_discount);
-                $shipping_lines = ckpg_build_shipping_lines($data);
-                $shipping_contact = ckpg_build_shipping_contact($data);
-                $customer_info = isset($data['customer_info']) ? $data['customer_info'] : [];
-                
-                // Make sure customer_info has required fields with metadata
-                if (!empty($customer_info)) {
-                    $customer_info = array_merge($customer_info, ['metadata' => ['soft_validations' => true]]);
-                }
-                
-                $order_metadata = ckpg_build_order_metadata($data + array(
-                    'plugin_conekta_version' => $gateway->version,
-                    'woocommerce_version' => WC()->version,
-                    'payment_method' => 'WC_Conekta_Gateway',
-                ));
-                
-                // Ensure line items exist
-                if (empty($line_items)) {
-                    $line_items = [
-                        [
-                            'name' => 'Order #' . $order->get_id(),
-                            'unit_price' => intval($order->get_total() * 100) ?: 100,
-                            'quantity' => 1
-                        ]
-                    ];
-                }
-                
-            } catch (\Exception $e) {
-                error_log('Error building request data: ' . $e->getMessage());
+            // Customer info is only needed on creation; reject early if missing.
+            if (empty($snapshot['customer_info']['email'])) {
                 return new WP_REST_Response([
                     'success' => false,
-                    'message' => 'Error building request data: ' . $e->getMessage()
-                ], 500);
+                    'message' => 'customer email required to create checkout',
+                    'code'    => 'missing_customer_email',
+                ], 422);
             }
-            
-            // Create OrderRequest
-            try {
-                info_log('Creating OrderRequest');
-                
-                // Base request with required fields
-                $request_data = [
-                    'currency' => isset($data['currency']) ? $data['currency'] : 'MXN',
-                    'line_items' => $line_items,
-                    'metadata' => $order_metadata,
-                    'three_ds_mode' => $gateway->three_ds_mode,
-                    'return_url' => get_site_url() . '/?wc-api=conekta_3ds_callback&woo_order_id=' . $order->get_id()
+
+            // shipping_contact must be set at creation time so the SDK can
+            // mount and render the payment form. If the customer hasn't typed
+            // the address yet, seed it with the 'Pendiente' placeholder — the
+            // update branch above will overwrite it with the real address
+            // once WC()->customer has it. The WC order itself captures the
+            // real address at process_payment time regardless.
+            if (empty($snapshot['shipping_contact'])) {
+                $snapshot['shipping_contact'] = [
+                    'phone'    => '0000000000',
+                    'receiver' => $snapshot['customer_info']['name'] ?: 'Cliente',
+                    'address'  => [
+                        'street1'     => 'Pendiente',
+                        'postal_code' => '00000',
+                        'city'        => 'Pendiente',
+                        'state'       => 'Pendiente',
+                        'country'     => 'MX',
+                    ],
                 ];
-                
-                // Add customer_info if available
-                if (!empty($customer_info)) {
-                    $request_data['customer_info'] = $customer_info;
-                }
-                
-                // Add shipping_lines if available
-                if (!empty($shipping_lines)) {
-                    $request_data['shipping_lines'] = $shipping_lines;
-                }
-                
-                // Add tax_lines if available
-                if (!empty($tax_lines)) {
-                    $request_data['tax_lines'] = $tax_lines;
-                }
-                
-                // Add discount_lines if available
-                if (!empty($discount_lines)) {
-                    $request_data['discount_lines'] = $discount_lines;
-                }
-                
-                // Create OrderRequest
-                $rq = new \Conekta\Model\OrderRequest($request_data);
-                
-                // Add shipping contact if available
-                if (!empty($shipping_contact)) {
-                    $rq->setShippingContact(new \Conekta\Model\CustomerShippingContacts($shipping_contact));
-                }
-            } catch (\Exception $e) {
-                error_log('Error creating OrderRequest: ' . $e->getMessage());
-                return new WP_REST_Response([
-                    'success' => false,
-                    'message' => 'Error creating OrderRequest: ' . $e->getMessage()
-                ], 500);
             }
-            
-            $payment_method = new \Conekta\Model\ChargeRequestPaymentMethod([
-                'type' => 'card',
-                'token_id' => $token,
-                'expires_at' => get_expired_at($gateway->settings['order_expiration']),
-                'customer_ip_address' => \WC_Geolocation::get_ip_address()
-            ]);
-            
-            if ($gateway->settings['is_msi_enabled'] == 'yes' && (int)$msi_option > 1) {
-                $payment_method->setMonthlyInstallments((int)$msi_option);
-            }
-            
-            $charge = new \Conekta\Model\ChargeRequest([
-                'payment_method' => $payment_method,
-                'reference_id' => strval($order->get_id()),
-            ]);
-            
-            $rq->setCharges([$charge]);
-            
-            // Create order in Conekta
-            $conekta_order = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version)
-                ->createOrder($rq, $gateway->get_user_locale());
-                
-            // Store Conekta order ID in WooCommerce order
-            self::update_conekta_order_meta($order, $conekta_order->getId(), 'conekta-order-id');
-            
-            // Return success response with next_action if present
-            $response_data = [
-                'success' => true,
-                'order_id' => $conekta_order->getId(),
-                'woo_order_id' => $order->get_id(),
-                'payment_status' => $conekta_order->getPaymentStatus()
+
+            $msi_options = array_values(array_filter(
+                array_map('intval', (array) ($gateway->settings['months'] ?? [])),
+                fn($v) => $v > 0
+            ));
+            $checkout_data = [
+                'type'                    => OrderCheckoutRequest::TYPE_INTEGRATION,
+                'allowed_payment_methods' => self::build_allowed_payment_methods($gateway),
+                'name'                    => 'WooCommerce checkout',
             ];
-            
-            // Check if order has next_action (3DS authentication required)
-            if (method_exists($conekta_order, 'getNextAction') && $conekta_order->getNextAction()) {
-                $next_action = $conekta_order->getNextAction();
-                $response_data['next_action'] = [
-                    'type' => $next_action->getType(),
-                    'redirect_url' => $next_action->getRedirectToUrl()->getUrl(),
-                    'return_url' => $next_action->getRedirectToUrl()->getReturnUrl()
-                ];
+
+            if (!empty($msi_options)) {
+                $checkout_data['monthly_installments_enabled'] = true;
+                $checkout_data['monthly_installments_options'] = $msi_options;
             }
-            
-            return new WP_REST_Response($response_data, 200);
-            
+
+            $checkout = new OrderCheckoutRequest($checkout_data);
+
+            $balanced = ckpg_check_balance([
+                'line_items'     => $snapshot['line_items'],
+                'shipping_lines' => $snapshot['shipping_lines'],
+                'discount_lines' => $snapshot['discount_lines'],
+                'tax_lines'      => $snapshot['tax_lines'],
+            ], $current_amount);
+
+            $order_request = new OrderRequest([
+                'currency'       => $snapshot['currency'],
+                'line_items'     => $snapshot['line_items'],
+                'discount_lines' => $snapshot['discount_lines'],
+                'shipping_lines' => $snapshot['shipping_lines'],
+                'tax_lines'      => $balanced['tax_lines'],
+                'customer_info'  => $snapshot['customer_info'],
+                'checkout'       => $checkout,
+                'metadata'       => [
+                    'plugin'                 => 'woocommerce',
+                    'plugin_conekta_version' => $gateway->version,
+                    'woocommerce_version'    => WC()->version,
+                    'payment_method'         => 'WC_Conekta_Gateway',
+                ],
+            ]);
+
+            if (!empty($snapshot['shipping_contact'])) {
+                $order_request->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
+            }
+
+            $conekta_order = $api->createOrder($order_request, $gateway->get_user_locale());
+
+            $conekta_order_id    = $conekta_order->getId();
+            $checkout_request_id = $conekta_order->getCheckout() ? $conekta_order->getCheckout()->getId() : null;
+
+            self::state_set([
+                'order_id'           => $conekta_order_id,
+                'checkout_request_id'=> $checkout_request_id,
+                'last_amount'        => (int) $current_amount,
+                'last_shipping_hash' => $current_shipping_hash,
+            ]);
+
+            return new WP_REST_Response([
+                'success'             => true,
+                'mode'                => 'create',
+                'conekta_order_id'    => $conekta_order_id,
+                'checkout_request_id' => $checkout_request_id,
+            ], 200);
+
         } catch (\Exception $e) {
+            error_log('Conekta - checkout-request failed: ' . $e->getMessage());
             return new WP_REST_Response([
                 'success' => false,
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
-    
+
     /**
-     * WC AJAX handler — wraps create_3ds_order so it runs inside the
-     * WooCommerce frontend session (cart + coupons available).
+     * Read everything Conekta needs from the live WC()->cart + WC()->customer.
+     * WooCommerce keeps both in sync via update_order_review (classic) and
+     * wc/store/v1/cart/update-customer (blocks) before our debounced POST fires.
      */
-    public static function wc_ajax_create_3ds_order() {
-        $json = file_get_contents('php://input');
-        $params = json_decode($json, true) ?: [];
+    private static function build_snapshot(): array {
+        $line_items     = [];
+        $discount_lines = [];
+        $shipping_lines = [];
+        $tax_lines      = [];
+        $currency       = get_woocommerce_currency() ?: 'MXN';
 
-        if (empty($params['nonce']) || !wp_verify_nonce(sanitize_text_field($params['nonce']), 'conekta-create-3ds-order')) {
-            wp_send_json([
-                'success' => false,
-                'message' => 'Invalid nonce',
-            ], 403);
-            return;
-        }
+        if (WC()->cart && !WC()->cart->is_empty()) {
+            WC()->cart->calculate_totals();
 
-        $request = new WP_REST_Request('POST');
-        foreach ($params as $key => $value) {
-            if ($key === 'nonce') {
-                continue;
+            $tax_lines = ckpg_build_tax_lines_from_cart(WC()->cart);
+
+            $price_level_discount = 0;
+            foreach (WC()->cart->get_cart() as $cart_item) {
+                $product = $cart_item['data'];
+                if (!$product) continue;
+
+                $unit_price_cents = amount_validation((float) $cart_item['line_subtotal'] / max(1, (int) $cart_item['quantity']));
+                $regular_price    = (float) $product->get_regular_price();
+                if ($regular_price > 0) {
+                    $regular_unit_cents = amount_validation($regular_price);
+                    if ($regular_unit_cents > $unit_price_cents) {
+                        $price_level_discount += ($regular_unit_cents - $unit_price_cents) * (int) $cart_item['quantity'];
+                        $unit_price_cents      = $regular_unit_cents;
+                    }
+                }
+
+                $line_items[] = [
+                    'name'       => item_name_validation($product->get_name()),
+                    'unit_price' => $unit_price_cents,
+                    'quantity'   => (int) $cart_item['quantity'],
+                ];
             }
-            $request->set_param($key, $value);
+
+            foreach (WC()->cart->get_applied_coupons() as $code) {
+                $amount = WC()->cart->get_coupon_discount_amount($code);
+                if ($amount > 0) {
+                    $discount_lines[] = [
+                        'code'   => $code,
+                        'amount' => amount_validation($amount),
+                        'type'   => 'coupon',
+                    ];
+                }
+            }
+
+            foreach (WC()->cart->get_fees() as $fee) {
+                if ($fee->total < 0) {
+                    $discount_lines[] = [
+                        'code'   => $fee->name ?: 'discount',
+                        'amount' => amount_validation(abs($fee->total)),
+                        'type'   => 'campaign',
+                    ];
+                }
+            }
+
+            if ($price_level_discount > 0) {
+                $discount_lines[] = [
+                    'code'   => 'dynamic_pricing',
+                    'amount' => $price_level_discount,
+                    'type'   => 'campaign',
+                ];
+            }
+
+            $chosen_methods = WC()->session ? (WC()->session->get('chosen_shipping_methods') ?: []) : [];
+            $shipping_total = amount_validation(WC()->cart->get_shipping_total());
+            if ($shipping_total > 0 && !empty($chosen_methods[0])) {
+                $method_label = $chosen_methods[0];
+                foreach (WC()->shipping()->get_packages() as $package) {
+                    if (isset($package['rates'][$chosen_methods[0]])) {
+                        $method_label = $package['rates'][$chosen_methods[0]]->get_label();
+                        break;
+                    }
+                }
+                $shipping_lines[] = [
+                    'amount'  => $shipping_total,
+                    'carrier' => $method_label,
+                    'method'  => $method_label,
+                ];
+            }
         }
 
-        $response = self::create_3ds_order($request);
-        $data = $response->get_data();
-        $status = $response->get_status();
+        $customer_info    = [];
+        $shipping_contact = [];
+        if (WC()->customer) {
+            $email = sanitize_email(WC()->customer->get_billing_email());
+            if (!empty($email)) {
+                $name = trim(WC()->customer->get_billing_first_name() . ' ' . WC()->customer->get_billing_last_name());
+                // Both phone slots prefer the shipping_phone with billing as
+                // fallback. Why shipping first for BOTH:
+                //   - When "use same address for billing" is on, WC Blocks
+                //     copies the shipping address to billing but does NOT
+                //     sync the phone field — billing_phone keeps its previous
+                //     (often stale) value. Preferring shipping_phone makes
+                //     customer_info reflect what the customer just typed.
+                //   - When the customer enters distinct addresses with
+                //     distinct phones, shipping_phone is the freshly-entered
+                //     one in the visible Dirección de envío block; that is a
+                //     reasonable default contact for the order.
+                //   - Falling back to billing_phone covers the legacy classic
+                //     checkout flow that only has a single phone field.
+                $billing_phone  = sanitize_text_field(WC()->customer->get_billing_phone());
+                $shipping_phone = method_exists(WC()->customer, 'get_shipping_phone')
+                    ? sanitize_text_field(WC()->customer->get_shipping_phone())
+                    : '';
+                $customer_phone = self::resolve_phone($billing_phone, $shipping_phone);
+                $contact_phone  = self::resolve_phone($billing_phone, $shipping_phone);
 
-        wp_send_json($data, $status);
+                $customer_info = [
+                    'email' => $email,
+                    'name'  => $name ?: 'Cliente',
+                    'phone' => $customer_phone ?: '0000000000',
+                ];
+
+                // Conekta requires shipping_contact to charge an order. Fall back
+                // to billing fields when shipping is unset (matches WC's "ship to
+                // same address" default).
+                $first    = WC()->customer->get_shipping_first_name() ?: WC()->customer->get_billing_first_name();
+                $last     = WC()->customer->get_shipping_last_name() ?: WC()->customer->get_billing_last_name();
+                $address1 = WC()->customer->get_shipping_address_1() ?: WC()->customer->get_billing_address_1();
+                $city     = WC()->customer->get_shipping_city() ?: WC()->customer->get_billing_city();
+                $state    = WC()->customer->get_shipping_state() ?: WC()->customer->get_billing_state();
+                $country  = WC()->customer->get_shipping_country() ?: WC()->customer->get_billing_country();
+                $postcode = WC()->customer->get_shipping_postcode() ?: WC()->customer->get_billing_postcode();
+
+                if (!empty($address1) && !empty($postcode)) {
+                    $shipping_contact = [
+                        'phone'    => $contact_phone ?: '0000000000',
+                        'receiver' => trim("$first $last") ?: ($name ?: 'Cliente'),
+                        'address'  => [
+                            'street1'     => $address1,
+                            'city'        => $city,
+                            'state'       => $state,
+                            'country'     => $country ?: 'MX',
+                            'postal_code' => $postcode,
+                        ],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'currency'         => $currency,
+            'line_items'       => $line_items,
+            'discount_lines'   => $discount_lines,
+            'shipping_lines'   => $shipping_lines,
+            'tax_lines'        => $tax_lines,
+            'customer_info'    => $customer_info,
+            'shipping_contact' => $shipping_contact,
+        ];
+    }
+
+    private static function get_gateway() {
+        $gateways = WC()->payment_gateways->payment_gateways();
+        return $gateways['conekta'] ?? null;
     }
 
     /**
-     * Update Conekta order meta in WooCommerce order
-     * 
-     * @param WC_Order $order WooCommerce order
-     * @param string $value Meta value
-     * @param string $key Meta key
+     * Translate the gateway's wallets_enabled setting into the
+     * allowed_payment_methods array sent to Conekta. Apple/Google are kept
+     * as raw strings because the SDK enum doesn't expose constants for them.
      */
-    private static function update_conekta_order_meta($order, $value, $key) {
-        if (is_callable(array($order, 'update_meta_data'))) {
-            $order->update_meta_data($key, $value);
-            $order->save();
-        } else {
-            update_post_meta($order->get_id(), $key, $value);
+    public static function build_allowed_payment_methods($gateway): array {
+        $wallets_enabled = isset($gateway->settings['wallets_enabled'])
+            ? $gateway->settings['wallets_enabled'] === 'yes'
+            : true;
+
+        return $wallets_enabled
+            ? [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
+            : [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
+    }
+
+    /**
+     * Stable hash of the shipping_contact array — used to detect address
+     * changes between checkout-request POSTs. Empty/missing contact returns
+     * an empty string so the "first POST with placeholder" path keeps the
+     * stored hash empty until a real address arrives.
+     */
+    public static function shipping_contact_hash(array $contact): string {
+        return !empty($contact) ? md5(json_encode($contact)) : '';
+    }
+
+    /**
+     * Pick the phone that should be sent to Conekta when we have two
+     * candidates from WC()->customer. The shipping phone wins because
+     * WC Blocks does NOT sync the phone field on the "use same address for
+     * billing" toggle (only addresses), so billing_phone is frequently
+     * stale relative to what the customer just typed. Billing is the
+     * fallback for the classic flow that only has one phone field.
+     */
+    public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
+        return $shipping_phone ?: $billing_phone;
+    }
+
+    /**
+     * Hydrate WC()->customer with a billing/shipping address sent in the
+     * /checkout-request body. Each field is only applied when non-empty —
+     * we want to fill stale slots, not blank out fields the customer
+     * already set elsewhere. Returns the list of field keys that were
+     * actually written, so callers (and tests) can verify the effect.
+     *
+     * Why we bypass WC()->customer: WC Blocks debounces its own server
+     * sync via `wc/store/v1/cart/update-customer`. Our debounced POST can
+     * win that race and observe a stale shipping address, which produces
+     * a cache-hit ("mode=unchanged") and leaves the Conekta order with
+     * the old shipping_contact.
+     */
+    public static function apply_address_from_body($customer, string $type, $address): array {
+        if (!$customer || !in_array($type, ['billing', 'shipping'], true) || !is_array($address)) {
+            return [];
         }
+        $fields = ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'];
+        $written = [];
+        foreach ($fields as $field) {
+            if (empty($address[$field])) continue;
+            $setter = "set_{$type}_{$field}";
+            if (method_exists($customer, $setter)) {
+                $customer->{$setter}(sanitize_text_field((string) $address[$field]));
+                $written[] = $field;
+            }
+        }
+        return $written;
+    }
+
+    /**
+     * Stable bucket key for the checkout-state transient. Uses WC's
+     * customer_id which is cookie-derived for guests and user_id for
+     * logged-in users — survives across our POSTs in the same browser
+     * session, independent of WC Blocks' wp_woocommerce_session writes.
+     */
+    private static function state_transient_key(): ?string {
+        if (!WC()->session || !method_exists(WC()->session, 'get_customer_id')) return null;
+        $customer_id = WC()->session->get_customer_id();
+        if (empty($customer_id)) return null;
+        return self::STATE_TRANSIENT_PREFIX . $customer_id;
+    }
+
+    /**
+     * Read the full checkout state blob. Returns an array (possibly empty)
+     * to keep call sites uniform.
+     */
+    public static function state_get(): array {
+        $key = self::state_transient_key();
+        if (!$key) return [];
+        $value = get_transient($key);
+        return is_array($value) ? $value : [];
+    }
+
+    /**
+     * Write the full state blob. We persist on every successful create or
+     * update — set_transient itself goes straight to wp_options /
+     * external object cache, no race with the Store API session writes.
+     */
+    public static function state_set(array $data): void {
+        $key = self::state_transient_key();
+        if (!$key) return;
+        set_transient($key, $data, self::STATE_TRANSIENT_TTL);
+    }
+
+    public static function state_delete(): void {
+        $key = self::state_transient_key();
+        if (!$key) return;
+        delete_transient($key);
+    }
+
+    public static function clear_session(): void {
+        // Primary path: drop the transient.
+        self::state_delete();
+        // Backward-compat: also clear any keys an older plugin version may
+        // still have in wp_woocommerce_session. Cheap and safe.
+        if (!WC()->session) return;
+        WC()->session->__unset(self::SESSION_ORDER_ID);
+        WC()->session->__unset(self::SESSION_CHECKOUT_REQUEST_ID);
+        WC()->session->__unset(self::SESSION_LAST_AMOUNT);
+        WC()->session->__unset(self::SESSION_LAST_SHIPPING_HASH);
+    }
+
+    /**
+     * Run WC's checkout validation against the submitted form data and return
+     * any errors that would otherwise block process_checkout. We hook into
+     * woocommerce_after_checkout_validation at PHP_INT_MAX (so we observe
+     * errors collected by every other listener) and throw a sentinel exception
+     * to abort process_checkout before order creation / payment.
+     */
+    private static function validate_only_response($request): WP_REST_Response {
+        if (!class_exists('WC_Checkout')) {
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'WC checkout unavailable',
+            ], 500);
+        }
+
+        $form_data = $request->get_param('form_data');
+        if (!is_array($form_data) || empty($form_data)) {
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'form_data required',
+            ], 400);
+        }
+
+        $original_post = $_POST;
+        // process_checkout reads $_POST exclusively, so feed it the form
+        // values verbatim — including the customer's _wpnonce so WC's own
+        // checkout-process nonce check passes.
+        $_POST = $form_data;
+
+        $captured = new WP_Error();
+        $sentinel = 'CONEKTA_VALIDATE_ONLY';
+        $listener = function ($data, $errors) use ($captured, $sentinel) {
+            foreach ($errors->get_error_codes() as $code) {
+                foreach ($errors->get_error_messages($code) as $msg) {
+                    $captured->add($code, $msg);
+                }
+            }
+            throw new \Exception($sentinel);
+        };
+        add_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX, 2);
+
+        try {
+            WC()->checkout()->process_checkout();
+        } catch (\Exception $e) {
+            if ($e->getMessage() !== $sentinel) {
+                $captured->add('checkout_exception', wp_strip_all_tags($e->getMessage()));
+            }
+        } finally {
+            remove_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX);
+            $_POST = $original_post;
+            if (function_exists('wc_clear_notices')) {
+                wc_clear_notices();
+            }
+        }
+
+        if ($captured->has_errors()) {
+            $messages = [];
+            foreach ($captured->get_error_codes() as $code) {
+                foreach ($captured->get_error_messages($code) as $msg) {
+                    $messages[] = [
+                        'code'    => $code,
+                        'message' => wp_strip_all_tags($msg),
+                    ];
+                }
+            }
+            return new WP_REST_Response([
+                'success' => false,
+                'mode'    => 'validate',
+                'errors'  => $messages,
+            ], 422);
+        }
+
+        return new WP_REST_Response([
+            'success' => true,
+            'mode'    => 'validate',
+        ], 200);
     }
 }
 
-// Initialize REST API endpoints
-add_action('init', ['WC_Conekta_REST_API', 'init']); 
+add_action('init', ['WC_Conekta_REST_API', 'init']);

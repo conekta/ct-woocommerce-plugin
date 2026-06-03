@@ -22,6 +22,8 @@ const LabelConekta = ( props ) => {
 			<>
 				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-creditea.svg`} alt="creditea" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-aplazo.svg`} alt="aplazo" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-coppel.svg`} alt="coppel" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
+				<img src={`https://assets.conekta.com/cpanel/statics/assets/brands/logos/logo-azteca.svg`} alt="azteca" style={{ marginLeft: '8px', width: '32px', height: 'auto' }} />
 			</>
 		</div>
 	);

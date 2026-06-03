@@ -1,3 +1,18 @@
+## [6.0.0]() - 2026-04-27
+- BREAKING: Card payments migrated from the `Card` tokenizer SDK component to the `Integration` SDK component (`ConektaCheckoutComponents.Integration`). The Conekta order is now pre-created at iframe-mount time via a new server endpoint and updated on every cart change; `process_payment` no longer creates the order, it only validates the already-paid Conekta order against the WooCommerce total.
+- Feature: New endpoint `POST /conekta/v1/checkout-request` (also exposed via WC AJAX action `conekta_checkout_request`) that creates the Conekta Integration order on first call in a WC session and PUTs `line_items`/`discount_lines`/`shipping_lines` on every subsequent call. `customer_info` and `currency` are set once at creation and never updated.
+- Feature: Amount-mismatch guard in `process_payment` — fetches the Conekta order, requires `payment_status === 'paid'` AND `conekta_order.amount === wc_total*100` before completing the WC order.
+- Feature: MSI passed to Conekta via the Integration checkout config (`monthly_installments_enabled` defaults to `false`; when the merchant enables it, `monthly_installments_options` is sent with the configured plazos).
+- Removal: All custom 3DS handling is gone — the Integration SDK runs 3DS internally. Removed the `threeDsHandler`, the custom 3DS iframe, the `create_3ds_order` REST endpoint, the `three_ds_enabled`/`three_ds_mode` gateway properties, and the company API helper used to fetch them.
+- Removal: JS no longer scrapes the DOM or ships cart/billing/shipping data. The request body to `/checkout-request` is `{ nonce }`; the server reads `WC()->cart` + `WC()->customer` directly (kept in sync by WooCommerce via `update_order_review` in classic and `wc/store/v1/cart/update-customer` in blocks).
+- Removal: Fragment system (`#conekta-cart-data`, `ckpg_build_conekta_cart_snapshot`, `woocommerce_update_order_review_fragments` filter) — no longer needed once the server is the source of truth.
+- Removal: `assets/styles.css` (only contained 3DS slide-in/out animations) and the dequeue from `conekta_cash_block_gateway.php`.
+- Cleanup: `conekta_settings` localized to classic JS reduced from 11 keys to 5 (`public_key`, `locale`, `checkout_url`, `checkout_request_url`, `nonce`). Blocks `conekta_data` similarly trimmed.
+- Cleanup: Token + MSI hidden fields in `payment_fields()` replaced by a single `conekta_order_id` hidden field.
+- Compat: WooCommerce Blocks checkout migrated to the same flow — `paymentMethodData` is now `{ conekta_order_id }`.
+- Tests: PHPUnit suite trimmed of legacy 3DS/MSI/token tests; 105 tests / 226 assertions pass against the Mockoon sandbox. E2E specs reshaped around the Integration flow (cart-change triggers PUT, paid order completes WC order, amount mismatch rejected).
+- Net diff vs 5.4.14: ~ -1000 lines.
+
 ## [5.4.15]() - 2026-05-25
 - Fix: `ckpg_build_tax_lines` now reads `tax_total`/`shipping_tax_total` from `WC_Order_Item_Tax` objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
 

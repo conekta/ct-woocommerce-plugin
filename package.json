@@ -1,21 +1,24 @@
 {
   "name": "conekta-payment-gateway",
-  "version": "5.4.15",
+  "version": "6.0.0",
   "description": "<div align=\"center\">",
   "main": "index.js",
   "directories": {
     "lib": "lib"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@woocommerce/dependency-extraction-webpack-plugin": "^3.1.0",
     "@wordpress/scripts": "^30.13.0",
     "cross-env": "7.0.3",
-    "playwright": "^1.59.1"
+    "playwright": "^1.60.0",
+    "react-dom": "^18.3.1"
   },
   "scripts": {
     "start": "wp-scripts start",
@@ -28,7 +31,7 @@
     "test": "wp-scripts test-unit-js --testPathPattern=tests/js",
     "test:e2e": "node tests/e2e/run.js",
     "check-engines": "wp-scripts check-engines",
-    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*'  -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x '.claude*'"
+    "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*' -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x 'test-results*' -x '.claude*' -x 'deploy.zip' -x '*.bak' -x 'phpunit.xml' -x 'composer.lock' -x 'package-lock.json'"
   },
   "dependencies": {
     "@woocommerce/settings": "^1.0.0",

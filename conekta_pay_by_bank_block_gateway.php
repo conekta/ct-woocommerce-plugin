@@ -12,7 +12,6 @@ use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
 use Conekta\Configuration;
 use Conekta\Model\OrderRequest;
-use Conekta\Model\CustomerShippingContacts;
 use Conekta\Model\EventTypes;
 
 class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
@@ -343,6 +342,15 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
                 'payment_method' => $this->GATEWAY_NAME,
             )
         );
+
+        $balanced = ckpg_check_balance([
+            'line_items'     => $line_items,
+            'shipping_lines' => $shipping_lines,
+            'discount_lines' => $discount_lines,
+            'tax_lines'      => $tax_lines,
+        ], amount_validation((float) $order->get_total()));
+        $tax_lines = $balanced['tax_lines'];
+
         $orderData = [
             'line_items' => $line_items,
             'currency' => $data['currency'],
