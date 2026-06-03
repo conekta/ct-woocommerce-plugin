@@ -1,6 +1,22 @@
+6.0.0, 2026-04-27
+-------------------------------------
+- BREAKING: Card payments migrated from the Card tokenizer SDK component to the Integration SDK component. Conekta order is pre-created at iframe-mount time and updated on every cart change; process_payment only validates the already-paid order.
+- Feature: New endpoint POST /conekta/v1/checkout-request (also via WC AJAX conekta_checkout_request) that creates the Conekta Integration order on first call and PUTs line_items/discount_lines/shipping_lines on subsequent calls. customer_info and currency set once at creation.
+- Feature: Amount-mismatch guard in process_payment — requires payment_status='paid' AND conekta_order.amount === wc_total*100 before completing the WC order.
+- Feature: MSI passed via the Integration checkout config (monthly_installments_enabled defaults to false; when enabled, monthly_installments_options ships the configured plazos).
+- Removal: All custom 3DS handling — the Integration SDK runs 3DS internally. Dropped threeDsHandler, custom 3DS iframe, create_3ds_order REST endpoint, three_ds_enabled/three_ds_mode properties, get_companies_api_instance helper.
+- Removal: JS no longer scrapes the DOM or ships cart/billing/shipping data. Request body is { nonce }; server reads WC()->cart + WC()->customer (kept in sync by WC's update_order_review in classic and wc/store/v1/cart/update-customer in blocks).
+- Removal: Fragment system (#conekta-cart-data, ckpg_build_conekta_cart_snapshot, woocommerce_update_order_review_fragments filter).
+- Removal: assets/styles.css (only had 3DS slide-in/out animations) and its enqueue in conekta_cash_block_gateway.php.
+- Cleanup: conekta_settings localized to classic JS reduced from 11 keys to 5. Blocks conekta_data similarly trimmed.
+- Cleanup: Token + MSI hidden fields in payment_fields() replaced by a single conekta_order_id hidden field.
+- Compat: WooCommerce Blocks checkout migrated to the same flow — paymentMethodData is now { conekta_order_id }.
+- Tests: PHPUnit trimmed of legacy 3DS/MSI/token tests; 105 tests / 226 assertions pass against the Mockoon sandbox.
+- Net diff vs 5.4.14: ~ -1000 lines.
 5.4.15, 2026-05-25
 -------------------------------------
 - Fix: ckpg_build_tax_lines now reads tax_total/shipping_tax_total from WC_Order_Item_Tax objects (WooCommerce 3.0+), so IVA over items and shipping is reported correctly to Conekta instead of being collapsed into a "Round Adjustment" line
+
 
 5.4.14, 2026-04-10
 -------------------------------------

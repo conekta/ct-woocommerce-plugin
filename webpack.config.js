@@ -29,6 +29,7 @@ module.exports = {
 	...defaultConfig,
 	entry: {
 		'frontend/blocks': '/resources/js/frontend/index.js',
+		'frontend/classic-checkout': '/resources/js/frontend/classic-checkout.js',
 		'frontend/conekta_cash': '/resources/js/frontend/conekta_cash.js',
 		'frontend/conekta_bank_transfer': '/resources/js/frontend/conekta_bank_transfer.js',
 		'frontend/conekta_bnpl': '/resources/js/frontend/conekta_bnpl.js',

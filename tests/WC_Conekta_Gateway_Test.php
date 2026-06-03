@@ -81,8 +81,6 @@ class WC_Conekta_Gateway_Test extends TestCase
             'webhook_url'          => 'http://localhost/?wc-api=wc_conekta',
             'alternate_imageurl'   => '',
             'order_expiration'     => 1,
-            'is_msi_enabled'       => 'no',
-            'months'               => [],
         ];
 
         $settings = array_merge($defaults, $overrides);
@@ -93,8 +91,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway->api_key = $settings['cards_api_key'];
         $gateway->public_api_key = $settings['cards_public_api_key'];
         $gateway->webhook_url = $settings['webhook_url'];
-        $gateway->three_ds_enabled = false;
-        $gateway->three_ds_mode = '';
         $gateway->has_fields = true;
         $gateway->method_title = 'Conekta Tarjetas';
 
@@ -115,8 +111,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway = new WC_Conekta_Gateway();
 
         $this->assertEmpty($gateway->api_key);
-        $this->assertFalse($gateway->three_ds_enabled);
-        $this->assertSame('', $gateway->three_ds_mode);
     }
 
     // -------------------------------------------------------
@@ -183,6 +177,45 @@ class WC_Conekta_Gateway_Test extends TestCase
             'metadata' => ['reference_id' => null],
         ]);
         $this->assertFalse($result, 'Null reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_accepts_integration_payload_without_reference_id()
+    {
+        // Integration component creates the Conekta order before the WC
+        // order exists, so metadata.reference_id is absent. As long as the
+        // Conekta order id is present we can resolve via the
+        // `conekta-order-id` meta lookup downstream.
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => 'ord_2znsJ8YNbNoDDsN3p',
+            'metadata' => ['plugin' => 'woocommerce'],
+        ]);
+        $this->assertTrue($result, 'Payload with conekta id but no reference_id should be valid');
+    }
+
+    public function test_validate_reference_id_falls_back_to_conekta_id_when_reference_id_invalid()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => 'ord_xyz',
+            'metadata' => ['reference_id' => 'not-a-number'],
+        ]);
+        $this->assertTrue($result, 'Bogus reference_id with valid Conekta id should still validate');
+    }
+
+    public function test_validate_reference_id_rejects_payload_without_id_or_reference()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'metadata' => ['plugin' => 'woocommerce'],
+        ]);
+        $this->assertFalse($result, 'Payload with neither id nor reference_id should be invalid');
+    }
+
+    public function test_validate_reference_id_rejects_empty_id()
+    {
+        $result = WC_Conekta_Plugin::validate_reference_id([
+            'id'       => '',
+            'metadata' => [],
+        ]);
+        $this->assertFalse($result, 'Empty Conekta id with no reference_id should be invalid');
     }
 
     // -------------------------------------------------------
@@ -318,43 +351,6 @@ class WC_Conekta_Gateway_Test extends TestCase
     /**
      * @group mockoon
      */
-    public function test_create_order_success()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-        $order = new WC_Order(100);
-
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 1, &$error,
-        ]);
-
-        $this->assertTrue($result, 'Order creation should succeed. Error: ' . ($error ?? 'none'));
-        $this->assertNull($error);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_create_order_with_msi()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway(['is_msi_enabled' => 'yes']);
-        $order = new WC_Order(101);
-
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 6, &$error,
-        ]);
-
-        $this->assertTrue($result, 'MSI order creation should succeed. Error: ' . ($error ?? 'none'));
-    }
-
-    /**
-     * @group mockoon
-     */
     public function test_get_order_by_id()
     {
         $this->requireMockoon();
@@ -393,19 +389,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('paid', $captured->getPaymentStatus());
     }
 
-    /**
-     * @group mockoon
-     */
-    public function test_get_company_3ds_info()
-    {
-        $this->requireMockoon();
-
-        $companiesApi = WC_Conekta_Plugin::get_companies_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
-
-        $company = $companiesApi->getCurrentCompany('es');
-        $this->assertNotNull($company);
-    }
-
     public function test_gateway_disabled_without_api_key()
     {
         $gateway = new WC_Conekta_Gateway();
@@ -431,75 +414,6 @@ class WC_Conekta_Gateway_Test extends TestCase
     /**
      * @group mockoon
      */
-    public function test_process_payment_standard_card_flow()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_msi_option' => '1',
-        ];
-
-        $result = $gateway->process_payment(200);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_flow_with_paid_order()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // Mockoon GET /orders/:id returns pending_payment by default
-        // Simulate 3DS completed with capture flow
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_test_123',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(300);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_already_paid_skips_capture()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // ord_2znsJ8YNbNoDDsN3p returns paid — no capture needed
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_2znsJ8YNbNoDDsN3p',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(301);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
-    }
-
-    /**
-     * @group mockoon
-     */
     public function test_process_payment_3ds_failed_order_returns_failure()
     {
         $this->requireMockoon();
@@ -518,31 +432,6 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $this->assertEquals('failure', $result['result']);
         $this->assertArrayNotHasKey('redirect', $result);
-    }
-
-    /**
-     * @group mockoon
-     */
-    public function test_process_payment_3ds_with_temp_order_transfers_meta()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-
-        // Simulate 3DS with a temporary WooCommerce order
-        $_POST = [
-            'conekta_token' => 'tok_test_visa_4242',
-            'conekta_order_id' => 'ord_test_123',
-            'conekta_woo_order_id' => '999',
-            'conekta_3ds_completed' => 'true',
-            'conekta_payment_status' => 'paid',
-        ];
-
-        $result = $gateway->process_payment(303);
-
-        $this->assertEquals('success', $result['result']);
-        $this->assertArrayHasKey('redirect', $result);
-        $this->assertStringContainsString('order-received', $result['redirect']);
     }
 
     public function test_process_payment_returns_failure_on_empty_post()
@@ -716,285 +605,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('coupon', $requestBody['discount_lines'][1]['type']);
     }
 
-    /**
-     * @group mockoon
-     */
-    public function test_create_order_with_discount_and_verify_discount_lines()
-    {
-        $this->requireMockoon();
-
-        $gateway = $this->createConfiguredGateway();
-        $order = new WC_Order(503);
-        $order->set_coupons([
-            ['name' => 'DESC10', 'type' => 'percent', 'discount_amount' => 10.00],
-        ]);
-
-        // Create order via the plugin
-        $error = null;
-        $result = $this->invokeMethod($gateway, 'process_conekta_payment_for_order', [
-            $order, 'tok_test_visa_4242', 1, &$error,
-        ]);
-        $this->assertTrue($result, 'Order with discount should succeed. Error: ' . ($error ?? 'none'));
-
-        // Fetch the order and verify discount_lines exist
-        $api = WC_Conekta_Plugin::get_api_instance('key_test_123', (new WC_Conekta_Plugin())->version);
-        $conektaOrder = $api->getOrderById('ord_2znsF4cv7L8s3452');
-
-        $discountLines = $conektaOrder->getDiscountLines();
-        $this->assertNotNull($discountLines, 'Order should have discount_lines');
-        $this->assertNotEmpty($discountLines->getData(), 'discount_lines should not be empty');
-
-        $firstDiscount = $discountLines->getData()[0];
-        $this->assertEquals(1000, $firstDiscount->getAmount());
-    }
-
-    // -------------------------------------------------------
-    // 3DS Smart mode — next_action may not have redirect_to_url
-    // -------------------------------------------------------
-
-    /**
-     * @group mockoon
-     */
-    public function test_create_3ds_order_smart_mode_without_redirect()
-    {
-        $this->requireMockoon();
-
-        // Configure gateway with 3DS smart mode
-        $gateway = $this->createConfiguredGateway();
-        $gateway->three_ds_mode = 'smart';
-
-        // Register gateway in WC() so create_3ds_order can find it
-        global $test_conekta_gateway;
-        $test_conekta_gateway = $gateway;
-
-        // Simulate REST request to create-3ds-order
-        $request = new WP_REST_Request('POST');
-        $request->set_params([
-            'token' => 'tok_test_visa_4242',
-            'order_id' => '600',
-            'msi_option' => 1,
-        ]);
-
-        $response = WC_Conekta_REST_API::create_3ds_order($request);
-        $data = $response->get_data();
-
-        // In smart mode without 3DS, should succeed without next_action
-        $this->assertEquals(200, $response->get_status(), 'Response should be 200. Got: ' . json_encode($data));
-        $this->assertTrue($data['success']);
-        $this->assertNotEmpty($data['order_id']);
-        $this->assertEquals('paid', $data['payment_status']);
-        $this->assertArrayNotHasKey('next_action', $data, 'Smart mode should not require 3DS redirect');
-    }
-
-    // -------------------------------------------------------
-    // Dynamic pricing / discount integration (cart helpers)
-    // -------------------------------------------------------
-
-    public function test_build_discount_lines_captures_native_coupons()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 1000.00, 900.00)
-            ->withCoupon('VERANO20', 50.00)
-            ->withCoupon('ENVIO', 100.00)
-            ->withTotal(850.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-
-        $this->assertEquals('VERANO20', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        $this->assertEquals('coupon', $lines[0]['type']);
-
-        $this->assertEquals('ENVIO', $lines[1]['code']);
-        $this->assertEquals(10000, $lines[1]['amount']);
-        $this->assertEquals('coupon', $lines[1]['type']);
-    }
-
-    public function test_build_discount_lines_captures_negative_fee_discounts()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withFee('Advanced Pricing Discount', -150.00)
-            ->withTotal(350.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('Advanced Pricing Discount', $lines[0]['code']);
-        $this->assertEquals(15000, $lines[0]['amount']);
-        $this->assertEquals('campaign', $lines[0]['type']);
-    }
-
-    public function test_build_discount_lines_combines_coupons_and_fees()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 400.00)
-            ->withCoupon('DESC100', 100.00)
-            ->withFee('2x1 Promo', -200.00)
-            ->withTotal(200.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-        // Coupons come first, then fee-based discounts
-        $this->assertEquals('DESC100', $lines[0]['code']);
-        $this->assertEquals(10000, $lines[0]['amount']);
-        $this->assertEquals('2x1 Promo', $lines[1]['code']);
-        $this->assertEquals(20000, $lines[1]['amount']);
-    }
-
-    public function test_build_discount_lines_empty_without_discounts()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withTotal(500.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_ignores_positive_fees()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withFee('Service Fee', 50.00)         // positive — NOT a discount
-            ->withFee('Flash Sale', -100.00)         // negative — IS a discount
-            ->withTotal(450.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines, 'Only negative fees should appear as discount lines');
-        $this->assertEquals('Flash Sale', $lines[0]['code']);
-        $this->assertEquals(10000, $lines[0]['amount']);
-    }
-
-    public function test_build_discount_lines_returns_empty_when_cart_null()
-    {
-        WC()->cart = null;
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_zero_coupon_amount_excluded()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 500.00)
-            ->withCoupon('EXPIRED', 0.00)     // zero-amount coupon
-            ->withCoupon('VALID10', 10.00)
-            ->withTotal(490.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines, 'Zero-amount coupons should be excluded');
-        $this->assertEquals('VALID10', $lines[0]['code']);
-    }
-
-    // -------------------------------------------------------
-    // Price-level discount detection (dynamic pricing modifying product price)
-    // -------------------------------------------------------
-
-    public function test_build_discount_lines_detects_price_level_discounts()
-    {
-        // Product regular price = 500, dynamic pricing lowered to 400
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00)
-            ->withTotal(800.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('dynamic_pricing', $lines[0]['code']);
-        $this->assertEquals(20000, $lines[0]['amount']); // (500*2 - 800) * 100
-        $this->assertEquals('campaign', $lines[0]['type']);
-    }
-
-    public function test_build_discount_lines_price_level_combined_with_coupon()
-    {
-        // Regular 500, dynamic → 400, coupon 50 off
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 350.00, 0, 500.00)
-            ->withCoupon('DESC50', 50.00)
-            ->withTotal(350.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(2, $lines);
-        $this->assertEquals('DESC50', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        $this->assertEquals('dynamic_pricing', $lines[1]['code']);
-        $this->assertEquals(10000, $lines[1]['amount']); // (500 - 400) * 100
-    }
-
-    public function test_build_discount_lines_no_price_discount_when_regular_matches()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 1000.00, 1000.00, 0, 500.00) // 500*2 = 1000 = subtotal
-            ->withTotal(1000.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines);
-    }
-
-    public function test_build_discount_lines_all_three_types_together()
-    {
-        // Coupon + negative fee + price-level: the triple combo
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 350.00, 0, 500.00) // regular=500, dynamic→400, coupon→350
-            ->withCoupon('CUPON50', 50.00)
-            ->withFee('Promo Fee', -30.00)
-            ->withTotal(320.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(3, $lines);
-        // 1) Coupon
-        $this->assertEquals('CUPON50', $lines[0]['code']);
-        $this->assertEquals(5000, $lines[0]['amount']);
-        // 2) Fee discount
-        $this->assertEquals('Promo Fee', $lines[1]['code']);
-        $this->assertEquals(3000, $lines[1]['amount']);
-        // 3) Price-level
-        $this->assertEquals('dynamic_pricing', $lines[2]['code']);
-        $this->assertEquals(10000, $lines[2]['amount']); // (500 - 400) * 100
-
-        // Verify total adds up: 5000 + 3000 + 10000 = 18000 cents = $180 total discount
-        $total_discount = array_sum(array_column($lines, 'amount'));
-        $this->assertEquals(18000, $total_discount);
-    }
-
-    public function test_build_discount_lines_mixed_items_some_discounted()
-    {
-        // Item 10: regular=500, dynamic→400 (discounted)
-        // Item 20: regular=300, no discount (300*1 = 300 = subtotal)
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00)  // 500*2=1000, subtotal=800 → 200 discount
-            ->withItem(20, 1, 300.00, 300.00, 0, 300.00)   // 300*1=300,  subtotal=300 → 0 discount
-            ->withTotal(1100.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertCount(1, $lines);
-        $this->assertEquals('dynamic_pricing', $lines[0]['code']);
-        $this->assertEquals(20000, $lines[0]['amount']); // only item 10 contributes
-    }
-
-    public function test_build_discount_lines_item_without_regular_price()
-    {
-        // Product with no regular_price set (0) should not generate discount
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 400.00, 400.00, 0, 0) // regular_price=0
-            ->withTotal(400.00);
-
-        $lines = ckpg_build_conekta_discount_lines();
-
-        $this->assertEmpty($lines, 'No discount when regular_price is 0/unset');
-    }
-
     // -------------------------------------------------------
     // ckpg_build_line_items — price-level discount via &$price_level_discount
     // -------------------------------------------------------
@@ -1084,100 +694,6 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $this->assertCount(1, $line_items);
         $this->assertEquals(50000, $line_items[0]['unit_price']);
-    }
-
-    // -------------------------------------------------------
-    // Cart snapshot (ckpg_build_conekta_cart_snapshot)
-    // -------------------------------------------------------
-
-    public function test_cart_snapshot_reflects_discounted_totals()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 4, 2000.00, 1500.00)
-            ->withCoupon('VERANO20', 500.00)
-            ->withTotal(1500.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(150000, $snapshot['amount'], 'Total should be 1500.00 in cents');
-        $this->assertCount(1, $snapshot['cart_items']);
-        $this->assertEquals(10, $snapshot['cart_items'][0]['id']);
-        $this->assertEquals(4, $snapshot['cart_items'][0]['quantity']);
-        $this->assertEquals(150000, $snapshot['cart_items'][0]['total'], 'Item total should use line_total (after discount)');
-    }
-
-    public function test_cart_snapshot_includes_all_discount_lines()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 1, 500.00, 400.00)
-            ->withCoupon('DESC100', 100.00)
-            ->withFee('Dynamic Discount', -50.00)
-            ->withTotal(350.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertArrayHasKey('discount_lines', $snapshot);
-        $this->assertCount(2, $snapshot['discount_lines']);
-        $this->assertEquals('DESC100', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(10000, $snapshot['discount_lines'][0]['amount']);
-        $this->assertEquals('Dynamic Discount', $snapshot['discount_lines'][1]['code']);
-        $this->assertEquals(5000, $snapshot['discount_lines'][1]['amount']);
-    }
-
-    public function test_cart_snapshot_empty_when_cart_null()
-    {
-        WC()->cart = null;
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEmpty($snapshot);
-    }
-
-    public function test_cart_snapshot_multiple_items_with_dynamic_pricing()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 400.00, 400.00)   // discounted by dynamic pricing (was 500 each)
-            ->withItem(20, 1, 300.00, 300.00)
-            ->withFee('Bulk Discount', -70.00)
-            ->withTotal(630.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(63000, $snapshot['amount']);
-        $this->assertCount(2, $snapshot['cart_items']);
-
-        $this->assertEquals(10, $snapshot['cart_items'][0]['id']);
-        $this->assertEquals(40000, $snapshot['cart_items'][0]['total']);
-
-        $this->assertEquals(20, $snapshot['cart_items'][1]['id']);
-        $this->assertEquals(30000, $snapshot['cart_items'][1]['total']);
-
-        $this->assertCount(1, $snapshot['discount_lines']);
-        $this->assertEquals('Bulk Discount', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(7000, $snapshot['discount_lines'][0]['amount']);
-    }
-
-    // -------------------------------------------------------
-    // Cart snapshot with price-level discounts
-    // -------------------------------------------------------
-
-    public function test_cart_snapshot_includes_price_level_discount_lines()
-    {
-        WC()->cart = WC_Cart_Test_Helper::create()
-            ->withItem(10, 2, 800.00, 800.00, 0, 500.00) // regular=500, effective=400
-            ->withCoupon('PROMO', 100.00)
-            ->withTotal(700.00);
-
-        $snapshot = ckpg_build_conekta_cart_snapshot();
-
-        $this->assertEquals(70000, $snapshot['amount']);
-
-        // discount_lines should have coupon + price-level
-        $this->assertCount(2, $snapshot['discount_lines']);
-        $this->assertEquals('PROMO', $snapshot['discount_lines'][0]['code']);
-        $this->assertEquals(10000, $snapshot['discount_lines'][0]['amount']);
-        $this->assertEquals('dynamic_pricing', $snapshot['discount_lines'][1]['code']);
-        $this->assertEquals(20000, $snapshot['discount_lines'][1]['amount']);
     }
 
     // -------------------------------------------------------
@@ -1767,6 +1283,87 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(1600, $tax_lines[1]['amount']);
     }
 
+    public function test_build_tax_lines_with_zero_shipping_tax()
+    {
+        // shipping_tax_amount === 0 should NOT emit a "Shipping tax" line.
+        $taxes = [
+            ['tax_amount' => 16.00, 'label' => 'IVA', 'shipping_tax_amount' => 0],
+        ];
+
+        $result = ckpg_build_tax_lines($taxes);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_tax_lines_from_cart
+    // -------------------------------------------------------
+
+    public function test_build_tax_lines_from_cart_single_rate()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_multi_rate()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00)
+            ->withTaxTotal('ieps', 'IEPS', 3.00);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('IEPS', $result[1]['description']);
+        $this->assertEquals(300, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_with_shipping_tax()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00, 2.40);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(2, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+        $this->assertEquals(1600, $result[0]['amount']);
+        $this->assertEquals('Shipping tax', $result[1]['description']);
+        $this->assertEquals(240, $result[1]['amount']);
+    }
+
+    public function test_build_tax_lines_from_cart_zero_shipping_tax_guarded()
+    {
+        $cart = WC_Cart_Test_Helper::create()
+            ->withTaxTotal('iva-16', 'IVA', 16.00, 0.0);
+
+        $result = ckpg_build_tax_lines_from_cart($cart);
+
+        $this->assertCount(1, $result);
+        $this->assertEquals('IVA', $result[0]['description']);
+    }
+
+    public function test_build_tax_lines_from_cart_empty_returns_empty()
+    {
+        $cart = WC_Cart_Test_Helper::create();
+
+        $this->assertEmpty(ckpg_build_tax_lines_from_cart($cart));
+    }
+
+    public function test_build_tax_lines_from_cart_null_cart_returns_empty()
+    {
+        $this->assertEmpty(ckpg_build_tax_lines_from_cart(null));
+    }
+
     // -------------------------------------------------------
     // ckpg_build_shipping_lines
     // -------------------------------------------------------
@@ -2116,6 +1713,23 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('IVA', $result['tax_lines'][0]['description']);
     }
 
+    public function test_check_balance_appends_when_tax_lines_empty()
+    {
+        // sum = 10000, total = 10001 → synthesize a tax_line for the 1-cent diff.
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [],
+            'discount_lines' => [],
+            'tax_lines'      => [],
+        ];
+
+        $result = ckpg_check_balance($order, 10001);
+
+        $this->assertCount(1, $result['tax_lines']);
+        $this->assertEquals(1, $result['tax_lines'][0]['amount']);
+        $this->assertEquals('Round Adjustment', $result['tax_lines'][0]['description']);
+    }
+
     // -------------------------------------------------------
     // Critical #1: Double-counting test — full REST API discount pipeline
     // -------------------------------------------------------
@@ -2246,6 +1860,416 @@ class WC_Conekta_Gateway_Test extends TestCase
         $dynamic_entries = array_filter($discount_lines, fn($d) => $d['code'] === 'dynamic_pricing');
         $this->assertCount(1, $dynamic_entries, 'Guard should prevent duplicate dynamic_pricing');
         $this->assertEquals(20000, array_values($dynamic_entries)[0]['amount']);
+    }
+
+    // -------------------------------------------------------
+    // wallets_enabled → allowed_payment_methods
+    // -------------------------------------------------------
+
+    /**
+     * @return object stand-in for a WC_Payment_Gateway with custom settings
+     */
+    private function gatewayWithSettings(array $settings)
+    {
+        return new class($settings) {
+            public $settings;
+            public function __construct(array $settings) { $this->settings = $settings; }
+        };
+    }
+
+    public function test_build_allowed_payment_methods_includes_wallets_when_enabled()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'yes']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(['card', 'apple', 'google'], $methods);
+    }
+
+    public function test_build_allowed_payment_methods_excludes_wallets_when_disabled()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(['card'], $methods);
+    }
+
+    public function test_build_allowed_payment_methods_defaults_to_enabled_for_legacy_settings()
+    {
+        // Merchants who upgrade without re-saving settings have no
+        // wallets_enabled key — must keep wallets ON by default so existing
+        // checkouts don't lose Apple/Google Pay silently.
+        $gateway = $this->gatewayWithSettings([]);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertContains('apple', $methods);
+        $this->assertContains('google', $methods);
+        $this->assertContains('card', $methods);
+    }
+
+    public function test_build_allowed_payment_methods_uses_sdk_constant_for_card()
+    {
+        $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
+        $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
+        $this->assertEquals(\Conekta\Model\OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, $methods[0]);
+    }
+
+    // -------------------------------------------------------
+    // shipping_contact_hash — detects address changes across
+    // checkout-request POSTs so the placeholder "Pendiente" gets
+    // replaced once the customer types the real address.
+    // -------------------------------------------------------
+
+    public function test_shipping_contact_hash_empty_returns_empty_string()
+    {
+        // First POST before the customer types the address: the snapshot
+        // returns shipping_contact=[] and the stored hash must be the empty
+        // string so a later real address compares as "changed".
+        $this->assertSame('', WC_Conekta_REST_API::shipping_contact_hash([]));
+    }
+
+    public function test_shipping_contact_hash_is_stable_for_same_input()
+    {
+        $contact = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Av Test 123',
+                'city'        => 'CDMX',
+                'state'       => 'DF',
+                'country'     => 'MX',
+                'postal_code' => '11010',
+            ],
+        ];
+
+        $this->assertSame(
+            WC_Conekta_REST_API::shipping_contact_hash($contact),
+            WC_Conekta_REST_API::shipping_contact_hash($contact)
+        );
+    }
+
+    public function test_shipping_contact_hash_changes_when_address_changes()
+    {
+        $a = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => ['street1' => 'Av Test 123', 'postal_code' => '11010', 'country' => 'MX'],
+        ];
+        $b = $a;
+        $b['address']['street1'] = 'Calle Otra 456';
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($a),
+            WC_Conekta_REST_API::shipping_contact_hash($b)
+        );
+    }
+
+    public function test_shipping_contact_hash_placeholder_differs_from_real_address()
+    {
+        // The 'Pendiente' placeholder is the seeded value the create path
+        // injects when the snapshot is still empty. Once the customer types
+        // a real address, the hash MUST differ so the unchanged short-circuit
+        // does not skip the update that would overwrite the placeholder.
+        $placeholder = [
+            'phone'    => '0000000000',
+            'receiver' => 'Cliente',
+            'address'  => [
+                'street1'     => 'Pendiente',
+                'postal_code' => '00000',
+                'city'        => 'Pendiente',
+                'state'       => 'Pendiente',
+                'country'     => 'MX',
+            ],
+        ];
+        $real = [
+            'phone'    => '5555555555',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Av Test 123',
+                'postal_code' => '11010',
+                'city'        => 'CDMX',
+                'state'       => 'DF',
+                'country'     => 'MX',
+            ],
+        ];
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($placeholder),
+            WC_Conekta_REST_API::shipping_contact_hash($real)
+        );
+    }
+
+    public function test_shipping_contact_hash_is_sensitive_to_key_order_in_address()
+    {
+        // md5(json_encode(...)) hashes the serialized form, which preserves
+        // PHP array order. This is acceptable because build_snapshot always
+        // emits the same key order — the test pins that contract so a future
+        // refactor that reorders keys doesn't silently break the cache hit.
+        $a = ['address' => ['street1' => 'Av 1', 'postal_code' => '11010']];
+        $b = ['address' => ['postal_code' => '11010', 'street1' => 'Av 1']];
+
+        $this->assertNotSame(
+            WC_Conekta_REST_API::shipping_contact_hash($a),
+            WC_Conekta_REST_API::shipping_contact_hash($b)
+        );
+    }
+
+    // -------------------------------------------------------
+    // clear_session
+    // -------------------------------------------------------
+
+    public function test_clear_session_removes_all_four_session_keys()
+    {
+        WC()->session->set(WC_Conekta_REST_API::SESSION_ORDER_ID, 'ord_123');
+        WC()->session->set(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID, 'cr_123');
+        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_AMOUNT, 12345);
+        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH, 'abc123');
+
+        WC_Conekta_REST_API::clear_session();
+
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_ORDER_ID));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_AMOUNT));
+        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH));
+    }
+
+    public function test_session_last_shipping_hash_constant_exists()
+    {
+        // Regression: the unchanged short-circuit in handle_checkout_request
+        // reads this constant. Renaming it without also updating the read
+        // sites would silently downgrade the cache to amount-only and let
+        // the 'Pendiente' placeholder survive.
+        $this->assertSame(
+            'conekta_checkout_last_shipping_hash',
+            WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH
+        );
+    }
+
+    // -------------------------------------------------------
+    // resolve_phone — shipping wins over billing because WC
+    // Blocks does NOT sync the phone field on the "use same
+    // address for billing" toggle, so billing_phone is often
+    // stale relative to what the customer just typed.
+    // -------------------------------------------------------
+
+    public function test_resolve_phone_shipping_wins_when_both_present()
+    {
+        // The bug scenario: WC Blocks left billing_phone='5555555555'
+        // from a previous interaction, the customer typed '3143159054'
+        // in the shipping block, and the toggle is on. Conekta must
+        // receive the new number, not the stale one.
+        $this->assertSame(
+            '3143159054',
+            WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054')
+        );
+    }
+
+    public function test_resolve_phone_falls_back_to_billing_when_shipping_empty()
+    {
+        // Classic checkout has only one phone field — it lands in
+        // billing_phone and shipping_phone never gets set.
+        $this->assertSame(
+            '5555555555',
+            WC_Conekta_REST_API::resolve_phone('5555555555', '')
+        );
+    }
+
+    public function test_resolve_phone_uses_shipping_when_billing_empty()
+    {
+        $this->assertSame(
+            '3143159054',
+            WC_Conekta_REST_API::resolve_phone('', '3143159054')
+        );
+    }
+
+    public function test_resolve_phone_returns_empty_string_when_both_empty()
+    {
+        // The caller is responsible for substituting the '0000000000'
+        // placeholder — resolve_phone is purely a preference picker so
+        // that decision lives at the call site where the placeholder
+        // policy is visible.
+        $this->assertSame('', WC_Conekta_REST_API::resolve_phone('', ''));
+    }
+
+    // -------------------------------------------------------
+    // OrderUpdate customer_info regression — pin the SDK
+    // contract that lets the update path push a fresh
+    // customer_info.phone to Conekta. Without this support
+    // a stale phone left over from the create call would
+    // never be replaced and the merchant dashboard / Conekta
+    // antifraud would see the wrong number.
+    // -------------------------------------------------------
+
+    public function test_order_update_accepts_customer_info_via_sdk()
+    {
+        // Locks the conekta-php >= 7.1.0 contract: OrderUpdate must accept
+        // customer_info with phone. If the SDK is rolled back to a version
+        // that doesn't expose this setter (early 7.0.x lacked it on the
+        // PUT model) the test fails BEFORE the silent regression — phone
+        // stuck at the create-time value — ships to production.
+        $update = new \Conekta\Model\OrderUpdate();
+        $update->setCustomerInfo(new \Conekta\Model\OrderUpdateCustomerInfo([
+            'name'  => 'Test User',
+            'phone' => '3143159054',
+        ]));
+        $info = $update->getCustomerInfo();
+        $this->assertNotNull($info, 'OrderUpdate must hold the customer_info we set');
+        $this->assertSame('3143159054', $info->getPhone());
+        $this->assertSame('Test User',  $info->getName());
+    }
+
+    public function test_order_update_accepts_shipping_contact_via_sdk()
+    {
+        // Same contract pin for the shipping_contact path — without it the
+        // 'Pendiente' placeholder never gets replaced on PUT.
+        $update = new \Conekta\Model\OrderUpdate();
+        $update->setShippingContact(new \Conekta\Model\CustomerShippingContactsRequest([
+            'phone'    => '3143159054',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Calle Test 123',
+                'postal_code' => '11010',
+                'country'     => 'MX',
+            ],
+        ]));
+        $contact = $update->getShippingContact();
+        $this->assertNotNull($contact);
+        $this->assertSame('3143159054', $contact->getPhone());
+    }
+
+    public function test_resolve_phone_user_scenario_blocks_does_not_sync_phone()
+    {
+        // Documents the exact reproduction the merchant hit on staging:
+        //   - billing_phone='5555555555' was left in WC()->customer from a
+        //     previous interaction.
+        //   - The customer typed '3143159054' in Dirección de envío.
+        //   - "Usar la misma dirección para facturación" was on.
+        //   - WC Blocks copied the shipping address to billing but DID NOT
+        //     sync billing_phone, so build_snapshot saw both phones diverge.
+        // resolve_phone must return the shipping one so customer_info.phone
+        // (and shipping_contact.phone, which uses the same helper) reflect
+        // what the customer just typed instead of the stale leftover.
+        $resolved = WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054');
+        $this->assertSame('3143159054', $resolved);
+    }
+
+    // -------------------------------------------------------
+    // apply_address_from_body — closes the race where WC Blocks
+    // debounces its own `update-customer` REST call AFTER our
+    // /checkout-request POST has already hit the server. Without
+    // this helper, build_snapshot would read a stale
+    // WC()->customer and the cache-key would match the previous
+    // hash, returning mode=unchanged and leaving the Conekta
+    // order with the old shipping address.
+    // -------------------------------------------------------
+
+    private function freshCustomer()
+    {
+        // Lightweight stand-in. Setters are declared explicitly because
+        // apply_address_from_body() uses method_exists() to gate writes,
+        // and method_exists() ignores PHP's __call magic.
+        return new class {
+            public string $billing_first_name = '';
+            public string $billing_last_name = '';
+            public string $billing_address_1 = '';
+            public string $billing_city = '';
+            public string $billing_state = '';
+            public string $billing_postcode = '';
+            public string $billing_country = '';
+            public string $billing_phone = '';
+            public string $shipping_first_name = '';
+            public string $shipping_last_name = '';
+            public string $shipping_address_1 = '';
+            public string $shipping_city = '';
+            public string $shipping_state = '';
+            public string $shipping_postcode = '';
+            public string $shipping_country = '';
+            public string $shipping_phone = '';
+            public function set_billing_first_name($v)  { $this->billing_first_name  = $v; }
+            public function set_billing_last_name($v)   { $this->billing_last_name   = $v; }
+            public function set_billing_address_1($v)   { $this->billing_address_1   = $v; }
+            public function set_billing_city($v)        { $this->billing_city        = $v; }
+            public function set_billing_state($v)       { $this->billing_state       = $v; }
+            public function set_billing_postcode($v)    { $this->billing_postcode    = $v; }
+            public function set_billing_country($v)     { $this->billing_country     = $v; }
+            public function set_billing_phone($v)       { $this->billing_phone       = $v; }
+            public function set_shipping_first_name($v) { $this->shipping_first_name = $v; }
+            public function set_shipping_last_name($v)  { $this->shipping_last_name  = $v; }
+            public function set_shipping_address_1($v)  { $this->shipping_address_1  = $v; }
+            public function set_shipping_city($v)       { $this->shipping_city       = $v; }
+            public function set_shipping_state($v)      { $this->shipping_state      = $v; }
+            public function set_shipping_postcode($v)   { $this->shipping_postcode   = $v; }
+            public function set_shipping_country($v)    { $this->shipping_country    = $v; }
+            public function set_shipping_phone($v)      { $this->shipping_phone      = $v; }
+        };
+    }
+
+    public function test_apply_address_from_body_writes_only_non_empty_fields()
+    {
+        $customer = $this->freshCustomer();
+        $written = WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', [
+            'first_name' => 'Test',
+            'address_1'  => 'Calle Test chavito',
+            'city'       => '',   // empty — should be skipped
+            'phone'      => '3143159054',
+        ]);
+
+        $this->assertSame(['first_name', 'address_1', 'phone'], $written);
+        $this->assertSame('Test',                $customer->shipping_first_name);
+        $this->assertSame('Calle Test chavito',  $customer->shipping_address_1);
+        $this->assertSame('3143159054',          $customer->shipping_phone);
+    }
+
+    public function test_apply_address_from_body_overrides_stale_value_in_customer()
+    {
+        // Exact scenario from the merchant: WC()->customer had the old
+        // address "lisa" because Blocks hadn't synced yet, the user typed
+        // "chavito", and our POST landed first. The body override must win.
+        $customer = $this->freshCustomer();
+        $customer->shipping_address_1 = 'Calle Test lisa'; // stale
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', [
+            'address_1' => 'Calle Test chavito',
+        ]);
+        $this->assertSame('Calle Test chavito', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_writes_separate_billing_and_shipping_setters()
+    {
+        // The helper must use set_billing_<field> vs set_shipping_<field>
+        // — sending billing values into shipping slots would silently
+        // duplicate the address and break checkouts where the user has
+        // distinct billing and shipping.
+        $customer = $this->freshCustomer();
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'billing',  ['address_1' => 'Calle Bill 1']);
+        WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', ['address_1' => 'Calle Ship 1']);
+        $this->assertSame('Calle Bill 1', $customer->billing_address_1);
+        $this->assertSame('Calle Ship 1', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_no_op_for_empty_or_invalid_input()
+    {
+        $customer = $this->freshCustomer();
+        $customer->shipping_address_1 = 'Calle Test lisa'; // existing value must survive
+
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', []));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'shipping', null));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body($customer, 'invalid_type', ['address_1' => 'X']));
+        $this->assertSame([], WC_Conekta_REST_API::apply_address_from_body(null,      'shipping', ['address_1' => 'X']));
+
+        $this->assertSame('Calle Test lisa', $customer->shipping_address_1);
+    }
+
+    public function test_apply_address_from_body_ignores_fields_outside_allowlist()
+    {
+        // Defense-in-depth: a malicious client can't write arbitrary
+        // setters via this endpoint (e.g. set_billing_email). Only the
+        // known address fields go through — the returned list reflects
+        // exactly what was applied, so non-allowlisted keys are absent.
+        $customer = $this->freshCustomer();
+        $written = WC_Conekta_REST_API::apply_address_from_body($customer, 'billing', [
+            'first_name' => 'A',
+            'email'      => 'evil@example.com',
+            'admin'      => true,
+            'role'       => 'administrator',
+        ]);
+        $this->assertSame(['first_name'], $written);
+        $this->assertSame('A', $customer->billing_first_name);
     }
 
     // -------------------------------------------------------

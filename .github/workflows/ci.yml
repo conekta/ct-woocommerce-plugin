@@ -75,9 +75,8 @@ jobs:
   e2e-checkout:
     runs-on: ubuntu-latest
     name: E2E Checkout
-    needs: build-and-test
     container:
-      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -104,4 +103,13 @@ jobs:
         with:
           name: e2e-failure-artifacts
           path: test-results/
-          retention-days: 3
+          retention-days: 1
+
+      - name: Upload E2E success artifacts
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-success-artifacts
+          path: test-results/
+          retention-days: 1
+          if-no-files-found: ignore

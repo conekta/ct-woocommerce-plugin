@@ -13,7 +13,7 @@ use Conekta\ApiException;
 use \Conekta\Configuration;
 use Conekta\Model\OrderRequest;
 use Conekta\Model\EventTypes;
-use Conekta\Model\CustomerShippingContacts;
+use Conekta\Model\CustomerShippingContactsRequest;
 
 class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
 {
@@ -201,6 +201,15 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
                 'payment_method' => $this->GATEWAY_NAME,
             )
         );
+
+        $balanced = ckpg_check_balance([
+            'line_items'     => $line_items,
+            'shipping_lines' => $shipping_lines,
+            'discount_lines' => $discount_lines,
+            'tax_lines'      => $tax_lines,
+        ], amount_validation((float) $order->get_total()));
+        $tax_lines = $balanced['tax_lines'];
+
         $rq = new OrderRequest([
             'currency' => $data['currency'],
             'checkout' => [
@@ -220,7 +229,7 @@ class WC_Conekta_Bnpl_Gateway extends WC_Conekta_Plugin
             'metadata' => $order_metadata
         ]);
         if (!empty($shipping_contact)) {
-            $rq->setShippingContact(new CustomerShippingContacts($shipping_contact));
+            $rq->setShippingContact(new CustomerShippingContactsRequest($shipping_contact));
         }
         try {
             $orderCreated = $this->get_api_instance($this->settings['api_key'], $this->version)->createOrder($rq);

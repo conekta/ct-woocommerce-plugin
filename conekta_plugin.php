@@ -11,7 +11,6 @@ use \Conekta\Configuration;
 use \Conekta\Model\WebhookRequest;
 use Conekta\Api\OrdersApi;
 use Conekta\ApiException;
-use Conekta\Api\CompaniesApi;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
@@ -22,7 +21,7 @@ require_once(__DIR__ . '/conekta-rest-api.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "5.4.15";
+	public $version  = "6.0.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit, debit, cash, and monthly installments for Mexican credit cards.";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -116,7 +115,26 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!$order) {
             http_response_code(404);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            echo json_encode([
+                'error'        => 'Order not found',
+                'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
+                'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
+            exit;
+        }
+
+        // Idempotency guard: Conekta retries webhooks, and the same event
+        // can also arrive after process_payment already marked the order
+        // processing. Skip re-running payment_complete + add_order_note so
+        // we don't pile up duplicate notes / meta on each retry. Return 200
+        // so Conekta marks the webhook delivered and stops retrying.
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'message'  => 'OK',
+                'order_id' => $order->get_id(),
+                'note'     => 'already paid (idempotent retry)',
+            ]);
             exit;
         }
 
@@ -155,7 +173,35 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!$order) {
             http_response_code(404);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Order not found', 'reference_id' => $conekta_order['metadata']['reference_id'], 'conekta_id' => $conekta_order['id']]);
+            echo json_encode([
+                'error'        => 'Order not found',
+                'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
+                'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
+            exit;
+        }
+
+        // Idempotency guard: don't cancel an order that's already paid.
+        // This protects against the 3DS temp-order edge case where the
+        // temporary Conekta order eventually expires while the real WC
+        // order was already charged through the actual conekta-order-id
+        // mapping; without this guard we'd cancel a successful order.
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'cancelled' => 'NO',
+                'order_id'  => $order->get_id(),
+                'note'      => 'already paid, ignoring cancel webhook',
+            ]);
+            exit;
+        }
+        if ($order->get_status() === 'cancelled') {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'cancelled' => 'OK',
+                'order_id'  => $order->get_id(),
+                'note'      => 'already cancelled (idempotent retry)',
+            ]);
             exit;
         }
 
@@ -175,12 +221,31 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
     
+    /**
+     * Decide whether a webhook payload references a Conekta order we can
+     * look up in WooCommerce. Two valid shapes:
+     *
+     *  - Legacy / cash / bank-transfer flows: metadata.reference_id is the
+     *    numeric WC order id (the Conekta order was created from the WC
+     *    order, so reference_id was set at creation time).
+     *  - Integration component flow (cards / Apple Pay): the Conekta order
+     *    is created BEFORE the WC order exists, so metadata.reference_id
+     *    is absent — but the Conekta order id is present, and
+     *    find_order_for_webhook() can resolve the WC order through the
+     *    `conekta-order-id` meta on existing WC orders.
+     *
+     * Either shape is enough to proceed.
+     */
     public static function validate_reference_id(array $conekta_order): bool
     {
-        return isset($conekta_order['metadata'])
+        $has_valid_reference = isset($conekta_order['metadata'])
             && array_key_exists('reference_id', $conekta_order['metadata'])
             && is_numeric($conekta_order['metadata']['reference_id'])
             && (int) $conekta_order['metadata']['reference_id'] > 0;
+        if ($has_valid_reference) {
+            return true;
+        }
+        return !empty($conekta_order['id']) && is_string($conekta_order['id']);
     }
 
     /**
@@ -265,50 +330,4 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         return  new OrdersApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
     }
 
-    public static function get_companies_api_instance(string $api_key, string $version): CompaniesApi
-    {
-        $stack = HandlerStack::create();
-        $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
-            return $request->withHeader(
-                'X-Conekta-Client-User-Agent',
-                json_encode([
-                    'plugin_name'    => 'woocommerce',
-                    'plugin_version' => $version,
-                ])
-            );
-        }));
-        $client = new Client([
-            'handler' => $stack,
-        ]);
-        return new CompaniesApi($client, Configuration::getDefaultConfiguration()->setAccessToken($api_key));
-    }
-
-    public static function handle_conekta_3ds_callback() {
-        // Get payment status from query parameters
-        $payment_status = isset($_GET['payment_status']) ? sanitize_text_field($_GET['payment_status']) : '';
-        $order_id = isset($_GET['order_id']) ? sanitize_text_field($_GET['order_id']) : '';
-        $woo_order_id = isset($_GET['woo_order_id']) ? sanitize_text_field($_GET['woo_order_id']) : '';
-        
-        // Redirect to checkout page with appropriate status
-        if (!empty($order_id)) {
-            // Store the order ID and status in session to be processed in the checkout
-            WC()->session->set('conekta_3ds_order_id', $order_id);
-            WC()->session->set('conekta_3ds_payment_status', $payment_status);
-            
-            // Store WooCommerce order ID if available
-            if (!empty($woo_order_id)) {
-                WC()->session->set('conekta_woo_order_id', $woo_order_id);
-            }
-            
-            // Redirect to checkout
-            wp_safe_redirect(wc_get_checkout_url());
-            exit;
-        }
-        
-        // Fallback redirect
-        wp_safe_redirect(wc_get_checkout_url());
-        exit;
-    }
 }
-
-add_action('woocommerce_api_conekta_3ds_callback', [ 'WC_Conekta_Plugin', 'handle_conekta_3ds_callback' ]);
