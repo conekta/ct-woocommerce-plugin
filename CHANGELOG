@@ -1,3 +1,7 @@
+6.0.1, 2026-06-04
+-------------------------------------
+- Security: hardened handling of payment method data on the Blocks checkout.
+
 6.0.0, 2026-04-27
 -------------------------------------
 - BREAKING: Card payments migrated from the Card tokenizer SDK component to the Integration SDK component. Conekta order is pre-created at iframe-mount time and updated on every cart change; process_payment only validates the already-paid order.

@@ -1,3 +1,6 @@
+## [6.0.1]() - 2026-06-04
+- Security: hardened handling of payment method data on the Blocks checkout.
+
 ## [6.0.0]() - 2026-04-27
 - BREAKING: Card payments migrated from the `Card` tokenizer SDK component to the `Integration` SDK component (`ConektaCheckoutComponents.Integration`). The Conekta order is now pre-created at iframe-mount time via a new server endpoint and updated on every cart change; `process_payment` no longer creates the order, it only validates the already-paid Conekta order against the WooCommerce total.
 - Feature: New endpoint `POST /conekta/v1/checkout-request` (also exposed via WC AJAX action `conekta_checkout_request`) that creates the Conekta Integration order on first call in a WC session and PUTs `line_items`/`discount_lines`/`shipping_lines` on every subsequent call. `customer_info` and `currency` are set once at creation and never updated.
