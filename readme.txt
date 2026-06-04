@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 6.0.0
+Stable tag: 6.0.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.1 =
+* Security fix in the checkout integration. Updating is strongly recommended.
+
 = 6.0.0 =
 * BREAKING: Card payments migrated from the Card tokenizer SDK component to the Integration SDK component. The Conekta order is pre-created at iframe-mount time and updated via PUT on every cart change; process_payment only validates the already-paid order against the WooCommerce total.
 * Feature: New endpoint POST /conekta/v1/checkout-request that creates or updates the Conekta Integration order. customer_info and currency are set once at creation; line_items/discount_lines/shipping_lines are PUT on every cart change.
