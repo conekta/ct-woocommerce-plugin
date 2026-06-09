@@ -317,6 +317,58 @@ async function testOrderStatus(conektaOrderId) {
   }
 }
 
+function getProductId() { return productId; }
+
+/**
+ * Find every WooCommerce order that carries the given conekta-order-id meta.
+ * Re-authenticates as admin first (the checkout flow runs as a guest, so the
+ * REST nonce from the guest session can't read orders). Returns the matching
+ * order objects (with status + meta_data) so callers can assert how many of
+ * them are in a paid state.
+ *
+ * This is the invariant that proves the duplicate-order guard: a single
+ * Conekta order must map to AT MOST ONE paid WooCommerce order.
+ */
+async function findOrdersByConektaOrderId(conektaOrderId, { perPage = 50 } = {}) {
+  await loginAsAdmin();
+  const orders = await wcApi('GET', `wc/v3/orders?per_page=${perPage}&orderby=date&order=desc&status=any`);
+  if (!Array.isArray(orders)) return [];
+  return orders.filter(o =>
+    Array.isArray(o.meta_data) &&
+    o.meta_data.some(m => m.key === 'conekta-order-id' && String(m.value) === String(conektaOrderId))
+  );
+}
+
+const PAID_STATUSES = ['processing', 'completed', 'on-hold'];
+
+/**
+ * Submit the classic checkout form directly to the WC AJAX endpoint, forcing a
+ * specific conekta_order_id. This reproduces a resubmission (double-click /
+ * timeout / retry) where a second WC order is created while the hidden
+ * conekta_order_id stays the same — the exact condition behind the duplicate
+ * paid orders observed in staging (e.g. WC #6360 & #6361 sharing one Conekta
+ * order). Returns the WC AJAX JSON ({ result, redirect, messages, ... }).
+ */
+async function submitClassicCheckoutRaw(conektaOrderId) {
+  return page.evaluate(async (id) => {
+    const form = document.querySelector('form.checkout');
+    if (!form) throw new Error('form.checkout not found — not on the classic checkout page');
+    const fd = new FormData(form);
+    fd.set('payment_method', 'conekta');
+    fd.set('conekta_order_id', id);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd.entries()) params.append(k, v);
+    const res = await fetch('/?wc-ajax=checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: params.toString(),
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) {}
+    return { status: res.status, json };
+  }, conektaOrderId);
+}
+
 // -------------------------------------------------------
 // Shared helper: wait for the Integration iframe to mount
 // -------------------------------------------------------
@@ -731,9 +783,10 @@ async function run(label, optionsOrFn, maybeFn) {
 module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT,
   TEST_CARD, BILLING,
-  assert, getPage, getCounters, wcApi, setCheckoutType,
+  assert, getPage, getCounters, wcApi, setCheckoutType, loginAsAdmin,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
+  getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForOrderReceivedWith3DS,
 };
