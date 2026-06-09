@@ -363,13 +363,6 @@ const submitInterceptor = {
 const orchestrator = {
   refresh: async () => {
     if (!utils.isConektaSelected()) return;
-    // Never refresh/remount while a charge is in progress. A late
-    // `updated_checkout` (e.g. a trailing update_order_review settling after
-    // the customer hit "Realizar el pedido") would otherwise call
-    // mounter.mount(), tear down the script + container, and destroy the
-    // in-progress 3DS iframe — the payment silently resets to the card form
-    // and the order is never completed.
-    if (state.payingInProgress) return;
     if (!utils.isValidEmail(utils.getBillingEmail())) {
       utils.showPlaceholder();
       return;

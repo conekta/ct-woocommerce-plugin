@@ -164,12 +164,6 @@ const ContentConekta = (props) => {
 
         let cancelled = false;
         const timer = setTimeout(async () => {
-            // Never refresh/remount while a charge is in flight. A trailing
-            // debounced refresh firing during onPaymentSetup would set
-            // refreshing=true (making onPaymentSetup reject with "Actualizando
-            // importe") or remount the iframe mid-3DS — either way the payment
-            // never completes.
-            if (expectingChargeRef.current) return;
             setRefreshing(true);
             try {
                 // Send billing + shipping in the body so the server doesn't
