@@ -369,6 +369,73 @@ async function submitClassicCheckoutRaw(conektaOrderId) {
   }, conektaOrderId);
 }
 
+/**
+ * Submit the Blocks (Store API) checkout directly, forcing a specific
+ * conekta_order_id on payment_data. This is the Blocks analogue of
+ * submitClassicCheckoutRaw: it reproduces a resubmission that reaches
+ * process_payment_api with an already-used Conekta order.
+ *
+ * Blocks does NOT post form.checkout — it hits /wc/store/v1/checkout with a
+ * JSON body and a Store API `Nonce` + guest `Cart-Token` header. We first GET
+ * the cart to capture those headers and select a shipping rate (the checkout
+ * is rejected before reaching the gateway if shipping is required but unset),
+ * then POST the checkout with conekta_order_id in payment_data — the same
+ * shape the Blocks frontend sends on finalize.
+ *
+ * Returns { status, json } where json is the Store API checkout response.
+ */
+async function submitBlocksCheckoutRaw(conektaOrderId, billing) {
+  return page.evaluate(async ({ id, b }) => {
+    const base = '/wp-json/wc/store/v1';
+
+    // 1) Read the cart to grab the Store API nonce + guest cart token and the
+    //    available shipping rates.
+    const cartRes = await fetch(`${base}/cart`, { headers: { Accept: 'application/json' } });
+    const nonce = cartRes.headers.get('Nonce') || cartRes.headers.get('X-WC-Store-API-Nonce');
+    const cartToken = cartRes.headers.get('Cart-Token');
+    const cart = await cartRes.json();
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (nonce) headers['Nonce'] = nonce;
+    if (cartToken) headers['Cart-Token'] = cartToken;
+
+    // 2) Ensure a shipping rate is selected when the cart needs shipping.
+    if (cart && cart.needs_shipping && Array.isArray(cart.shipping_rates)) {
+      for (const pkg of cart.shipping_rates) {
+        const rates = pkg.shipping_rates || [];
+        if (rates.length && !rates.some(r => r.selected)) {
+          await fetch(`${base}/cart/select-shipping-rate`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ package_id: pkg.package_id, rate_id: rates[0].rate_id }),
+          });
+        }
+      }
+    }
+
+    // 3) Submit the checkout, reusing the conekta_order_id.
+    const address = {
+      first_name: b.first_name, last_name: b.last_name,
+      address_1: b.address_1, address_2: '',
+      city: b.city, state: b.state, postcode: b.postcode,
+      country: 'MX', email: b.email, phone: b.phone,
+    };
+    const res = await fetch(`${base}/checkout`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        billing_address: address,
+        shipping_address: address,
+        payment_method: 'conekta',
+        payment_data: [{ key: 'conekta_order_id', value: id }],
+      }),
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) {}
+    return { status: res.status, json };
+  }, { id: conektaOrderId, b: billing });
+}
+
 // -------------------------------------------------------
 // Shared helper: wait for the Integration iframe to mount
 // -------------------------------------------------------
@@ -786,7 +853,7 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType, loginAsAdmin,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
-  getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, PAID_STATUSES,
+  getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForOrderReceivedWith3DS,
 };
