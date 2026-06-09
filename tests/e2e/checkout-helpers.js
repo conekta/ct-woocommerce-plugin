@@ -35,14 +35,13 @@ const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const FIRST_NAME = pickRandom(FIRST_NAMES);
 const LAST_NAME = pickRandom(LAST_NAMES);
 
-// Conekta sandbox: 4000 0000 0000 1091 = Smart/Strict 3DS with a CHALLENGE that
-// authenticates successfully (OTP = 1234). We use the challenge card (not the
-// frictionless …2701) because the entity runs 3DS Strict, which forces the
-// challenge — the frictionless card then never finalizes ("Error procesando el
-// pago", no charge). The challenge path is deterministic: charge fires, the OTP
-// modal renders (we run headed under xvfb), and the wait loop types 1234.
+// Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
+// auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
+// that does not render reliably in headless Chromium. This depends on the
+// company NOT being in 3DS Strict mode — Strict forces a challenge even for
+// this card, which breaks the headless/frictionless design.
 const TEST_CARD = {
-  number: '4000000000001091',
+  number: '4000000000002701',
   name: `${FIRST_NAME} ${LAST_NAME}`,
   expMonth: '12',
   expYear: '30',
@@ -642,35 +641,14 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
     throw new Error('Conekta card-number input never became visible');
   }
 
-  // Type field-by-field with real keystrokes. The Integration card inputs are
-  // masked (card number groups, MM/YY expiry) and validated on input/keyup —
-  // a raw .fill() sets the value without driving the mask, so the SDK can read
-  // an invalid/incomplete card and reject submit() with no charge ("Error
-  // procesando el pago", zero Conekta API calls). pressSequentially fires the
-  // per-key events the SDK listens to.
-  const typeInto = async (locator, value) => {
-    const el = locator.first();
-    await el.click();
-    await el.fill('');
-    await el.pressSequentially(String(value), { delay: 60 });
-  };
-
-  await typeInto(cardForm.locator(cardNumberSel), card.number);
+  await cardForm.locator(cardNumberSel).first().fill(card.number);
 
   const name = cardForm.locator(nameSel).first();
   if (await name.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await typeInto(cardForm.locator(nameSel), card.name);
+    await name.fill(card.name);
   }
-  // Expiry: type digits only and let the mask insert the slash. Typing the
-  // pre-slashed "12/30" can fight the mask and yield an invalid value.
-  await typeInto(cardForm.locator(expSel), `${card.expMonth}${card.expYear}`);
-  await typeInto(cardForm.locator(cvcSel), card.cvc);
-
-  // Blur the last field and give the SDK a beat to mark the card valid before
-  // Place Order fires. Submitting before the SDK finishes validating reads the
-  // card as incomplete and rejects without charging.
-  await cardForm.locator(cvcSel).first().blur().catch(() => {});
-  await page.waitForTimeout(1500);
+  await cardForm.locator(expSel).first().fill(`${card.expMonth}/${card.expYear}`);
+  await cardForm.locator(cvcSel).first().fill(card.cvc);
 }
 
 /**

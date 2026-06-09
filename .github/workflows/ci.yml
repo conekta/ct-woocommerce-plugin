@@ -95,11 +95,7 @@ jobs:
           STORE_URL: https://woocommerce.stg.conekta.io
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
-        # Run headed under a virtual display: the Conekta 3DS challenge modal
-        # does not render reliably in headless Chromium and the Integration
-        # component resets to the card form, stalling the payment. xvfb ships
-        # with the Playwright container.
-        run: xvfb-run -a npm run test:e2e
+        run: npm run test:e2e
 
       - name: Upload E2E failure artifacts
         if: failure()
