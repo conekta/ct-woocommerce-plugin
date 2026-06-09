@@ -683,6 +683,70 @@ async function clickPlaceOrder() {
 }
 
 /**
+/**
+ * Dump everything we can see about the checkout's payment state — used to
+ * diagnose why a charge never fires (e.g. Blocks onPaymentSetup returning an
+ * error before calling the SDK). Reads visible notices, the WC Blocks
+ * validation/payment stores, the place-order button state, and the Conekta
+ * component iframe's visible text.
+ */
+async function dumpCheckoutDiagnostics(tag) {
+  try {
+    const info = await page.evaluate(() => {
+      const txt = (sel) => Array.from(document.querySelectorAll(sel))
+        .map((e) => (e.innerText || e.textContent || '').trim()).filter(Boolean);
+      const notices = Array.from(new Set([
+        ...txt('.wc-block-components-notice-banner'),
+        ...txt('.wc-block-components-validation-error'),
+        ...txt('.woocommerce-error'),
+        ...txt('.woocommerce-message'),
+        ...txt('.wc-block-store-notice'),
+        ...txt('[role="alert"]'),
+      ])).map((s) => s.slice(0, 200));
+      let validationErrors = null, payment = null;
+      try {
+        const v = window.wp?.data?.select?.('wc/store/validation');
+        validationErrors = v?.getValidationErrors ? v.getValidationErrors() : 'no-store';
+      } catch (e) { validationErrors = 'err:' + e.message; }
+      try {
+        const p = window.wp?.data?.select?.('wc/store/payment');
+        payment = p ? {
+          status: p.getCurrentStatus ? p.getCurrentStatus() : null,
+          active: p.getActivePaymentMethod ? p.getActivePaymentMethod() : null,
+        } : 'no-store';
+      } catch (e) { payment = 'err:' + e.message; }
+      const btnEl = document.querySelector('button.wc-block-components-checkout-place-order-button, #place_order');
+      const btn = btnEl ? { text: (btnEl.innerText || '').slice(0, 40), disabled: !!btnEl.disabled } : null;
+      const cont = document.querySelector('#conektaITokenizerframeContainer');
+      return {
+        notices,
+        validationErrors,
+        payment,
+        btn,
+        hasIframe: !!(cont && cont.querySelector('iframe')),
+        url: location.href,
+      };
+    });
+    console.log(`  [diag ${tag}] url=${info.url}`);
+    console.log(`  [diag ${tag}] notices=${JSON.stringify(info.notices)}`);
+    console.log(`  [diag ${tag}] validationErrors=${JSON.stringify(info.validationErrors)}`);
+    console.log(`  [diag ${tag}] payment=${JSON.stringify(info.payment)} placeBtn=${JSON.stringify(info.btn)} hasIframe=${info.hasIframe}`);
+    // Try to read the Conekta component iframe's visible text (may be cross-origin).
+    for (const f of page.frames()) {
+      let host = ''; try { host = new URL(f.url()).hostname; } catch (_) {}
+      if (/pay\.conekta\.com/.test(host) && /component-frame/.test(f.url())) {
+        try {
+          const t = await f.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 300));
+          console.log(`  [diag ${tag}] component-frame text="${t}"`);
+        } catch (e) { console.log(`  [diag ${tag}] component-frame unreadable: ${e.message}`); }
+      }
+    }
+  } catch (e) {
+    console.log(`  [diag ${tag}] failed: ${e.message}`);
+  }
+}
+
+/**
  * Wait for the order-received navigation while continuously dismissing any
  * 3DS challenge that appears. Conekta's sandbox renders the challenge in a
  * nested iframe with a hard-coded OTP=1234. The 3DS modal can take 5–30s to
@@ -701,13 +765,26 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
   const conektaLog = [];
   const responseHandler = async (response) => {
     const url = response.url();
-    // Match only Conekta API hosts — exclude analytics/CDN noise.
-    if (!/(api\.conekta|pay\.conekta|checkout\.conekta)/i.test(url)) return;
+    const isConekta = /(api\.conekta|pay\.conekta|checkout\.conekta)/i.test(url);
+    // Also capture the Store API checkout + the checkout-request endpoint and
+    // ANY non-2xx response on our store — that's where a "charge never fired"
+    // failure surfaces (validation rejects, process_payment_api errors).
+    const isStoreCheckout = /\/wc\/store\/v1\/checkout|conekta_checkout_request|wc-ajax=checkout/i.test(url);
+    const isStoreError = /woocommerce\.stg\.conekta\.io/i.test(url) && response.status() >= 400;
+    if (!isConekta && !isStoreCheckout && !isStoreError) return;
     let bodyPreview = '';
-    try { bodyPreview = (await response.text()).slice(0, 500); } catch (_) {}
+    try { bodyPreview = (await response.text()).slice(0, 600); } catch (_) {}
     conektaLog.push(`${response.status()} ${response.request().method()} ${url}\n      → ${bodyPreview}`);
   };
   page.on('response', responseHandler);
+
+  // Capture EVERY console message during the payment window (the SDK and our
+  // frontend log here) so we can see why the charge didn't fire.
+  const consoleLog = [];
+  const consoleHandler = (msg) => {
+    try { consoleLog.push(`[${msg.type()}] ${msg.text().slice(0, 300)}`); } catch (_) {}
+  };
+  page.on('console', consoleHandler);
   const dumpLog = () => {
     if (conektaLog.length === 0) {
       console.log('  [no conekta API calls observed]');
@@ -727,9 +804,11 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
   let last3dsFrame = null;
   let last3dsBodyHash = '';
   let lastScreenshotAt = 0;
+  let lastDiagAt = 0;
   while (Date.now() - start < timeoutMs) {
     if (page.url().includes('order-received')) {
       page.off('response', responseHandler);
+      page.off('console', consoleHandler);
       return true;
     }
 
@@ -743,6 +822,13 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
         });
       } catch (_) { /* skip */ }
       lastScreenshotAt = Date.now();
+    }
+
+    // Periodic checkout diagnostics (every 8s) so we can see WHEN/WHAT error
+    // the checkout surfaces — the charge-never-fired case shows up here.
+    if (Date.now() - lastDiagAt > 8000) {
+      await dumpCheckoutDiagnostics(`+${Math.floor((Date.now() - start) / 1000)}s`);
+      lastDiagAt = Date.now();
     }
 
     // Iterate ALL frames including descendants — page.frames() already returns
@@ -812,7 +898,17 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
     await page.waitForTimeout(500);
   }
   page.off('response', responseHandler);
+  page.off('console', consoleHandler);
   dumpLog();
+
+  // Full diagnostics at timeout: checkout state + console trail + frames.
+  await dumpCheckoutDiagnostics('TIMEOUT');
+  if (consoleLog.length) {
+    console.log('  [console trail during payment]');
+    consoleLog.slice(-40).forEach((l) => console.log('    ' + l));
+  } else {
+    console.log('  [no console messages captured]');
+  }
 
   // Diagnostic: dump every frame URL and the inputs inside the 3DS challenge.
   console.log('  [frames at timeout]');
