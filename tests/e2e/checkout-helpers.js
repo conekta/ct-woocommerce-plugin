@@ -657,8 +657,14 @@ async function clickPlaceOrder() {
  * nested iframe with a hard-coded OTP=1234. The 3DS modal can take 5–30s to
  * appear after Place Order, so we can't rely on a one-shot handler — we poll
  * for the URL change and submit OTP whenever it surfaces.
+ *
+ * Timeout: a healthy payment (frictionless or with OTP) reaches order-received
+ * in well under a minute. The sandbox intermittently fails to finalize the
+ * frictionless 3DS — the order stays unpaid and we never navigate. When that
+ * happens we want to FAIL FAST (so run.js retries the spec on a fresh payment)
+ * instead of hanging for minutes. Default 120s; override with E2E_NAV_TIMEOUT.
  */
-async function waitForOrderReceivedWith3DS(timeoutMs = 240000) {
+async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NAV_TIMEOUT) || 120000) {
   // Diagnostic: log every Conekta API response so we can see what the SDK
   // is doing after Place Order (charges, 3DS challenge URL, errors, etc.).
   const conektaLog = [];
