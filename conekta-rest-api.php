@@ -440,39 +440,13 @@ class WC_Conekta_REST_API {
         if (WC()->customer) {
             $email = sanitize_email(WC()->customer->get_billing_email());
             if (!empty($email)) {
-                $name = trim(WC()->customer->get_billing_first_name() . ' ' . WC()->customer->get_billing_last_name());
-                // Both phone slots prefer the shipping_phone with billing as
-                // fallback. Why shipping first for BOTH:
-                //   - When "use same address for billing" is on, WC Blocks
-                //     copies the shipping address to billing but does NOT
-                //     sync the phone field — billing_phone keeps its previous
-                //     (often stale) value. Preferring shipping_phone makes
-                //     customer_info reflect what the customer just typed.
-                //   - When the customer enters distinct addresses with
-                //     distinct phones, shipping_phone is the freshly-entered
-                //     one in the visible Dirección de envío block; that is a
-                //     reasonable default contact for the order.
-                //   - Falling back to billing_phone covers the legacy classic
-                //     checkout flow that only has a single phone field.
-                $billing_phone  = sanitize_text_field(WC()->customer->get_billing_phone());
-                $shipping_phone = method_exists(WC()->customer, 'get_shipping_phone')
-                    ? sanitize_text_field(WC()->customer->get_shipping_phone())
-                    : '';
-                $customer_phone = self::resolve_phone($billing_phone, $shipping_phone);
-
-                $customer_info = [
-                    'email' => $email,
-                    'name'  => $name ?: 'Cliente',
-                    'phone' => $customer_phone ?: '0000000000',
-                ];
-
-                // Conekta requires shipping_contact to charge an order. Pick the
-                // address block at the block level (see resolve_address_source):
-                // use shipping only when the customer actually typed it, else
-                // fall back to billing as a whole. This avoids mixing a billing
-                // street with a shipping state/country that themes pre-fill with
-                // store defaults. The phone comes from the SAME block as the
-                // address so the contact stays consistent.
+                // Resolve the address block (shipping when the customer filled
+                // it, else billing) ONCE and feed it to BOTH customer_info and
+                // shipping_contact. Previously customer_info read billing-only,
+                // so when the shopper filled just the shipping block (the common
+                // WC Blocks case) the Conekta customer object was left with the
+                // 'Cliente' / 0000000000 defaults even though shipping_contact
+                // had the real name/phone. See resolve_address_source.
                 $addr          = self::resolve_address_source(WC()->customer);
                 $first         = $addr['first_name'];
                 $last          = $addr['last_name'];
@@ -481,12 +455,20 @@ class WC_Conekta_REST_API {
                 $state         = $addr['state'];
                 $country       = $addr['country'];
                 $postcode      = $addr['postcode'];
+                $name          = trim("$first $last");
                 $contact_phone = sanitize_text_field($addr['phone']);
 
+                $customer_info = [
+                    'email' => $email,
+                    'name'  => $name ?: 'Cliente',
+                    'phone' => $contact_phone ?: '0000000000',
+                ];
+
+                // Conekta requires shipping_contact to charge an order.
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
                         'phone'    => $contact_phone ?: '0000000000',
-                        'receiver' => trim("$first $last") ?: ($name ?: 'Cliente'),
+                        'receiver' => $name ?: 'Cliente',
                         'address'  => [
                             'street1'     => $address1,
                             'city'        => $city,
