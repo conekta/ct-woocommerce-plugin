@@ -24,16 +24,26 @@ const COUPON_AMOUNT = '50';
 // Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
 // auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
 // that does not render reliably in headless Chromium.
+// Randomize the shopper name per run so orders aren't all "Test User". Picked
+// once at module load, so it stays stable across a single spec (the payment and
+// the resubmission share the same name); each spec runs in its own process via
+// run.js, so they get independent names.
+const FIRST_NAMES = ['Mauricio', 'Sofía', 'Diego', 'Valentina', 'Carlos', 'Fernanda', 'Alejandro', 'Regina', 'Ricardo', 'Gabriela'];
+const LAST_NAMES = ['Hernández', 'García', 'Martínez', 'López', 'González', 'Rodríguez', 'Pérez', 'Sánchez', 'Ramírez', 'Torres'];
+const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const FIRST_NAME = pickRandom(FIRST_NAMES);
+const LAST_NAME = pickRandom(LAST_NAMES);
+
 const TEST_CARD = {
   number: '4000000000002701',
-  name: 'Test User',
+  name: `${FIRST_NAME} ${LAST_NAME}`,
   expMonth: '12',
   expYear: '30',
   cvc: '123',
 };
 const BILLING = {
-  first_name: 'Test',
-  last_name: 'User',
+  first_name: FIRST_NAME,
+  last_name: LAST_NAME,
   address_1: 'Calle Test 123',
   city: 'CDMX',
   state: 'DF',
