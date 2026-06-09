@@ -77,7 +77,7 @@ h.run('Classic Checkout — duplicate-order guard', { checkoutType: 'classic' },
   // ---------------------------------------------------------------
   console.log('\n--- (2) resubmission with the same conekta_order_id ---');
   const productId = h.getProductId();
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${h.QUANTITY}`);
   await page.waitForLoadState('networkidle');
 
   await page.goto(`${STORE_URL}/checkout/`);

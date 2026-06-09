@@ -21,6 +21,10 @@ const WP_PASS = process.env.WP_PASS || 'bitnami';
 const REGULAR_PRICE = (Math.random() * 900 + 100).toFixed(2);
 const DISCOUNT_AMOUNT = (parseFloat(REGULAR_PRICE) / 2).toFixed(2);
 const COUPON_AMOUNT = '50';
+// Random line-item quantity (1–5) so the cart total varies per run on top of
+// the already-random price. Picked once at module load so it's stable across a
+// single spec (the payment and any resubmission use the same cart).
+const QUANTITY = Math.floor(Math.random() * 5) + 1;
 // Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
 // auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
 // that does not render reliably in headless Chromium.
@@ -193,7 +197,7 @@ async function setup(options = {}) {
   const cleaned = staleProducts.length + staleCoupons.length;
   console.log(`Setup: cleaned ${cleaned} orphaned e2e resources`);
 
-  console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}`);
+  console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}, quantity=${QUANTITY}`);
 
   const product = await wcApi('POST', 'wc/v3/products', {
     name: 'E2E Discount Test',
@@ -226,7 +230,7 @@ async function setup(options = {}) {
   // A guest session is cookie-only and fresh on every run.
   await page.context().clearCookies();
 
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${QUANTITY}`);
   await page.waitForLoadState('networkidle');
 }
 
@@ -858,7 +862,7 @@ async function run(label, optionsOrFn, maybeFn) {
 }
 
 module.exports = {
-  STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT,
+  STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
   TEST_CARD, BILLING,
   assert, getPage, getCounters, wcApi, setCheckoutType, loginAsAdmin,
   applyCheckoutCoupon, applyBlocksCoupon,

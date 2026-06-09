@@ -73,7 +73,7 @@ h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks' }, a
   // ---------------------------------------------------------------
   console.log('\n--- (2) resubmission via Store API with the same conekta_order_id ---');
   const productId = h.getProductId();
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${h.QUANTITY}`);
   await page.waitForLoadState('networkidle');
 
   const resubmit = await h.submitBlocksCheckoutRaw(conektaOrderId, BILLING);
