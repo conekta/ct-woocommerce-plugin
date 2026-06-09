@@ -641,10 +641,41 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
 }
 
 /**
+ * Wait until the checkout is STABLE before charging: no `conekta_checkout_request`
+ * POST has fired for `quietMs`. Both checkouts debounce a refresh on every
+ * address/cart change that can remount the Integration iframe or (in Blocks)
+ * flip `refreshing=true`. Clicking "Place order" while that refresh is in
+ * flight makes the SDK never charge (classic resets to the card form; Blocks'
+ * onPaymentSetup rejects with "Actualizando importe"). Waiting for the network
+ * to go quiet removes that race deterministically — no retry needed.
+ */
+async function waitForCheckoutStable(quietMs = 2500, timeoutMs = 25000) {
+  let lastRequestAt = Date.now();
+  const handler = (response) => {
+    if (response.url().includes('conekta_checkout_request') && response.request().method() === 'POST') {
+      lastRequestAt = Date.now();
+    }
+  };
+  page.on('response', handler);
+  const start = Date.now();
+  try {
+    while (Date.now() - start < timeoutMs) {
+      if (Date.now() - lastRequestAt >= quietMs) return;
+      await page.waitForTimeout(200);
+    }
+    console.log('  [waitForCheckoutStable] timed out waiting for quiet — proceeding anyway');
+  } finally {
+    page.off('response', handler);
+  }
+}
+
+/**
  * Click the WC "Place Order" button, whichever variant is rendered (blocks
- * vs classic).
+ * vs classic). Waits for the checkout to settle first so the charge isn't
+ * fired while a debounced iframe refresh is still in flight.
  */
 async function clickPlaceOrder() {
+  await waitForCheckoutStable();
   const btn = page.locator(
     'button.wc-block-components-checkout-place-order-button, button:has-text("Realizar el pedido"), button:has-text("Place order"), #place_order'
   ).first();
@@ -875,5 +906,5 @@ module.exports = {
   setup, teardown, testOrderStatus, run,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
-  fillIntegrationCard, clickPlaceOrder, waitForOrderReceivedWith3DS,
+  fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
 };
