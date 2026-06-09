@@ -37,6 +37,14 @@ const utils = {
       form.querySelector('#place_order') ||
       form.querySelector('button[type="submit"]');
 
+    // The Conekta iframe must stay ABOVE the loading overlay: during the charge
+    // the SDK can show a 3DS challenge (OTP modal) inside the iframe, and the
+    // overlay (z-index 1000, covering the whole form) would otherwise intercept
+    // every click/keystroke so the customer can't type the OTP. We raise the
+    // iframe container above the overlay while keeping the rest of the form
+    // greyed-out and the place-order button disabled.
+    const container = document.querySelector(CONTAINER_SELECTOR);
+
     if (isLoading) {
       if (!form.querySelector('.conekta-loading-overlay')) {
         const overlay = document.createElement('div');
@@ -46,6 +54,10 @@ const utils = {
         form.style.position = 'relative';
         form.appendChild(overlay);
       }
+      if (container) {
+        container.style.position = 'relative';
+        container.style.zIndex = '1001';
+      }
       if (placeOrderBtn) {
         placeOrderBtn.disabled = true;
         placeOrderBtn.classList.add('conekta-disabled');
@@ -53,6 +65,9 @@ const utils = {
     } else {
       const overlay = form.querySelector('.conekta-loading-overlay');
       if (overlay) overlay.remove();
+      if (container) {
+        container.style.zIndex = '';
+      }
       if (placeOrderBtn) {
         placeOrderBtn.disabled = false;
         placeOrderBtn.classList.remove('conekta-disabled');
@@ -363,6 +378,14 @@ const submitInterceptor = {
 const orchestrator = {
   refresh: async () => {
     if (!utils.isConektaSelected()) return;
+    // Never refresh/remount while a charge is in progress. A late
+    // `updated_checkout` (a trailing update_order_review settling after the
+    // customer hit "Realizar el pedido") would otherwise call mounter.mount(),
+    // tear down + reload the iframe, and destroy an in-progress 3DS challenge
+    // (the OTP modal disappears mid-authentication and the order never
+    // completes). Confirmed via manual testing: with this guard the challenge
+    // modal stays put through the whole 3DS flow.
+    if (state.payingInProgress) return;
     if (!utils.isValidEmail(utils.getBillingEmail())) {
       utils.showPlaceholder();
       return;
