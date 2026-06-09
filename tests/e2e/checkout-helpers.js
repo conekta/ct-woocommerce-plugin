@@ -485,6 +485,15 @@ async function waitForIntegrationIframe() {
  * field appears, then fill the four fields in whatever frame held it.
  */
 async function fillIntegrationCard(card, timeoutMs = 60000) {
+  // CRITICAL: wait for the checkout to be stable BEFORE filling the card.
+  // Any cart/address change (e.g. a coupon that changes the amount) remounts
+  // the Integration iframe to show the new total — wiping a card filled into
+  // the old iframe. If we fill while a debounced refresh is still pending, the
+  // ensuing remount blanks the card and the SDK charges nothing ("Error
+  // procesando el pago", empty component-frame). Settling first means we fill
+  // the FINAL iframe and nothing remounts it before Place Order.
+  await waitForCheckoutStable();
+
   // Conekta Integration uses these stable input ids in both layouts (tile picker
   // and accordion). Targeting them directly avoids false positives from billing
   // or coupon fields that share the broader autocomplete/placeholder regexes.
@@ -711,7 +720,9 @@ async function dumpCheckoutDiagnostics(tag) {
       try {
         const p = window.wp?.data?.select?.('wc/store/payment');
         payment = p ? {
-          status: p.getCurrentStatus ? p.getCurrentStatus() : null,
+          idle: p.isPaymentIdle ? p.isPaymentIdle() : null,
+          processing: p.isPaymentProcessing ? p.isPaymentProcessing() : null,
+          hasError: p.hasPaymentError ? p.hasPaymentError() : null,
           active: p.getActivePaymentMethod ? p.getActivePaymentMethod() : null,
         } : 'no-store';
       } catch (e) { payment = 'err:' + e.message; }
