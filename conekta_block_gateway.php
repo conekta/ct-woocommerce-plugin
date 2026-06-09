@@ -238,6 +238,28 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      */
     protected function complete_wc_order_from_conekta(WC_Order $order, string $conekta_order_id): array {
         try {
+            // Guard against applying the same paid Conekta order to more than
+            // one WooCommerce order. On classic checkout the customer can
+            // resubmit (double-click on "Place order", AJAX timeout, browser
+            // retry) while the hidden conekta_order_id stays the same; WooCommerce
+            // then creates a second order. Without this check the single Conekta
+            // payment would complete BOTH WC orders (1 Conekta order -> 2 paid
+            // WC orders). The conekta-order-id meta is the unique link Conekta
+            // webhooks already rely on via find_order_for_webhook().
+            $duplicate = $this->find_existing_order_for_conekta_id($conekta_order_id, $order->get_id());
+            if ($duplicate) {
+                return [
+                    'success'        => false,
+                    'duplicate'      => true,
+                    'existing_order' => $duplicate,
+                    'error'          => sprintf(
+                        'La orden de Conekta %s ya fue aplicada al pedido #%d',
+                        $conekta_order_id,
+                        $duplicate->get_id()
+                    ),
+                ];
+            }
+
             $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
             $conekta_order = $api->getOrderById($conekta_order_id);
 
@@ -275,6 +297,24 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     }
 
     /**
+     * Look up a WooCommerce order (other than $exclude_order_id) that already
+     * holds the given conekta-order-id meta. Used to stop a single paid Conekta
+     * order from completing more than one WC order.
+     *
+     * @return WC_Order|false
+     */
+    protected function find_existing_order_for_conekta_id(string $conekta_order_id, int $exclude_order_id) {
+        $orders = wc_get_orders([
+            'meta_key'   => 'conekta-order-id',
+            'meta_value' => $conekta_order_id,
+            'exclude'    => [$exclude_order_id],
+            'limit'      => 1,
+        ]);
+
+        return !empty($orders) ? $orders[0] : false;
+    }
+
+    /**
      * @throws Exception
      */
     public function process_payment_api($context, $result) {
@@ -299,6 +339,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if ($outcome['success']) {
             $result->set_status('success');
             $result->set_redirect_url($this->get_return_url($order));
+        } elseif (!empty($outcome['duplicate']) && !empty($outcome['existing_order'])) {
+            // The Conekta payment already completed another WC order; send the
+            // customer to that successful order instead of failing or charging
+            // again. The duplicate WC order is left pending and cleaned up by WC.
+            $result->set_status('success');
+            $result->set_redirect_url($this->get_return_url($outcome['existing_order']));
         } else {
             wc_add_notice(__('Error: ', 'woothemes') . ($outcome['error'] ?? 'unknown'), 'error');
             WC()->session->reload_checkout = true;
@@ -337,6 +383,16 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             return [
                 'result'   => 'success',
                 'redirect' => $this->get_return_url($order),
+            ];
+        }
+
+        if (!empty($outcome['duplicate']) && !empty($outcome['existing_order'])) {
+            // Resubmission created a second WC order for an already-paid Conekta
+            // order. Redirect to the order that was actually paid instead of
+            // marking this duplicate as paid too.
+            return [
+                'result'   => 'success',
+                'redirect' => $this->get_return_url($outcome['existing_order']),
             ];
         }
 

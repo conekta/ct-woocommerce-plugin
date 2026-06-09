@@ -1,3 +1,8 @@
+6.0.2, 2026-06-09
+-------------------------------------
+- Fix: prevent a single paid Conekta order from completing more than one WooCommerce order (duplicate orders on checkout resubmission). The gateway now detects the duplicate via the unique conekta-order-id meta and redirects to the already-paid order.
+- Fix: build the Conekta shipping_contact from a single address block — shipping when the customer filled it, otherwise billing as a whole; the contact phone follows the same block.
+
 6.0.1, 2026-06-04
 -------------------------------------
 - Security: hardened handling of payment method data on the Blocks checkout.

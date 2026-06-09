@@ -449,6 +449,124 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // Duplicate conekta-order-id guard (1 Conekta order -> N WC orders)
+    // No Mockoon: the guard short-circuits before any Conekta API call.
+    // -------------------------------------------------------
+
+    /**
+     * find_existing_order_for_conekta_id returns another WC order that already
+     * holds the same conekta-order-id meta, and excludes the current order.
+     */
+    public function test_find_existing_order_for_conekta_id_detects_duplicate()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $paid = new WC_Order(1308);
+        $paid->update_meta_data('conekta-order-id', 'ord_dup123');
+        $test_order_registry[1308] = $paid;
+
+        $gateway = $this->createConfiguredGateway();
+        $method = new ReflectionMethod($gateway, 'find_existing_order_for_conekta_id');
+        $method->setAccessible(true);
+
+        // Looking up from a different order id (1309) finds the paid one.
+        $found = $method->invoke($gateway, 'ord_dup123', 1309);
+        $this->assertNotFalse($found);
+        $this->assertEquals(1308, $found->get_id());
+
+        // Excluding the order that holds the meta returns false (no duplicate).
+        $this->assertFalse($method->invoke($gateway, 'ord_dup123', 1308));
+
+        // Unknown conekta order id -> no duplicate.
+        $this->assertFalse($method->invoke($gateway, 'ord_other', 1309));
+    }
+
+    /**
+     * Classic checkout: a resubmission creates a second WC order while the
+     * hidden conekta_order_id stays the same. The guard must NOT mark the
+     * second order paid; it redirects the customer to the already-paid order.
+     */
+    public function test_process_payment_does_not_double_complete_on_resubmission()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        // Order 1308 was already paid with this Conekta order.
+        $paid = new WC_Order(1308);
+        $paid->update_meta_data('conekta-order-id', 'ord_dup123');
+        $paid->update_status('processing');
+        $test_order_registry[1308] = $paid;
+
+        // Order 1309 is the duplicate WC order created by the resubmission.
+        $dup = new WC_Order(1309);
+        $test_order_registry[1309] = $dup;
+
+        $gateway = $this->createConfiguredGateway();
+        $_POST = ['conekta_order_id' => 'ord_dup123'];
+
+        $result = $gateway->process_payment(1309);
+
+        // Customer is sent to a success page (the already-paid order)...
+        $this->assertEquals('success', $result['result']);
+        $this->assertArrayHasKey('redirect', $result);
+        // ...but the duplicate order 1309 is NOT marked paid.
+        $this->assertNotEquals('completed', $dup->get_status());
+        $this->assertNotEquals('processing', $dup->get_status());
+    }
+
+    /**
+     * Blocks checkout (Store API): same resubmission scenario as classic.
+     * process_payment_api must not mark the duplicate WC order paid; it sets
+     * the result to success and redirects to the already-paid order.
+     */
+    public function test_process_payment_api_does_not_double_complete_on_resubmission()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        // Order 1308 was already paid with this Conekta order.
+        $paid = new WC_Order(1308);
+        $paid->update_meta_data('conekta-order-id', 'ord_dup123');
+        $paid->update_status('processing');
+        $test_order_registry[1308] = $paid;
+
+        // Order 1309 is the duplicate WC order created by the resubmission.
+        $dup = new WC_Order(1309);
+        $test_order_registry[1309] = $dup;
+
+        $gateway = $this->createConfiguredGateway();
+
+        // Minimal stand-ins for the Store API PaymentContext / PaymentResult.
+        $context = new class($dup) {
+            public $order;
+            public $payment_method = 'conekta';
+            public $payment_data;
+            public function __construct($order) {
+                $this->order = $order;
+                $this->payment_data = ['conekta_order_id' => 'ord_dup123'];
+            }
+        };
+        $result = new class {
+            public $status;
+            public $redirect_url;
+            public $payment_details = [];
+            public function set_status($s) { $this->status = $s; }
+            public function set_redirect_url($u) { $this->redirect_url = $u; }
+            public function set_payment_details($d) { $this->payment_details = $d; }
+        };
+
+        $gateway->process_payment_api($context, $result);
+
+        // Result is success with a redirect (to the already-paid order)...
+        $this->assertEquals('success', $result->status);
+        $this->assertNotEmpty($result->redirect_url);
+        // ...but the duplicate order 1309 is NOT marked paid.
+        $this->assertNotEquals('completed', $dup->get_status());
+        $this->assertNotEquals('processing', $dup->get_status());
+    }
+
+    // -------------------------------------------------------
     // check_order_status (via Mockoon)
     // -------------------------------------------------------
 
@@ -1908,6 +2026,171 @@ class WC_Conekta_Gateway_Test extends TestCase
         $gateway = $this->gatewayWithSettings(['wallets_enabled' => 'no']);
         $methods = WC_Conekta_REST_API::build_allowed_payment_methods($gateway);
         $this->assertEquals(\Conekta\Model\OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, $methods[0]);
+    }
+
+    // -------------------------------------------------------
+    // resolve_address_source — block-level shipping/billing choice
+    // for the Conekta shipping_contact. Shipping wins only when the
+    // customer actually filled it (keyed on shipping_address_1).
+    // -------------------------------------------------------
+
+    /**
+     * Build a customer-like stub exposing get_{shipping,billing}_* getters.
+     */
+    private function makeAddressCustomer(array $shipping, array $billing)
+    {
+        // Real getter methods (not __call): resolve_address_source guards with
+        // method_exists(), which does NOT see __call-handled methods — and the
+        // real WC_Customer exposes these as concrete methods anyway.
+        return new class($shipping, $billing) {
+            private $shipping;
+            private $billing;
+            public function __construct($shipping, $billing) {
+                $this->shipping = $shipping;
+                $this->billing  = $billing;
+            }
+            private function s($k) { return $this->shipping[$k] ?? ''; }
+            private function b($k) { return $this->billing[$k] ?? ''; }
+            public function get_shipping_first_name() { return $this->s('first_name'); }
+            public function get_shipping_last_name()  { return $this->s('last_name'); }
+            public function get_shipping_address_1()  { return $this->s('address_1'); }
+            public function get_shipping_city()       { return $this->s('city'); }
+            public function get_shipping_state()      { return $this->s('state'); }
+            public function get_shipping_country()    { return $this->s('country'); }
+            public function get_shipping_postcode()   { return $this->s('postcode'); }
+            public function get_shipping_phone()      { return $this->s('phone'); }
+            public function get_billing_first_name()  { return $this->b('first_name'); }
+            public function get_billing_last_name()   { return $this->b('last_name'); }
+            public function get_billing_address_1()   { return $this->b('address_1'); }
+            public function get_billing_city()        { return $this->b('city'); }
+            public function get_billing_state()       { return $this->b('state'); }
+            public function get_billing_country()     { return $this->b('country'); }
+            public function get_billing_postcode()    { return $this->b('postcode'); }
+            public function get_billing_phone()       { return $this->b('phone'); }
+        };
+    }
+
+    /**
+     * The reported bug: address typed in billing, shipping carries only the
+     * theme-prefilled state/country. Must use the billing block as a whole,
+     * NOT mix the billing street with the shipping state.
+     */
+    public function test_resolve_address_source_uses_billing_when_shipping_empty()
+    {
+        $customer = $this->makeAddressCustomer(
+            // shipping: only state/country pre-filled, no street, no phone
+            ['state' => 'DF', 'country' => 'MX'],
+            [
+                'first_name' => 'fran', 'last_name' => 'carero',
+                'address_1' => 'av siempre viva', 'city' => 'cdmx',
+                'state' => 'DF', 'country' => 'MX', 'postcode' => '11011',
+                'phone' => '3143159054',
+            ]
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('av siempre viva', $addr['address_1']);
+        $this->assertEquals('cdmx', $addr['city']);
+        $this->assertEquals('11011', $addr['postcode']);
+        $this->assertEquals('fran', $addr['first_name']);
+        $this->assertEquals('carero', $addr['last_name']);
+        // phone follows the billing block (the one with data)
+        $this->assertEquals('3143159054', $addr['phone']);
+    }
+
+    /**
+     * When shipping is actually filled, use the shipping block as a whole.
+     */
+    public function test_resolve_address_source_uses_shipping_when_present()
+    {
+        $customer = $this->makeAddressCustomer(
+            [
+                'first_name' => 'envio', 'last_name' => 'destino',
+                'address_1' => 'calle envio 99', 'city' => 'Monterrey',
+                'state' => 'NL', 'country' => 'MX', 'postcode' => '64000',
+                'phone' => '8111111111',
+            ],
+            [
+                'first_name' => 'fact', 'last_name' => 'uracion',
+                'address_1' => 'calle billing 1', 'city' => 'CDMX',
+                'state' => 'DF', 'country' => 'MX', 'postcode' => '11011',
+                'phone' => '5522222222',
+            ]
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('calle envio 99', $addr['address_1']);
+        $this->assertEquals('Monterrey', $addr['city']);
+        $this->assertEquals('NL', $addr['state']);
+        $this->assertEquals('64000', $addr['postcode']);
+        $this->assertEquals('envio', $addr['first_name']);
+        // phone follows the shipping block (the one in use)
+        $this->assertEquals('8111111111', $addr['phone']);
+    }
+
+    /**
+     * Shipping address present but its name empty: address comes from shipping,
+     * receiver name falls back to billing so it is never blank.
+     */
+    public function test_resolve_address_source_name_falls_back_to_billing()
+    {
+        $customer = $this->makeAddressCustomer(
+            [
+                'address_1' => 'calle envio 99', 'city' => 'Monterrey',
+                'state' => 'NL', 'country' => 'MX', 'postcode' => '64000',
+            ],
+            ['first_name' => 'fran', 'last_name' => 'carero']
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('calle envio 99', $addr['address_1']);
+        $this->assertEquals('fran', $addr['first_name']);
+        $this->assertEquals('carero', $addr['last_name']);
+    }
+
+    /**
+     * Whitespace-only shipping street counts as empty -> falls back to billing.
+     */
+    public function test_resolve_address_source_treats_whitespace_shipping_as_empty()
+    {
+        $customer = $this->makeAddressCustomer(
+            ['address_1' => '   ', 'state' => 'DF', 'country' => 'MX'],
+            [
+                'first_name' => 'fran', 'address_1' => 'av billing 5',
+                'city' => 'cdmx', 'state' => 'DF', 'country' => 'MX',
+                'postcode' => '11011',
+            ]
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('av billing 5', $addr['address_1']);
+        $this->assertEquals('11011', $addr['postcode']);
+    }
+
+    /**
+     * Shipping block is in use but has no phone: the contact phone falls back
+     * to the billing phone so the shipping_contact phone is never empty.
+     */
+    public function test_resolve_address_source_phone_falls_back_to_other_block()
+    {
+        $customer = $this->makeAddressCustomer(
+            [
+                'first_name' => 'envio', 'address_1' => 'calle envio 99',
+                'city' => 'Monterrey', 'state' => 'NL', 'country' => 'MX',
+                'postcode' => '64000',
+                // no shipping phone
+            ],
+            ['phone' => '5522222222']
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('calle envio 99', $addr['address_1']);
+        $this->assertEquals('5522222222', $addr['phone']);
     }
 
     // -------------------------------------------------------

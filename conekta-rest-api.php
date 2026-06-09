@@ -459,7 +459,6 @@ class WC_Conekta_REST_API {
                     ? sanitize_text_field(WC()->customer->get_shipping_phone())
                     : '';
                 $customer_phone = self::resolve_phone($billing_phone, $shipping_phone);
-                $contact_phone  = self::resolve_phone($billing_phone, $shipping_phone);
 
                 $customer_info = [
                     'email' => $email,
@@ -467,16 +466,22 @@ class WC_Conekta_REST_API {
                     'phone' => $customer_phone ?: '0000000000',
                 ];
 
-                // Conekta requires shipping_contact to charge an order. Fall back
-                // to billing fields when shipping is unset (matches WC's "ship to
-                // same address" default).
-                $first    = WC()->customer->get_shipping_first_name() ?: WC()->customer->get_billing_first_name();
-                $last     = WC()->customer->get_shipping_last_name() ?: WC()->customer->get_billing_last_name();
-                $address1 = WC()->customer->get_shipping_address_1() ?: WC()->customer->get_billing_address_1();
-                $city     = WC()->customer->get_shipping_city() ?: WC()->customer->get_billing_city();
-                $state    = WC()->customer->get_shipping_state() ?: WC()->customer->get_billing_state();
-                $country  = WC()->customer->get_shipping_country() ?: WC()->customer->get_billing_country();
-                $postcode = WC()->customer->get_shipping_postcode() ?: WC()->customer->get_billing_postcode();
+                // Conekta requires shipping_contact to charge an order. Pick the
+                // address block at the block level (see resolve_address_source):
+                // use shipping only when the customer actually typed it, else
+                // fall back to billing as a whole. This avoids mixing a billing
+                // street with a shipping state/country that themes pre-fill with
+                // store defaults. The phone comes from the SAME block as the
+                // address so the contact stays consistent.
+                $addr          = self::resolve_address_source(WC()->customer);
+                $first         = $addr['first_name'];
+                $last          = $addr['last_name'];
+                $address1      = $addr['address_1'];
+                $city          = $addr['city'];
+                $state         = $addr['state'];
+                $country       = $addr['country'];
+                $postcode      = $addr['postcode'];
+                $contact_phone = sanitize_text_field($addr['phone']);
 
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
@@ -545,6 +550,50 @@ class WC_Conekta_REST_API {
      */
     public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
         return $shipping_phone ?: $billing_phone;
+    }
+
+    /**
+     * Pick which address block (shipping or billing) feeds the Conekta
+     * shipping_contact, as a WHOLE block.
+     *
+     * Shipping wins only when the customer actually filled it in — we key the
+     * decision on shipping_address_1 (the street line), NOT on state/country:
+     * WooCommerce themes routinely pre-populate shipping_state and
+     * shipping_country with store defaults even when the customer typed their
+     * real address into billing. A per-field `shipping ?: billing` fallback
+     * would then mix a billing street with a stale shipping state and break
+     * Conekta's antifraud rules. When shipping_address_1 is empty we take the
+     * billing block as a whole.
+     *
+     * first_name / last_name / phone still fall back to the other block when
+     * the chosen block's value is empty, so the receiver name and contact
+     * phone are never blank.
+     *
+     * @param object $customer object exposing get_{shipping,billing}_* getters
+     * @return array{first_name:string,last_name:string,address_1:string,city:string,state:string,country:string,postcode:string,phone:string}
+     */
+    public static function resolve_address_source($customer): array {
+        $get = function (string $prefix, string $field) use ($customer): string {
+            $getter = "get_{$prefix}_{$field}";
+            return method_exists($customer, $getter) ? trim((string) $customer->{$getter}()) : '';
+        };
+
+        $use_shipping = $get('shipping', 'address_1') !== '';
+        $prefix = $use_shipping ? 'shipping' : 'billing';
+        $other  = $use_shipping ? 'billing'  : 'shipping';
+
+        return [
+            'first_name' => $get($prefix, 'first_name') ?: $get('billing', 'first_name'),
+            'last_name'  => $get($prefix, 'last_name')  ?: $get('billing', 'last_name'),
+            'address_1'  => $get($prefix, 'address_1'),
+            'city'       => $get($prefix, 'city'),
+            'state'      => $get($prefix, 'state'),
+            'country'    => $get($prefix, 'country'),
+            'postcode'   => $get($prefix, 'postcode'),
+            // Phone follows the chosen address block; fall back to the other
+            // block's phone so the shipping_contact phone is never empty.
+            'phone'      => $get($prefix, 'phone') ?: $get($other, 'phone'),
+        ];
     }
 
     /**
