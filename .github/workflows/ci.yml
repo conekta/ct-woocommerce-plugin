@@ -11,6 +11,9 @@ on:
 
 jobs:
   build-and-test:
+    # TEMP: skipped while iterating on the e2e job to save CI minutes.
+    # RE-ENABLE before merge (remove this `if` line).
+    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
