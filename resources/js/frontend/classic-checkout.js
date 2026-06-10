@@ -115,6 +115,11 @@ const state = {
   refreshTimer: null,
   inflight: false,
   payingInProgress: false,
+  // Conekta order id we've already submitted to WooCommerce. The SDK can emit
+  // the finalized-order event more than once (a re-fired 3DS/finalize
+  // callback); we submit the WC checkout only ONCE per Conekta order so a
+  // single payment never creates two WC orders.
+  submittedOrderId: null,
 };
 
 const formHandler = {
@@ -131,6 +136,9 @@ const formHandler = {
       if (data.result === "success") {
         window.location.href = data.redirect;
       } else {
+        // The WC submit failed (e.g. transient error). Clear the dedup guard
+        // so the customer can retry with the same already-paid Conekta order.
+        state.submittedOrderId = null;
         utils.setLoading(false);
         const form = document.querySelector(FORM_SELECTOR);
         if (form) {
@@ -148,6 +156,8 @@ const formHandler = {
         }
       }
     } catch (error) {
+      // Network/parse failure — clear the dedup guard so a retry can resubmit.
+      state.submittedOrderId = null;
       utils.setLoading(false);
       utils.showErrorMessage(utils.getTranslation("form_error"));
     }
@@ -190,8 +200,19 @@ const mounter = {
     orderEmitter.onOrder(async (order) => {
       const form = document.querySelector(FORM_SELECTOR);
       if (!form) return;
+
+      const orderId = (order && order.id) || "";
+      // Ignore a repeated finalize event for an order we already submitted —
+      // the SDK can emit onOrder more than once, and submitting twice would
+      // create a duplicate WC order for the same Conekta payment.
+      if (orderId && orderId === state.submittedOrderId) {
+        mounter.wireOrderListeners();
+        return;
+      }
+      state.submittedOrderId = orderId;
+
       const hidden = form.querySelector('[name="conekta_order_id"]');
-      if (hidden) hidden.value = (order && order.id) || "";
+      if (hidden) hidden.value = orderId;
 
       // Discriminate the source: payingInProgress is set by submitInterceptor
       // when the user clicked "Realizar el pedido" (card path). If it's still
