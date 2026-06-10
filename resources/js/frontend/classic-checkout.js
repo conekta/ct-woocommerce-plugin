@@ -190,7 +190,7 @@ const requestCheckout = async () => {
       email: utils.getBillingEmail(),
       billing: addressFromForm('billing'),
       shipping: addressFromForm('shipping'),
-      checkout_type: 'classic',
+      woocommerce_checkout_type: 'classic',
     }),
     credentials: 'same-origin',
   });
