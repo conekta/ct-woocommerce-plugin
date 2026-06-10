@@ -129,10 +129,12 @@ class WC_Conekta_REST_API {
             // update_order_review syncs the form to WC()->customer. The client
             // sends the typed email so we can backfill the customer object,
             // keeping the snapshot read fully server-authoritative downstream.
+            // Apply it whenever it differs (not only when missing) so a corrected
+            // email actually propagates.
             $email_from_body = $request ? $request->get_param('email') : null;
-            if ($email_from_body && WC()->customer && !WC()->customer->get_billing_email()) {
+            if ($email_from_body && WC()->customer) {
                 $clean_email = sanitize_email($email_from_body);
-                if ($clean_email) {
+                if ($clean_email && $clean_email !== WC()->customer->get_billing_email()) {
                     WC()->customer->set_billing_email($clean_email);
                     WC()->customer->save();
                 }
@@ -167,18 +169,17 @@ class WC_Conekta_REST_API {
             // their address" and replace the 'Pendiente' fallback.
             $current_shipping_hash = self::shipping_contact_hash($snapshot['shipping_contact'] ?? []);
 
-            // Conekta SNAPSHOTS the embedded customer (name/phone) at order
-            // creation — OrderUpdate.setCustomerInfo does NOT change it (only
-            // shipping_contact is updatable). The order is created early (as
-            // soon as we have the email, to mount the iframe) before the shopper
-            // typed their name, so customer_info defaults to 'Cliente' /
-            // 0000000000. When the real name finally arrives, RECREATE the order
-            // so the Conekta customer object shows the real data. This fires
-            // once (placeholder -> real), while the customer is still filling
-            // the form, before any card entry.
-            $last_customer_name    = $state['customer_name'] ?? '';
+            // The order is created early (as soon as we have the email, to mount
+            // the iframe) before the shopper typed their name, so customer_info
+            // defaults to the 'Cliente' / 0000000000 placeholders. When the real
+            // name finally arrives, RECREATE the order: Conekta freezes the
+            // embedded customer at creation and only OrderUpdate.shipping_contact
+            // is updatable, so a placeholder->real name can't be patched in.
+            // (An email change, by contrast, is pushed via the update path below
+            // — the order isn't paid yet, so updateOrder still accepts it.)
             $current_customer_name = $snapshot['customer_info']['name'] ?? '';
-            $customer_became_real  = self::customer_became_real($last_customer_name, $current_customer_name);
+            $current_email         = $snapshot['customer_info']['email'] ?? '';
+            $customer_became_real  = self::customer_became_real($state['customer_name'] ?? '', $current_customer_name);
             if ($existing_order_id && $customer_became_real) {
                 self::clear_session();
                 $existing_order_id   = null;
@@ -202,10 +203,14 @@ class WC_Conekta_REST_API {
             }
 
             if ($existing_order_id && $existing_request_id) {
+                // Also key "unchanged" on the email: it's not part of the
+                // shipping_hash, so without this an email correction would
+                // short-circuit here and never reach the setCustomerInfo update.
                 if (
                     $last_amount !== null
                     && (int) $last_amount === (int) $current_amount
                     && $current_shipping_hash === $last_shipping_hash
+                    && $current_email === ($state['customer_email'] ?? '')
                 ) {
                     return new WP_REST_Response([
                         'success'             => true,
@@ -260,6 +265,7 @@ class WC_Conekta_REST_API {
                         'last_amount'        => (int) $current_amount,
                         'last_shipping_hash' => $current_shipping_hash,
                         'customer_name'      => $current_customer_name,
+                        'customer_email'     => $current_email,
                     ]);
 
                     return new WP_REST_Response([
@@ -367,6 +373,7 @@ class WC_Conekta_REST_API {
                 'last_amount'        => (int) $current_amount,
                 'last_shipping_hash' => $current_shipping_hash,
                 'customer_name'      => $current_customer_name,
+                'customer_email'     => $current_email,
             ]);
 
             return new WP_REST_Response([
