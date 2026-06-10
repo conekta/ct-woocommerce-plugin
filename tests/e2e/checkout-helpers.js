@@ -843,9 +843,11 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
   dumpLog();
 
   // Diagnostic: dump the checkout's visible state at timeout so a failure shows
-  // the REAL reason (e.g. an "Error procesando el pago" notice) instead of us
-  // guessing. Reads notices + the WC Blocks payment store + the place-order
-  // button + whether the Conekta iframe is still mounted.
+  // the REAL reason instead of us guessing. Covers BOTH checkouts:
+  //  - Blocks: notice banners + the wc/store/payment store.
+  //  - Classic: woocommerce-error/notice wrappers, the conekta-loading-overlay
+  //    (was the bug that blocked the OTP modal), and the hidden conekta_order_id
+  //    (tells us whether the SDK finalized and wrote the order id).
   try {
     const dom = await page.evaluate(() => {
       const txt = (sel) => Array.from(document.querySelectorAll(sel))
@@ -855,6 +857,8 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
         ...txt('.wc-block-components-validation-error'),
         ...txt('.woocommerce-error'),
         ...txt('.woocommerce-message'),
+        ...txt('.woocommerce-notices-wrapper'),
+        ...txt('.woocommerce-NoticeGroup'),
         ...txt('[role="alert"]'),
       ])).map((s) => s.slice(0, 200));
       let payment = 'no-store';
@@ -869,12 +873,16 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
       } catch (e) { payment = 'err:' + e.message; }
       const btn = document.querySelector('button.wc-block-components-checkout-place-order-button, #place_order');
       const cont = document.querySelector('#conektaITokenizerframeContainer');
+      const hidden = document.querySelector('[name="conekta_order_id"]');
       return {
         url: location.href,
         notices,
         payment,
         placeBtn: btn ? { text: (btn.innerText || '').slice(0, 40), disabled: !!btn.disabled } : null,
         hasIframe: !!(cont && cont.querySelector('iframe')),
+        // Classic-specific signals:
+        loadingOverlay: !!document.querySelector('.conekta-loading-overlay'),
+        conektaOrderIdField: hidden ? (hidden.value || '(empty)') : '(no field)',
       };
     });
     console.log('  [checkout DOM at timeout]');
@@ -882,6 +890,7 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
     console.log('    notices=' + JSON.stringify(dom.notices));
     console.log('    payment=' + JSON.stringify(dom.payment));
     console.log('    placeBtn=' + JSON.stringify(dom.placeBtn) + ' hasIframe=' + dom.hasIframe);
+    console.log('    loadingOverlay=' + dom.loadingOverlay + ' conektaOrderIdField=' + dom.conektaOrderIdField);
   } catch (e) {
     console.log('  [checkout DOM dump failed]: ' + e.message);
   }

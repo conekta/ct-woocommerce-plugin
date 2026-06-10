@@ -5,9 +5,7 @@ const { join } = require('path');
 const dir = __dirname;
 
 // TEMP: specs skipped while iterating. RE-ENABLE before merge (empty this set).
-const SKIP = new Set([
-  'discount-classic.spec.js',
-]);
+const SKIP = new Set([]);
 
 const specs = readdirSync(dir)
   .filter(f => f.endsWith('.spec.js') && !SKIP.has(f))
