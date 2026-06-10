@@ -169,9 +169,9 @@ const requestCheckout = async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // Email is the user's primary input and isn't always synced to
-    // WC()->customer yet when classic fires. The full billing/shipping is
-    // synced server-side from WC's own update_order_review POST (see
-    // capture_classic_form), so we don't read the DOM here.
+    // WC()->customer yet when classic fires, so we send it explicitly. The
+    // real customer name/phone is backfilled onto the Conekta order at
+    // payment time from the WC order (see backfill_conekta_customer).
     body: JSON.stringify({
       nonce: conekta_settings.nonce,
       email: utils.getBillingEmail(),
