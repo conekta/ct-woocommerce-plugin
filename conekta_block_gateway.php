@@ -9,7 +9,10 @@
 require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\ApiException;
+use Conekta\Api\OrdersApi;
 use Conekta\Model\EventTypes;
+use Conekta\Model\OrderUpdate;
+use Conekta\Model\OrderUpdateCustomerInfo;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
@@ -287,6 +290,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $order->payment_complete($conekta_order_id);
             $order->add_order_note(sprintf(__('Pago confirmado con Conekta (orden %s)', 'woocommerce'), $conekta_order_id));
 
+            // The order was created early (before the shopper typed their name),
+            // so its customer_info shows the "Cliente" / 0000000000 placeholders.
+            // Now that the WC order has the real billing, push it onto the
+            // order's customer_info.
+            $this->backfill_conekta_customer($api, $conekta_order_id, $order);
+
             WC_Conekta_REST_API::clear_session();
 
             return ['success' => true];
@@ -332,6 +341,36 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 $existing->get_id()
             )
         );
+    }
+
+    /**
+     * Update the order's embedded customer_info with the real billing data.
+     *
+     * The Conekta order is created early (before the shopper typed their name),
+     * so its customer_info defaults to "Cliente" / 0000000000. At payment time
+     * the WC order finally holds the real billing — push it onto the order's
+     * customer_info via OrderUpdate. Best-effort: a failure here never blocks
+     * the already-completed payment.
+     */
+    protected function backfill_conekta_customer(OrdersApi $api, string $conekta_order_id, WC_Order $order): void {
+        try {
+            $name  = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+            $phone = $order->get_billing_phone();
+            $email = $order->get_billing_email();
+            if ($name === '' && empty($phone)) {
+                return;
+            }
+
+            $info = [];
+            if (!empty($email)) { $info['email'] = $email; }
+            if ($name !== '')   { $info['name']  = $name; }
+            if (!empty($phone)) { $info['phone'] = $phone; }
+
+            $update = new OrderUpdate(['customer_info' => new OrderUpdateCustomerInfo($info)]);
+            $api->updateOrder($conekta_order_id, $update);
+        } catch (\Exception $e) {
+            error_log('Conekta - backfill_conekta_customer: ' . $e->getMessage());
+        }
     }
 
     /**
