@@ -29,17 +29,18 @@ const QUANTITY = Math.floor(Math.random() * 5) + 1;
 // once at module load, so it stays stable across a single spec (the payment and
 // the resubmission share the same name); each spec runs in its own process via
 // run.js, so they get independent names.
+// No accents/ñ on purpose — keep the data ASCII-safe for the Conekta API.
 const FIRST_NAMES = [
-  'Mauricio', 'Sofía', 'Diego', 'Valentina', 'Carlos', 'Fernanda', 'Alejandro', 'Regina', 'Ricardo', 'Gabriela',
-  'Santiago', 'Camila', 'Mateo', 'Ximena', 'Emiliano', 'Renata', 'Sebastián', 'Daniela', 'Leonardo', 'Andrea',
-  'Maximiliano', 'Mariana', 'Iker', 'Paola', 'Ángel', 'Lucía', 'Bruno', 'Isabela', 'Adrián', 'Natalia',
-  'Héctor', 'Andrés', 'Rodrigo', 'Mónica', 'Tomás', 'Verónica', 'Pablo', 'Carolina', 'Manuel', 'Jimena',
+  'Mauricio', 'Sofia', 'Diego', 'Valentina', 'Carlos', 'Fernanda', 'Alejandro', 'Regina', 'Ricardo', 'Gabriela',
+  'Santiago', 'Camila', 'Mateo', 'Ximena', 'Emiliano', 'Renata', 'Sebastian', 'Daniela', 'Leonardo', 'Andrea',
+  'Maximiliano', 'Mariana', 'Iker', 'Paola', 'Angel', 'Lucia', 'Bruno', 'Isabela', 'Adrian', 'Natalia',
+  'Hector', 'Andres', 'Rodrigo', 'Monica', 'Tomas', 'Veronica', 'Pablo', 'Carolina', 'Manuel', 'Jimena',
 ];
 const LAST_NAMES = [
-  'Hernández', 'García', 'Martínez', 'López', 'González', 'Rodríguez', 'Pérez', 'Sánchez', 'Ramírez', 'Torres',
-  'Flores', 'Rivera', 'Gómez', 'Díaz', 'Cruz', 'Morales', 'Reyes', 'Gutiérrez', 'Ortiz', 'Chávez',
-  'Ramos', 'Ruiz', 'Jiménez', 'Mendoza', 'Vázquez', 'Castillo', 'Romero', 'Álvarez', 'Méndez', 'Aguilar',
-  'Vargas', 'Guzmán', 'Domínguez', 'Herrera', 'Medina', 'Castro', 'Núñez', 'Rojas', 'Ríos', 'Estrada',
+  'Hernandez', 'Garcia', 'Martinez', 'Lopez', 'Gonzalez', 'Rodriguez', 'Perez', 'Sanchez', 'Ramirez', 'Torres',
+  'Flores', 'Rivera', 'Gomez', 'Diaz', 'Cruz', 'Morales', 'Reyes', 'Gutierrez', 'Ortiz', 'Chavez',
+  'Ramos', 'Ruiz', 'Jimenez', 'Mendoza', 'Vazquez', 'Castillo', 'Romero', 'Alvarez', 'Mendez', 'Aguilar',
+  'Vargas', 'Guzman', 'Dominguez', 'Herrera', 'Medina', 'Castro', 'Nunez', 'Rojas', 'Rios', 'Estrada',
 ];
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const FIRST_NAME = pickRandom(FIRST_NAMES);
