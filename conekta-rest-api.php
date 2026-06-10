@@ -42,6 +42,43 @@ class WC_Conekta_REST_API {
         add_action('rest_api_init', [self::class, 'register_routes']);
         add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
         add_action('template_redirect', [self::class, 'reset_session_on_checkout_entry']);
+        // Classic checkout: capture the full billing/shipping (name included)
+        // from WC's own update_order_review POST into WC()->customer, so our
+        // later checkout-request snapshots the real customer instead of the
+        // 'Cliente'/'Pendiente' placeholders. update_order_review runs BEFORE
+        // the updated_checkout that triggers our checkout-request.
+        add_action('woocommerce_checkout_update_order_review', [self::class, 'capture_classic_form']);
+    }
+
+    /**
+     * Sync WC()->customer from the serialized checkout form WooCommerce posts
+     * on every classic update_order_review. WC's own handler only syncs the
+     * address fields it needs for shipping calc (not first/last name), so the
+     * Conekta customer was left as 'Cliente'. We apply the full billing/shipping
+     * (name + phone + address) and persist it for the next checkout-request.
+     *
+     * @param string $post_data URL-encoded checkout form (WC passes it raw).
+     */
+    public static function capture_classic_form($post_data): void {
+        if (!WC()->customer || !is_string($post_data) || $post_data === '') {
+            return;
+        }
+        parse_str($post_data, $form);
+        if (empty($form) || !is_array($form)) {
+            return;
+        }
+        $extract = function (string $prefix) use ($form): array {
+            $out = [];
+            foreach (['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'] as $field) {
+                if (!empty($form["{$prefix}_{$field}"])) {
+                    $out[$field] = $form["{$prefix}_{$field}"];
+                }
+            }
+            return $out;
+        };
+        self::apply_address_from_body(WC()->customer, 'billing', $extract('billing'));
+        self::apply_address_from_body(WC()->customer, 'shipping', $extract('shipping'));
+        WC()->customer->save();
     }
 
     /**

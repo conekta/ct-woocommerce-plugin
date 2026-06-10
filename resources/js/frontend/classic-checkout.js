@@ -164,41 +164,17 @@ const formHandler = {
   }
 };
 
-// Read a billing/shipping address straight from the classic checkout form.
-// Classic only reliably syncs WC()->customer through update_order_review, which
-// the order-create can race — so we send the live form values and let the
-// server apply them (apply_address_from_body) before snapshotting. Empty fields
-// are ignored server-side, so an early create (before the address is typed)
-// still works and a later request backfills the real name/address.
-const collectAddress = (prefix) => {
-  const get = (field) => {
-    const el = document.querySelector(`#${prefix}_${field}`);
-    return el ? (el.value || '').trim() : '';
-  };
-  return {
-    first_name: get('first_name'),
-    last_name:  get('last_name'),
-    address_1:  get('address_1'),
-    city:       get('city'),
-    state:      get('state'),
-    postcode:   get('postcode'),
-    country:    get('country'),
-    phone:      get('phone'),
-  };
-};
-
 const requestCheckout = async () => {
   const response = await fetch(conekta_settings.checkout_request_url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Email + billing/shipping come from the live form so the server doesn't
-    // depend on WC()->customer being synced yet (classic fires before
-    // update_order_review). The server backfills the customer from these.
+    // Email is the user's primary input and isn't always synced to
+    // WC()->customer yet when classic fires. The full billing/shipping is
+    // synced server-side from WC's own update_order_review POST (see
+    // capture_classic_form), so we don't read the DOM here.
     body: JSON.stringify({
       nonce: conekta_settings.nonce,
       email: utils.getBillingEmail(),
-      billing: collectAddress('billing'),
-      shipping: collectAddress('shipping'),
       checkout_type: 'classic',
     }),
     credentials: 'same-origin',
