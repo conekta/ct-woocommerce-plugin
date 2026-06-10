@@ -842,59 +842,6 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
   page.off('response', responseHandler);
   dumpLog();
 
-  // Diagnostic: dump the checkout's visible state at timeout so a failure shows
-  // the REAL reason instead of us guessing. Covers BOTH checkouts:
-  //  - Blocks: notice banners + the wc/store/payment store.
-  //  - Classic: woocommerce-error/notice wrappers, the conekta-loading-overlay
-  //    (was the bug that blocked the OTP modal), and the hidden conekta_order_id
-  //    (tells us whether the SDK finalized and wrote the order id).
-  try {
-    const dom = await page.evaluate(() => {
-      const txt = (sel) => Array.from(document.querySelectorAll(sel))
-        .map((e) => (e.innerText || e.textContent || '').trim()).filter(Boolean);
-      const notices = Array.from(new Set([
-        ...txt('.wc-block-components-notice-banner'),
-        ...txt('.wc-block-components-validation-error'),
-        ...txt('.woocommerce-error'),
-        ...txt('.woocommerce-message'),
-        ...txt('.woocommerce-notices-wrapper'),
-        ...txt('.woocommerce-NoticeGroup'),
-        ...txt('[role="alert"]'),
-      ])).map((s) => s.slice(0, 200));
-      let payment = 'no-store';
-      try {
-        const p = window.wp?.data?.select?.('wc/store/payment');
-        if (p) payment = {
-          idle: p.isPaymentIdle?.(),
-          processing: p.isPaymentProcessing?.(),
-          hasError: p.hasPaymentError?.(),
-          active: p.getActivePaymentMethod?.(),
-        };
-      } catch (e) { payment = 'err:' + e.message; }
-      const btn = document.querySelector('button.wc-block-components-checkout-place-order-button, #place_order');
-      const cont = document.querySelector('#conektaITokenizerframeContainer');
-      const hidden = document.querySelector('[name="conekta_order_id"]');
-      return {
-        url: location.href,
-        notices,
-        payment,
-        placeBtn: btn ? { text: (btn.innerText || '').slice(0, 40), disabled: !!btn.disabled } : null,
-        hasIframe: !!(cont && cont.querySelector('iframe')),
-        // Classic-specific signals:
-        loadingOverlay: !!document.querySelector('.conekta-loading-overlay'),
-        conektaOrderIdField: hidden ? (hidden.value || '(empty)') : '(no field)',
-      };
-    });
-    console.log('  [checkout DOM at timeout]');
-    console.log('    url=' + dom.url);
-    console.log('    notices=' + JSON.stringify(dom.notices));
-    console.log('    payment=' + JSON.stringify(dom.payment));
-    console.log('    placeBtn=' + JSON.stringify(dom.placeBtn) + ' hasIframe=' + dom.hasIframe);
-    console.log('    loadingOverlay=' + dom.loadingOverlay + ' conektaOrderIdField=' + dom.conektaOrderIdField);
-  } catch (e) {
-    console.log('  [checkout DOM dump failed]: ' + e.message);
-  }
-
   // Diagnostic: dump every frame URL and the inputs inside the 3DS challenge.
   console.log('  [frames at timeout]');
   for (const f of page.frames()) console.log('    - ' + f.url().slice(0, 200));

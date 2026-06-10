@@ -3,15 +3,7 @@ const { spawnSync } = require('child_process');
 const { join } = require('path');
 
 const dir = __dirname;
-
-// TEMP: specs skipped while iterating. RE-ENABLE before merge (empty this set).
-const SKIP = new Set([]);
-
-const specs = readdirSync(dir)
-  .filter(f => f.endsWith('.spec.js') && !SKIP.has(f))
-  .sort();
-
-SKIP.forEach(s => console.log(`[run] SKIPPING ${s} (temporary)`));
+const specs = readdirSync(dir).filter(f => f.endsWith('.spec.js')).sort();
 
 // Run every spec once (no retries) and report a summary at the end. We don't
 // abort on the first failure so a single failing spec doesn't hide the status
