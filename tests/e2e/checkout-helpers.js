@@ -49,6 +49,9 @@ const LAST_NAME = pickRandom(LAST_NAMES);
 const emailSlug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
 // Email derived from the random name, e.g. sofia.hernandez@example.com.
 const EMAIL = `${emailSlug(FIRST_NAME)}.${emailSlug(LAST_NAME)}@example.com`;
+// Random 10-digit phone (first digit non-zero) instead of a fixed number.
+const PHONE = String(Math.floor(Math.random() * 9) + 1)
+  + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join('');
 
 // Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
 // auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
@@ -69,7 +72,7 @@ const BILLING = {
   city: 'CDMX',
   state: 'DF',
   postcode: '11010',
-  phone: '5555555555',
+  phone: PHONE,
   email: EMAIL,
 };
 

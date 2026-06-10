@@ -183,6 +183,7 @@ const ContentConekta = (props) => {
                         email: billingEmail,
                         billing:  billingAddress,
                         shipping: shippingAddress,
+                        checkout_type: 'blocks',
                     }),
                 });
 

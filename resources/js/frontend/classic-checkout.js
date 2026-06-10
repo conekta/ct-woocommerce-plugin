@@ -175,6 +175,7 @@ const requestCheckout = async () => {
     body: JSON.stringify({
       nonce: conekta_settings.nonce,
       email: utils.getBillingEmail(),
+      checkout_type: 'classic',
     }),
     credentials: 'same-origin',
   });

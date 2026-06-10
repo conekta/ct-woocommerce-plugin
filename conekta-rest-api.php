@@ -320,6 +320,14 @@ class WC_Conekta_REST_API {
 
             $checkout = new OrderCheckoutRequest($checkout_data);
 
+            // Record whether the order was created from the Blocks or the
+            // Classic checkout (the frontend sends checkout_type). Useful for
+            // debugging / segmenting orders on the Conekta dashboard.
+            $checkout_type = $request ? sanitize_text_field((string) $request->get_param('checkout_type')) : '';
+            if (!in_array($checkout_type, ['blocks', 'classic'], true)) {
+                $checkout_type = 'unknown';
+            }
+
             $balanced = ckpg_check_balance([
                 'line_items'     => $snapshot['line_items'],
                 'shipping_lines' => $snapshot['shipping_lines'],
@@ -340,6 +348,7 @@ class WC_Conekta_REST_API {
                     'plugin_conekta_version' => $gateway->version,
                     'woocommerce_version'    => WC()->version,
                     'payment_method'         => 'WC_Conekta_Gateway',
+                    'checkout_type'          => $checkout_type,
                 ],
             ]);
 
