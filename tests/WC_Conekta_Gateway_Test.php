@@ -2100,6 +2100,36 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     /**
+     * Regression for the "customer object shows Cliente / 0000000000" bug:
+     * the shopper filled ONLY the shipping block (billing empty) — the common
+     * WC Blocks case. resolve_address_source feeds BOTH customer_info and
+     * shipping_contact, so it must return the real shipping name + phone here;
+     * otherwise customer_info falls back to the 'Cliente' / 0000000000 defaults.
+     */
+    public function test_resolve_address_source_customer_name_from_shipping_when_billing_empty()
+    {
+        $customer = $this->makeAddressCustomer(
+            [
+                'first_name' => 'blocks', 'last_name' => 'User',
+                'address_1' => 'Calle Test lisa', 'city' => 'CDMX',
+                'state' => 'DF', 'country' => 'MX', 'postcode' => '11010',
+                'phone' => '3143159054',
+            ],
+            [] // billing completely empty — the exact bug scenario
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+        $name = trim($addr['first_name'] . ' ' . $addr['last_name']);
+
+        // These are exactly what build_snapshot puts into customer_info.name /
+        // customer_info.phone — non-empty, so it won't fall back to defaults.
+        $this->assertEquals('blocks User', $name, 'customer name must come from shipping, not default to Cliente');
+        $this->assertEquals('3143159054', $addr['phone'], 'customer phone must come from shipping, not default to 0000000000');
+        $this->assertNotSame('', $name);
+        $this->assertNotSame('', $addr['phone']);
+    }
+
+    /**
      * When shipping is actually filled, use the shipping block as a whole.
      */
     public function test_resolve_address_source_uses_shipping_when_present()
