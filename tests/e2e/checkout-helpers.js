@@ -929,7 +929,7 @@ async function run(label, optionsOrFn, maybeFn) {
 module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
   TEST_CARD, BILLING,
-  assert, getPage, getCounters, wcApi, setCheckoutType, loginAsAdmin,
+  assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,

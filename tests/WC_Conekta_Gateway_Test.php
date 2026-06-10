@@ -2359,52 +2359,6 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
-    // resolve_phone — shipping wins over billing because WC
-    // Blocks does NOT sync the phone field on the "use same
-    // address for billing" toggle, so billing_phone is often
-    // stale relative to what the customer just typed.
-    // -------------------------------------------------------
-
-    public function test_resolve_phone_shipping_wins_when_both_present()
-    {
-        // The bug scenario: WC Blocks left billing_phone='5555555555'
-        // from a previous interaction, the customer typed '3143159054'
-        // in the shipping block, and the toggle is on. Conekta must
-        // receive the new number, not the stale one.
-        $this->assertSame(
-            '3143159054',
-            WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054')
-        );
-    }
-
-    public function test_resolve_phone_falls_back_to_billing_when_shipping_empty()
-    {
-        // Classic checkout has only one phone field — it lands in
-        // billing_phone and shipping_phone never gets set.
-        $this->assertSame(
-            '5555555555',
-            WC_Conekta_REST_API::resolve_phone('5555555555', '')
-        );
-    }
-
-    public function test_resolve_phone_uses_shipping_when_billing_empty()
-    {
-        $this->assertSame(
-            '3143159054',
-            WC_Conekta_REST_API::resolve_phone('', '3143159054')
-        );
-    }
-
-    public function test_resolve_phone_returns_empty_string_when_both_empty()
-    {
-        // The caller is responsible for substituting the '0000000000'
-        // placeholder — resolve_phone is purely a preference picker so
-        // that decision lives at the call site where the placeholder
-        // policy is visible.
-        $this->assertSame('', WC_Conekta_REST_API::resolve_phone('', ''));
-    }
-
-    // -------------------------------------------------------
     // OrderUpdate customer_info regression — pin the SDK
     // contract that lets the update path push a fresh
     // customer_info.phone to Conekta. Without this support
@@ -2448,22 +2402,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $contact = $update->getShippingContact();
         $this->assertNotNull($contact);
         $this->assertSame('3143159054', $contact->getPhone());
-    }
-
-    public function test_resolve_phone_user_scenario_blocks_does_not_sync_phone()
-    {
-        // Documents the exact reproduction the merchant hit on staging:
-        //   - billing_phone='5555555555' was left in WC()->customer from a
-        //     previous interaction.
-        //   - The customer typed '3143159054' in Dirección de envío.
-        //   - "Usar la misma dirección para facturación" was on.
-        //   - WC Blocks copied the shipping address to billing but DID NOT
-        //     sync billing_phone, so build_snapshot saw both phones diverge.
-        // resolve_phone must return the shipping one so customer_info.phone
-        // (and shipping_contact.phone, which uses the same helper) reflect
-        // what the customer just typed instead of the stale leftover.
-        $resolved = WC_Conekta_REST_API::resolve_phone('5555555555', '3143159054');
-        $this->assertSame('3143159054', $resolved);
     }
 
     // -------------------------------------------------------

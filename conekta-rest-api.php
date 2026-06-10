@@ -243,10 +243,11 @@ class WC_Conekta_REST_API {
                     // Customer info (name + phone) can also drift after the
                     // initial create — e.g. the customer typed their phone in
                     // the shipping block (so build_snapshot resolves it via
-                    // resolve_phone()) but the Conekta order was created
-                    // earlier with billing_phone or the 0000000000 fallback.
+                    // resolve_address_source()) but the Conekta order was
+                    // created earlier with the placeholder fallbacks.
                     // OrderUpdate accepts customer_info as of conekta-php
-                    // 7.1.0, so push the latest values through.
+                    // 7.1.0, so push the latest values through (pre-payment;
+                    // a paid order can't be updated).
                     if (!empty($snapshot['customer_info']['email'])) {
                         $update->setCustomerInfo(new OrderUpdateCustomerInfo($snapshot['customer_info']));
                     }
@@ -555,18 +556,6 @@ class WC_Conekta_REST_API {
      */
     public static function shipping_contact_hash(array $contact): string {
         return !empty($contact) ? md5(json_encode($contact)) : '';
-    }
-
-    /**
-     * Pick the phone that should be sent to Conekta when we have two
-     * candidates from WC()->customer. The shipping phone wins because
-     * WC Blocks does NOT sync the phone field on the "use same address for
-     * billing" toggle (only addresses), so billing_phone is frequently
-     * stale relative to what the customer just typed. Billing is the
-     * fallback for the classic flow that only has one phone field.
-     */
-    public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
-        return $shipping_phone ?: $billing_phone;
     }
 
     /**
