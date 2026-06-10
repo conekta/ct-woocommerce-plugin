@@ -164,17 +164,32 @@ const formHandler = {
   }
 };
 
+// Pull a billing/shipping address from the checkout form via FormData (the
+// form's own field names) — no per-field DOM querying. WooCommerce doesn't
+// sync the billing NAME to WC()->customer, so the server can't read it on its
+// own; we send it so the Conekta order is (re)created with the real customer
+// pre-payment (a paid order can't be updated afterwards).
+const addressFromForm = (prefix) => {
+  const form = document.querySelector(FORM_SELECTOR);
+  if (!form) return {};
+  const fd = new FormData(form);
+  const out = {};
+  ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'].forEach((field) => {
+    const value = fd.get(`${prefix}_${field}`);
+    if (value) out[field] = String(value).trim();
+  });
+  return out;
+};
+
 const requestCheckout = async () => {
   const response = await fetch(conekta_settings.checkout_request_url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Email is the user's primary input and isn't always synced to
-    // WC()->customer yet when classic fires, so we send it explicitly. The
-    // real customer name/phone is backfilled onto the Conekta order at
-    // payment time from the WC order (see backfill_conekta_customer).
     body: JSON.stringify({
       nonce: conekta_settings.nonce,
       email: utils.getBillingEmail(),
+      billing: addressFromForm('billing'),
+      shipping: addressFromForm('shipping'),
       checkout_type: 'classic',
     }),
     credentials: 'same-origin',
