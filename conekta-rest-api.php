@@ -178,8 +178,7 @@ class WC_Conekta_REST_API {
             // the form, before any card entry.
             $last_customer_name    = $state['customer_name'] ?? '';
             $current_customer_name = $snapshot['customer_info']['name'] ?? '';
-            $customer_became_real  = in_array($last_customer_name, ['', self::DEFAULT_CUSTOMER_NAME], true)
-                && !in_array($current_customer_name, ['', self::DEFAULT_CUSTOMER_NAME], true);
+            $customer_became_real  = self::customer_became_real($last_customer_name, $current_customer_name);
             if ($existing_order_id && $customer_became_real) {
                 self::clear_session();
                 $existing_order_id   = null;
@@ -568,6 +567,20 @@ class WC_Conekta_REST_API {
      */
     public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
         return $shipping_phone ?: $billing_phone;
+    }
+
+    /**
+     * Whether the customer name went from a placeholder (empty or the
+     * DEFAULT_CUSTOMER_NAME fallback) to a real value. When true, the Conekta
+     * order — created early with the placeholder — must be recreated, because
+     * Conekta freezes the embedded customer at creation and rejects updates on
+     * a paid order. Returns false if it was already real, or is still a
+     * placeholder, so we don't recreate needlessly.
+     */
+    public static function customer_became_real(string $last_name, string $current_name): bool {
+        $placeholder = ['', self::DEFAULT_CUSTOMER_NAME];
+        return in_array($last_name, $placeholder, true)
+            && !in_array($current_name, $placeholder, true);
     }
 
     /**

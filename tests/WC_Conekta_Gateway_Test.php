@@ -2467,6 +2467,49 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // customer_became_real — gates the placeholder->real recreate
+    // of the Conekta order (created early with 'Cliente').
+    // -------------------------------------------------------
+
+    public function test_customer_became_real_from_empty_to_real()
+    {
+        // Order created before the name was typed (empty) -> now real: recreate.
+        $this->assertTrue(WC_Conekta_REST_API::customer_became_real('', 'Carolina Rivera'));
+    }
+
+    public function test_customer_became_real_from_placeholder_to_real()
+    {
+        // Created with the 'Cliente' placeholder -> real name: recreate.
+        $this->assertTrue(WC_Conekta_REST_API::customer_became_real('Cliente', 'Carolina Rivera'));
+    }
+
+    public function test_customer_became_real_false_when_already_real()
+    {
+        // Already had a real name -> don't recreate (avoids churn / extra orders).
+        $this->assertFalse(WC_Conekta_REST_API::customer_became_real('Carolina Rivera', 'Carolina Rivera'));
+    }
+
+    public function test_customer_became_real_false_when_still_placeholder()
+    {
+        $this->assertFalse(WC_Conekta_REST_API::customer_became_real('', ''));
+        $this->assertFalse(WC_Conekta_REST_API::customer_became_real('Cliente', 'Cliente'));
+        $this->assertFalse(WC_Conekta_REST_API::customer_became_real('Cliente', ''));
+    }
+
+    public function test_customer_became_real_uses_the_default_name_constant()
+    {
+        // The placeholder is the centralized DEFAULT_CUSTOMER_NAME, not a literal.
+        $this->assertFalse(WC_Conekta_REST_API::customer_became_real(
+            WC_Conekta_REST_API::DEFAULT_CUSTOMER_NAME,
+            WC_Conekta_REST_API::DEFAULT_CUSTOMER_NAME
+        ));
+        $this->assertTrue(WC_Conekta_REST_API::customer_became_real(
+            WC_Conekta_REST_API::DEFAULT_CUSTOMER_NAME,
+            'Diego Flores'
+        ));
+    }
+
+    // -------------------------------------------------------
     // apply_address_from_body — closes the race where WC Blocks
     // debounces its own `update-customer` REST call AFTER our
     // /checkout-request POST has already hit the server. Without
