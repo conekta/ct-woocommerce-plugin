@@ -23,7 +23,7 @@ class WC_Conekta_REST_API {
     // keys we tried to keep there. The transient sidesteps that race
     // entirely. TTL matches WC's 48h session expiry.
     const STATE_TRANSIENT_PREFIX = 'conekta_checkout_state_';
-    const STATE_TRANSIENT_TTL    = 48 * HOUR_IN_SECONDS;
+    const STATE_TRANSIENT_TTL    = 48 * 3600; // 48h in seconds (WC session expiry)
     // Kept ONLY for backwards compatibility with read sites elsewhere
     // (e.g. block_gateway) that still reference these constants; nothing
     // is written under these keys anymore.
@@ -31,6 +31,12 @@ class WC_Conekta_REST_API {
     const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
     const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
     const SESSION_LAST_SHIPPING_HASH  = 'conekta_checkout_last_shipping_hash';
+
+    // Placeholders sent to Conekta when the shopper hasn't provided the data
+    // yet (the order is created early to mount the iframe). Centralized so the
+    // "is this still a placeholder?" checks and the fallbacks stay in sync.
+    const DEFAULT_CUSTOMER_NAME = 'Cliente';
+    const DEFAULT_PHONE         = '0000000000';
 
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
@@ -172,8 +178,8 @@ class WC_Conekta_REST_API {
             // the form, before any card entry.
             $last_customer_name    = $state['customer_name'] ?? '';
             $current_customer_name = $snapshot['customer_info']['name'] ?? '';
-            $customer_became_real  = in_array($last_customer_name, ['', 'Cliente'], true)
-                && !in_array($current_customer_name, ['', 'Cliente'], true);
+            $customer_became_real  = in_array($last_customer_name, ['', self::DEFAULT_CUSTOMER_NAME], true)
+                && !in_array($current_customer_name, ['', self::DEFAULT_CUSTOMER_NAME], true);
             if ($existing_order_id && $customer_became_real) {
                 self::clear_session();
                 $existing_order_id   = null;
@@ -285,8 +291,8 @@ class WC_Conekta_REST_API {
             // real address at process_payment time regardless.
             if (empty($snapshot['shipping_contact'])) {
                 $snapshot['shipping_contact'] = [
-                    'phone'    => '0000000000',
-                    'receiver' => $snapshot['customer_info']['name'] ?: 'Cliente',
+                    'phone'    => self::DEFAULT_PHONE,
+                    'receiver' => $snapshot['customer_info']['name'] ?: self::DEFAULT_CUSTOMER_NAME,
                     'address'  => [
                         'street1'     => 'Pendiente',
                         'postal_code' => '00000',
@@ -481,15 +487,15 @@ class WC_Conekta_REST_API {
 
                 $customer_info = [
                     'email' => $email,
-                    'name'  => $name ?: 'Cliente',
-                    'phone' => $contact_phone ?: '0000000000',
+                    'name'  => $name ?: self::DEFAULT_CUSTOMER_NAME,
+                    'phone' => $contact_phone ?: self::DEFAULT_PHONE,
                 ];
 
                 // Conekta requires shipping_contact to charge an order.
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
-                        'phone'    => $contact_phone ?: '0000000000',
-                        'receiver' => $name ?: 'Cliente',
+                        'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
+                        'receiver' => $name ?: self::DEFAULT_CUSTOMER_NAME,
                         'address'  => [
                             'street1'     => $address1,
                             'city'        => $city,
