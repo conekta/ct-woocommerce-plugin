@@ -34,6 +34,10 @@ const LAST_NAMES = ['Hernández', 'García', 'Martínez', 'López', 'González',
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const FIRST_NAME = pickRandom(FIRST_NAMES);
 const LAST_NAME = pickRandom(LAST_NAMES);
+// Slug for email: strip accents (Sofía -> sofia), lowercase, drop non-letters.
+const emailSlug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+// Email derived from the random name, e.g. sofia.hernandez@example.com.
+const EMAIL = `${emailSlug(FIRST_NAME)}.${emailSlug(LAST_NAME)}@example.com`;
 
 // Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
 // auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
@@ -55,7 +59,7 @@ const BILLING = {
   state: 'DF',
   postcode: '11010',
   phone: '5555555555',
-  email: 'test-e2e@example.com',
+  email: EMAIL,
 };
 
 // -------------------------------------------------------
