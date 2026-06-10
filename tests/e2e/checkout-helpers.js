@@ -21,25 +21,59 @@ const WP_PASS = process.env.WP_PASS || 'bitnami';
 const REGULAR_PRICE = (Math.random() * 900 + 100).toFixed(2);
 const DISCOUNT_AMOUNT = (parseFloat(REGULAR_PRICE) / 2).toFixed(2);
 const COUPON_AMOUNT = '50';
+// Random line-item quantity (1–5) so the cart total varies per run on top of
+// the already-random price. Picked once at module load so it's stable across a
+// single spec (the payment and any resubmission use the same cart).
+const QUANTITY = Math.floor(Math.random() * 5) + 1;
+// Randomize the shopper name per run so orders aren't all "Test User". Picked
+// once at module load, so it stays stable across a single spec (the payment and
+// the resubmission share the same name); each spec runs in its own process via
+// run.js, so they get independent names.
+// No accents/ñ on purpose — keep the data ASCII-safe for the Conekta API.
+const FIRST_NAMES = [
+  'Mauricio', 'Sofia', 'Diego', 'Valentina', 'Carlos', 'Fernanda', 'Alejandro', 'Regina', 'Ricardo', 'Gabriela',
+  'Santiago', 'Camila', 'Mateo', 'Ximena', 'Emiliano', 'Renata', 'Sebastian', 'Daniela', 'Leonardo', 'Andrea',
+  'Maximiliano', 'Mariana', 'Iker', 'Paola', 'Angel', 'Lucia', 'Bruno', 'Isabela', 'Adrian', 'Natalia',
+  'Hector', 'Andres', 'Rodrigo', 'Monica', 'Tomas', 'Veronica', 'Pablo', 'Carolina', 'Manuel', 'Jimena',
+];
+const LAST_NAMES = [
+  'Hernandez', 'Garcia', 'Martinez', 'Lopez', 'Gonzalez', 'Rodriguez', 'Perez', 'Sanchez', 'Ramirez', 'Torres',
+  'Flores', 'Rivera', 'Gomez', 'Diaz', 'Cruz', 'Morales', 'Reyes', 'Gutierrez', 'Ortiz', 'Chavez',
+  'Ramos', 'Ruiz', 'Jimenez', 'Mendoza', 'Vazquez', 'Castillo', 'Romero', 'Alvarez', 'Mendez', 'Aguilar',
+  'Vargas', 'Guzman', 'Dominguez', 'Herrera', 'Medina', 'Castro', 'Nunez', 'Rojas', 'Rios', 'Estrada',
+];
+const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const FIRST_NAME = pickRandom(FIRST_NAMES);
+const LAST_NAME = pickRandom(LAST_NAMES);
+// Slug for email: strip accents (Sofía -> sofia), lowercase, drop non-letters.
+const emailSlug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+// Email derived from the random name, e.g. sofia.hernandez@example.com.
+const EMAIL = `${emailSlug(FIRST_NAME)}.${emailSlug(LAST_NAME)}@example.com`;
+// Random 10-digit phone (first digit non-zero) instead of a fixed number.
+const PHONE = String(Math.floor(Math.random() * 9) + 1)
+  + Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)).join('');
+
 // Conekta sandbox: 4000 0000 0000 2701 = Smart/Strict 3DS with frictionless
 // auth approved (no OTP challenge UI). Other cards force a Cardinal challenge
-// that does not render reliably in headless Chromium.
+// that does not render reliably in headless Chromium. This depends on the
+// company NOT being in 3DS Strict mode — Strict forces a challenge even for
+// this card, which breaks the headless/frictionless design.
 const TEST_CARD = {
   number: '4000000000002701',
-  name: 'Test User',
+  name: `${FIRST_NAME} ${LAST_NAME}`,
   expMonth: '12',
   expYear: '30',
   cvc: '123',
 };
 const BILLING = {
-  first_name: 'Test',
-  last_name: 'User',
+  first_name: FIRST_NAME,
+  last_name: LAST_NAME,
   address_1: 'Calle Test 123',
   city: 'CDMX',
   state: 'DF',
   postcode: '11010',
-  phone: '5555555555',
-  email: 'test-e2e@example.com',
+  phone: PHONE,
+  email: EMAIL,
 };
 
 // -------------------------------------------------------
@@ -183,7 +217,7 @@ async function setup(options = {}) {
   const cleaned = staleProducts.length + staleCoupons.length;
   console.log(`Setup: cleaned ${cleaned} orphaned e2e resources`);
 
-  console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}`);
+  console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}, quantity=${QUANTITY}`);
 
   const product = await wcApi('POST', 'wc/v3/products', {
     name: 'E2E Discount Test',
@@ -216,7 +250,7 @@ async function setup(options = {}) {
   // A guest session is cookie-only and fresh on every run.
   await page.context().clearCookies();
 
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}`);
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${QUANTITY}`);
   await page.waitForLoadState('networkidle');
 }
 
@@ -317,6 +351,125 @@ async function testOrderStatus(conektaOrderId) {
   }
 }
 
+function getProductId() { return productId; }
+
+/**
+ * Find every WooCommerce order that carries the given conekta-order-id meta.
+ * Re-authenticates as admin first (the checkout flow runs as a guest, so the
+ * REST nonce from the guest session can't read orders). Returns the matching
+ * order objects (with status + meta_data) so callers can assert how many of
+ * them are in a paid state.
+ *
+ * This is the invariant that proves the duplicate-order guard: a single
+ * Conekta order must map to AT MOST ONE paid WooCommerce order.
+ */
+async function findOrdersByConektaOrderId(conektaOrderId, { perPage = 50 } = {}) {
+  await loginAsAdmin();
+  const orders = await wcApi('GET', `wc/v3/orders?per_page=${perPage}&orderby=date&order=desc&status=any`);
+  if (!Array.isArray(orders)) return [];
+  return orders.filter(o =>
+    Array.isArray(o.meta_data) &&
+    o.meta_data.some(m => m.key === 'conekta-order-id' && String(m.value) === String(conektaOrderId))
+  );
+}
+
+const PAID_STATUSES = ['processing', 'completed', 'on-hold'];
+
+/**
+ * Submit the classic checkout form directly to the WC AJAX endpoint, forcing a
+ * specific conekta_order_id. This reproduces a resubmission (double-click /
+ * timeout / retry) where a second WC order is created while the hidden
+ * conekta_order_id stays the same — the exact condition behind the duplicate
+ * paid orders observed in staging (e.g. WC #6360 & #6361 sharing one Conekta
+ * order). Returns the WC AJAX JSON ({ result, redirect, messages, ... }).
+ */
+async function submitClassicCheckoutRaw(conektaOrderId) {
+  return page.evaluate(async (id) => {
+    const form = document.querySelector('form.checkout');
+    if (!form) throw new Error('form.checkout not found — not on the classic checkout page');
+    const fd = new FormData(form);
+    fd.set('payment_method', 'conekta');
+    fd.set('conekta_order_id', id);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd.entries()) params.append(k, v);
+    const res = await fetch('/?wc-ajax=checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: params.toString(),
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) {}
+    return { status: res.status, json };
+  }, conektaOrderId);
+}
+
+/**
+ * Submit the Blocks (Store API) checkout directly, forcing a specific
+ * conekta_order_id on payment_data. This is the Blocks analogue of
+ * submitClassicCheckoutRaw: it reproduces a resubmission that reaches
+ * process_payment_api with an already-used Conekta order.
+ *
+ * Blocks does NOT post form.checkout — it hits /wc/store/v1/checkout with a
+ * JSON body and a Store API `Nonce` + guest `Cart-Token` header. We first GET
+ * the cart to capture those headers and select a shipping rate (the checkout
+ * is rejected before reaching the gateway if shipping is required but unset),
+ * then POST the checkout with conekta_order_id in payment_data — the same
+ * shape the Blocks frontend sends on finalize.
+ *
+ * Returns { status, json } where json is the Store API checkout response.
+ */
+async function submitBlocksCheckoutRaw(conektaOrderId, billing) {
+  return page.evaluate(async ({ id, b }) => {
+    const base = '/wp-json/wc/store/v1';
+
+    // 1) Read the cart to grab the Store API nonce + guest cart token and the
+    //    available shipping rates.
+    const cartRes = await fetch(`${base}/cart`, { headers: { Accept: 'application/json' } });
+    const nonce = cartRes.headers.get('Nonce') || cartRes.headers.get('X-WC-Store-API-Nonce');
+    const cartToken = cartRes.headers.get('Cart-Token');
+    const cart = await cartRes.json();
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (nonce) headers['Nonce'] = nonce;
+    if (cartToken) headers['Cart-Token'] = cartToken;
+
+    // 2) Ensure a shipping rate is selected when the cart needs shipping.
+    if (cart && cart.needs_shipping && Array.isArray(cart.shipping_rates)) {
+      for (const pkg of cart.shipping_rates) {
+        const rates = pkg.shipping_rates || [];
+        if (rates.length && !rates.some(r => r.selected)) {
+          await fetch(`${base}/cart/select-shipping-rate`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ package_id: pkg.package_id, rate_id: rates[0].rate_id }),
+          });
+        }
+      }
+    }
+
+    // 3) Submit the checkout, reusing the conekta_order_id.
+    const address = {
+      first_name: b.first_name, last_name: b.last_name,
+      address_1: b.address_1, address_2: '',
+      city: b.city, state: b.state, postcode: b.postcode,
+      country: 'MX', email: b.email, phone: b.phone,
+    };
+    const res = await fetch(`${base}/checkout`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        billing_address: address,
+        shipping_address: address,
+        payment_method: 'conekta',
+        payment_data: [{ key: 'conekta_order_id', value: id }],
+      }),
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) {}
+    return { status: res.status, json };
+  }, { id: conektaOrderId, b: billing });
+}
+
 // -------------------------------------------------------
 // Shared helper: wait for the Integration iframe to mount
 // -------------------------------------------------------
@@ -352,6 +505,15 @@ async function waitForIntegrationIframe() {
  * field appears, then fill the four fields in whatever frame held it.
  */
 async function fillIntegrationCard(card, timeoutMs = 60000) {
+  // CRITICAL: wait for the checkout to be stable BEFORE filling the card.
+  // Any cart/address change (e.g. a coupon that changes the amount) remounts
+  // the Integration iframe to show the new total — wiping a card filled into
+  // the old iframe. If we fill while a debounced refresh is still pending, the
+  // ensuing remount blanks the card and the SDK charges nothing ("Error
+  // procesando el pago", empty component-frame). Settling first means we fill
+  // the FINAL iframe and nothing remounts it before Place Order.
+  await waitForCheckoutStable();
+
   // Conekta Integration uses these stable input ids in both layouts (tile picker
   // and accordion). Targeting them directly avoids false positives from billing
   // or coupon fields that share the broader autocomplete/placeholder regexes.
@@ -508,10 +670,41 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
 }
 
 /**
+ * Wait until the checkout is STABLE before charging: no `conekta_checkout_request`
+ * POST has fired for `quietMs`. Both checkouts debounce a refresh on every
+ * address/cart change that can remount the Integration iframe or (in Blocks)
+ * flip `refreshing=true`. Clicking "Place order" while that refresh is in
+ * flight makes the SDK never charge (classic resets to the card form; Blocks'
+ * onPaymentSetup rejects with "Actualizando importe"). Waiting for the network
+ * to go quiet removes that race deterministically — no retry needed.
+ */
+async function waitForCheckoutStable(quietMs = 2500, timeoutMs = 25000) {
+  let lastRequestAt = Date.now();
+  const handler = (response) => {
+    if (response.url().includes('conekta_checkout_request') && response.request().method() === 'POST') {
+      lastRequestAt = Date.now();
+    }
+  };
+  page.on('response', handler);
+  const start = Date.now();
+  try {
+    while (Date.now() - start < timeoutMs) {
+      if (Date.now() - lastRequestAt >= quietMs) return;
+      await page.waitForTimeout(200);
+    }
+    console.log('  [waitForCheckoutStable] timed out waiting for quiet — proceeding anyway');
+  } finally {
+    page.off('response', handler);
+  }
+}
+
+/**
  * Click the WC "Place Order" button, whichever variant is rendered (blocks
- * vs classic).
+ * vs classic). Waits for the checkout to settle first so the charge isn't
+ * fired while a debounced iframe refresh is still in flight.
  */
 async function clickPlaceOrder() {
+  await waitForCheckoutStable();
   const btn = page.locator(
     'button.wc-block-components-checkout-place-order-button, button:has-text("Realizar el pedido"), button:has-text("Place order"), #place_order'
   ).first();
@@ -519,13 +712,18 @@ async function clickPlaceOrder() {
 }
 
 /**
+/**
  * Wait for the order-received navigation while continuously dismissing any
  * 3DS challenge that appears. Conekta's sandbox renders the challenge in a
  * nested iframe with a hard-coded OTP=1234. The 3DS modal can take 5–30s to
  * appear after Place Order, so we can't rely on a one-shot handler — we poll
  * for the URL change and submit OTP whenever it surfaces.
+ *
+ * Timeout: a healthy payment reaches order-received in well under a minute, so
+ * we fail fast instead of hanging for minutes if it stalls. Default 120s;
+ * override with E2E_NAV_TIMEOUT.
  */
-async function waitForOrderReceivedWith3DS(timeoutMs = 240000) {
+async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NAV_TIMEOUT) || 120000) {
   // Diagnostic: log every Conekta API response so we can see what the SDK
   // is doing after Place Order (charges, 3DS challenge URL, errors, etc.).
   const conektaLog = [];
@@ -729,11 +927,12 @@ async function run(label, optionsOrFn, maybeFn) {
 }
 
 module.exports = {
-  STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT,
+  STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
   TEST_CARD, BILLING,
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
+  getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
-  fillIntegrationCard, clickPlaceOrder, waitForOrderReceivedWith3DS,
+  fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
 };

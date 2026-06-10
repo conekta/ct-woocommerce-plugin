@@ -71,8 +71,12 @@ if (!function_exists('wc_get_orders')) {
         $meta_key = $args['meta_key'] ?? null;
         $meta_value = $args['meta_value'] ?? null;
         $limit = $args['limit'] ?? -1;
+        $exclude = $args['exclude'] ?? [];
 
         foreach ($test_order_registry as $order) {
+            if (in_array($order->get_id(), $exclude)) {
+                continue;
+            }
             if ($meta_key && $meta_value && $order->get_meta($meta_key) === $meta_value) {
                 $results[] = $order;
             }

@@ -37,6 +37,14 @@ const utils = {
       form.querySelector('#place_order') ||
       form.querySelector('button[type="submit"]');
 
+    // The Conekta iframe must stay ABOVE the loading overlay: during the charge
+    // the SDK can show a 3DS challenge (OTP modal) inside the iframe, and the
+    // overlay (z-index 1000, covering the whole form) would otherwise intercept
+    // every click/keystroke so the customer can't type the OTP. We raise the
+    // iframe container above the overlay while keeping the rest of the form
+    // greyed-out and the place-order button disabled.
+    const container = document.querySelector(CONTAINER_SELECTOR);
+
     if (isLoading) {
       if (!form.querySelector('.conekta-loading-overlay')) {
         const overlay = document.createElement('div');
@@ -46,6 +54,10 @@ const utils = {
         form.style.position = 'relative';
         form.appendChild(overlay);
       }
+      if (container) {
+        container.style.position = 'relative';
+        container.style.zIndex = '1001';
+      }
       if (placeOrderBtn) {
         placeOrderBtn.disabled = true;
         placeOrderBtn.classList.add('conekta-disabled');
@@ -53,6 +65,9 @@ const utils = {
     } else {
       const overlay = form.querySelector('.conekta-loading-overlay');
       if (overlay) overlay.remove();
+      if (container) {
+        container.style.zIndex = '';
+      }
       if (placeOrderBtn) {
         placeOrderBtn.disabled = false;
         placeOrderBtn.classList.remove('conekta-disabled');
@@ -100,6 +115,11 @@ const state = {
   refreshTimer: null,
   inflight: false,
   payingInProgress: false,
+  // Conekta order id we've already submitted to WooCommerce. The SDK can emit
+  // the finalized-order event more than once (a re-fired 3DS/finalize
+  // callback); we submit the WC checkout only ONCE per Conekta order so a
+  // single payment never creates two WC orders.
+  submittedOrderId: null,
 };
 
 const formHandler = {
@@ -116,6 +136,9 @@ const formHandler = {
       if (data.result === "success") {
         window.location.href = data.redirect;
       } else {
+        // The WC submit failed (e.g. transient error). Clear the dedup guard
+        // so the customer can retry with the same already-paid Conekta order.
+        state.submittedOrderId = null;
         utils.setLoading(false);
         const form = document.querySelector(FORM_SELECTOR);
         if (form) {
@@ -133,23 +156,41 @@ const formHandler = {
         }
       }
     } catch (error) {
+      // Network/parse failure — clear the dedup guard so a retry can resubmit.
+      state.submittedOrderId = null;
       utils.setLoading(false);
       utils.showErrorMessage(utils.getTranslation("form_error"));
     }
   }
 };
 
+// Pull a billing/shipping address from the checkout form via FormData (the
+// form's own field names) — no per-field DOM querying. WooCommerce doesn't
+// sync the billing NAME to WC()->customer, so the server can't read it on its
+// own; we send it so the Conekta order is (re)created with the real customer
+// pre-payment (a paid order can't be updated afterwards).
+const addressFromForm = (prefix) => {
+  const form = document.querySelector(FORM_SELECTOR);
+  if (!form) return {};
+  const fd = new FormData(form);
+  const out = {};
+  ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'].forEach((field) => {
+    const value = fd.get(`${prefix}_${field}`);
+    if (value) out[field] = String(value).trim();
+  });
+  return out;
+};
+
 const requestCheckout = async () => {
   const response = await fetch(conekta_settings.checkout_request_url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Email is the user's primary input for this request and isn't derivable
-    // from WC()->customer when classic checkout fires before WC has run
-    // update_order_review. Send it so the server can backfill the customer
-    // email before snapshotting the cart for Conekta.
     body: JSON.stringify({
       nonce: conekta_settings.nonce,
       email: utils.getBillingEmail(),
+      billing: addressFromForm('billing'),
+      shipping: addressFromForm('shipping'),
+      woocommerce_checkout_type: 'classic',
     }),
     credentials: 'same-origin',
   });
@@ -175,8 +216,19 @@ const mounter = {
     orderEmitter.onOrder(async (order) => {
       const form = document.querySelector(FORM_SELECTOR);
       if (!form) return;
+
+      const orderId = (order && order.id) || "";
+      // Ignore a repeated finalize event for an order we already submitted —
+      // the SDK can emit onOrder more than once, and submitting twice would
+      // create a duplicate WC order for the same Conekta payment.
+      if (orderId && orderId === state.submittedOrderId) {
+        mounter.wireOrderListeners();
+        return;
+      }
+      state.submittedOrderId = orderId;
+
       const hidden = form.querySelector('[name="conekta_order_id"]');
-      if (hidden) hidden.value = (order && order.id) || "";
+      if (hidden) hidden.value = orderId;
 
       // Discriminate the source: payingInProgress is set by submitInterceptor
       // when the user clicked "Realizar el pedido" (card path). If it's still
@@ -363,6 +415,14 @@ const submitInterceptor = {
 const orchestrator = {
   refresh: async () => {
     if (!utils.isConektaSelected()) return;
+    // Never refresh/remount while a charge is in progress. A late
+    // `updated_checkout` (a trailing update_order_review settling after the
+    // customer hit "Realizar el pedido") would otherwise call mounter.mount(),
+    // tear down + reload the iframe, and destroy an in-progress 3DS challenge
+    // (the OTP modal disappears mid-authentication and the order never
+    // completes). Confirmed via manual testing: with this guard the challenge
+    // modal stays put through the whole 3DS flow.
+    if (state.payingInProgress) return;
     if (!utils.isValidEmail(utils.getBillingEmail())) {
       utils.showPlaceholder();
       return;

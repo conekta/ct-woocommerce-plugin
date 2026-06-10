@@ -23,7 +23,7 @@ class WC_Conekta_REST_API {
     // keys we tried to keep there. The transient sidesteps that race
     // entirely. TTL matches WC's 48h session expiry.
     const STATE_TRANSIENT_PREFIX = 'conekta_checkout_state_';
-    const STATE_TRANSIENT_TTL    = 48 * HOUR_IN_SECONDS;
+    const STATE_TRANSIENT_TTL    = 48 * 3600; // 48h in seconds (WC session expiry)
     // Kept ONLY for backwards compatibility with read sites elsewhere
     // (e.g. block_gateway) that still reference these constants; nothing
     // is written under these keys anymore.
@@ -31,6 +31,12 @@ class WC_Conekta_REST_API {
     const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
     const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
     const SESSION_LAST_SHIPPING_HASH  = 'conekta_checkout_last_shipping_hash';
+
+    // Placeholders sent to Conekta when the shopper hasn't provided the data
+    // yet (the order is created early to mount the iframe). Centralized so the
+    // "is this still a placeholder?" checks and the fallbacks stay in sync.
+    const DEFAULT_CUSTOMER_NAME = 'Cliente';
+    const DEFAULT_PHONE         = '0000000000';
 
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
@@ -123,10 +129,12 @@ class WC_Conekta_REST_API {
             // update_order_review syncs the form to WC()->customer. The client
             // sends the typed email so we can backfill the customer object,
             // keeping the snapshot read fully server-authoritative downstream.
+            // Apply it whenever it differs (not only when missing) so a corrected
+            // email actually propagates.
             $email_from_body = $request ? $request->get_param('email') : null;
-            if ($email_from_body && WC()->customer && !WC()->customer->get_billing_email()) {
+            if ($email_from_body && WC()->customer) {
                 $clean_email = sanitize_email($email_from_body);
-                if ($clean_email) {
+                if ($clean_email && $clean_email !== WC()->customer->get_billing_email()) {
                     WC()->customer->set_billing_email($clean_email);
                     WC()->customer->save();
                 }
@@ -161,6 +169,23 @@ class WC_Conekta_REST_API {
             // their address" and replace the 'Pendiente' fallback.
             $current_shipping_hash = self::shipping_contact_hash($snapshot['shipping_contact'] ?? []);
 
+            // The order is created early (as soon as we have the email, to mount
+            // the iframe) before the shopper typed their name, so customer_info
+            // defaults to the 'Cliente' / 0000000000 placeholders. When the real
+            // name finally arrives, RECREATE the order: Conekta freezes the
+            // embedded customer at creation and only OrderUpdate.shipping_contact
+            // is updatable, so a placeholder->real name can't be patched in.
+            // (An email change, by contrast, is pushed via the update path below
+            // — the order isn't paid yet, so updateOrder still accepts it.)
+            $current_customer_name = $snapshot['customer_info']['name'] ?? '';
+            $current_email         = $snapshot['customer_info']['email'] ?? '';
+            $customer_became_real  = self::customer_became_real($state['customer_name'] ?? '', $current_customer_name);
+            if ($existing_order_id && $customer_became_real) {
+                self::clear_session();
+                $existing_order_id   = null;
+                $existing_request_id = null;
+            }
+
             $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
             // Force WC to commit the session cookie so our writes below
@@ -178,10 +203,14 @@ class WC_Conekta_REST_API {
             }
 
             if ($existing_order_id && $existing_request_id) {
+                // Also key "unchanged" on the email: it's not part of the
+                // shipping_hash, so without this an email correction would
+                // short-circuit here and never reach the setCustomerInfo update.
                 if (
                     $last_amount !== null
                     && (int) $last_amount === (int) $current_amount
                     && $current_shipping_hash === $last_shipping_hash
+                    && $current_email === ($state['customer_email'] ?? '')
                 ) {
                     return new WP_REST_Response([
                         'success'             => true,
@@ -219,10 +248,11 @@ class WC_Conekta_REST_API {
                     // Customer info (name + phone) can also drift after the
                     // initial create — e.g. the customer typed their phone in
                     // the shipping block (so build_snapshot resolves it via
-                    // resolve_phone()) but the Conekta order was created
-                    // earlier with billing_phone or the 0000000000 fallback.
+                    // resolve_address_source()) but the Conekta order was
+                    // created earlier with the placeholder fallbacks.
                     // OrderUpdate accepts customer_info as of conekta-php
-                    // 7.1.0, so push the latest values through.
+                    // 7.1.0, so push the latest values through (pre-payment;
+                    // a paid order can't be updated).
                     if (!empty($snapshot['customer_info']['email'])) {
                         $update->setCustomerInfo(new OrderUpdateCustomerInfo($snapshot['customer_info']));
                     }
@@ -234,6 +264,8 @@ class WC_Conekta_REST_API {
                         'checkout_request_id'=> $existing_request_id,
                         'last_amount'        => (int) $current_amount,
                         'last_shipping_hash' => $current_shipping_hash,
+                        'customer_name'      => $current_customer_name,
+                        'customer_email'     => $current_email,
                     ]);
 
                     return new WP_REST_Response([
@@ -265,8 +297,8 @@ class WC_Conekta_REST_API {
             // real address at process_payment time regardless.
             if (empty($snapshot['shipping_contact'])) {
                 $snapshot['shipping_contact'] = [
-                    'phone'    => '0000000000',
-                    'receiver' => $snapshot['customer_info']['name'] ?: 'Cliente',
+                    'phone'    => self::DEFAULT_PHONE,
+                    'receiver' => $snapshot['customer_info']['name'] ?: self::DEFAULT_CUSTOMER_NAME,
                     'address'  => [
                         'street1'     => 'Pendiente',
                         'postal_code' => '00000',
@@ -294,6 +326,14 @@ class WC_Conekta_REST_API {
 
             $checkout = new OrderCheckoutRequest($checkout_data);
 
+            // Record whether the order was created from the WooCommerce Blocks
+            // or Classic checkout (the frontend sends woocommerce_checkout_type).
+            // Useful for debugging / segmenting orders on the Conekta dashboard.
+            $checkout_type = $request ? sanitize_text_field((string) $request->get_param('woocommerce_checkout_type')) : '';
+            if (!in_array($checkout_type, ['blocks', 'classic'], true)) {
+                $checkout_type = 'unknown';
+            }
+
             $balanced = ckpg_check_balance([
                 'line_items'     => $snapshot['line_items'],
                 'shipping_lines' => $snapshot['shipping_lines'],
@@ -314,6 +354,7 @@ class WC_Conekta_REST_API {
                     'plugin_conekta_version' => $gateway->version,
                     'woocommerce_version'    => WC()->version,
                     'payment_method'         => 'WC_Conekta_Gateway',
+                    'woocommerce_checkout_type' => $checkout_type,
                 ],
             ]);
 
@@ -331,6 +372,8 @@ class WC_Conekta_REST_API {
                 'checkout_request_id'=> $checkout_request_id,
                 'last_amount'        => (int) $current_amount,
                 'last_shipping_hash' => $current_shipping_hash,
+                'customer_name'      => $current_customer_name,
+                'customer_email'     => $current_email,
             ]);
 
             return new WP_REST_Response([
@@ -440,48 +483,35 @@ class WC_Conekta_REST_API {
         if (WC()->customer) {
             $email = sanitize_email(WC()->customer->get_billing_email());
             if (!empty($email)) {
-                $name = trim(WC()->customer->get_billing_first_name() . ' ' . WC()->customer->get_billing_last_name());
-                // Both phone slots prefer the shipping_phone with billing as
-                // fallback. Why shipping first for BOTH:
-                //   - When "use same address for billing" is on, WC Blocks
-                //     copies the shipping address to billing but does NOT
-                //     sync the phone field — billing_phone keeps its previous
-                //     (often stale) value. Preferring shipping_phone makes
-                //     customer_info reflect what the customer just typed.
-                //   - When the customer enters distinct addresses with
-                //     distinct phones, shipping_phone is the freshly-entered
-                //     one in the visible Dirección de envío block; that is a
-                //     reasonable default contact for the order.
-                //   - Falling back to billing_phone covers the legacy classic
-                //     checkout flow that only has a single phone field.
-                $billing_phone  = sanitize_text_field(WC()->customer->get_billing_phone());
-                $shipping_phone = method_exists(WC()->customer, 'get_shipping_phone')
-                    ? sanitize_text_field(WC()->customer->get_shipping_phone())
-                    : '';
-                $customer_phone = self::resolve_phone($billing_phone, $shipping_phone);
-                $contact_phone  = self::resolve_phone($billing_phone, $shipping_phone);
+                // Resolve the address block (shipping when the customer filled
+                // it, else billing) ONCE and feed it to BOTH customer_info and
+                // shipping_contact. Previously customer_info read billing-only,
+                // so when the shopper filled just the shipping block (the common
+                // WC Blocks case) the Conekta customer object was left with the
+                // 'Cliente' / 0000000000 defaults even though shipping_contact
+                // had the real name/phone. See resolve_address_source.
+                $addr          = self::resolve_address_source(WC()->customer);
+                $first         = $addr['first_name'];
+                $last          = $addr['last_name'];
+                $address1      = $addr['address_1'];
+                $city          = $addr['city'];
+                $state         = $addr['state'];
+                $country       = $addr['country'];
+                $postcode      = $addr['postcode'];
+                $name          = trim("$first $last");
+                $contact_phone = sanitize_text_field($addr['phone']);
 
                 $customer_info = [
                     'email' => $email,
-                    'name'  => $name ?: 'Cliente',
-                    'phone' => $customer_phone ?: '0000000000',
+                    'name'  => $name ?: self::DEFAULT_CUSTOMER_NAME,
+                    'phone' => $contact_phone ?: self::DEFAULT_PHONE,
                 ];
 
-                // Conekta requires shipping_contact to charge an order. Fall back
-                // to billing fields when shipping is unset (matches WC's "ship to
-                // same address" default).
-                $first    = WC()->customer->get_shipping_first_name() ?: WC()->customer->get_billing_first_name();
-                $last     = WC()->customer->get_shipping_last_name() ?: WC()->customer->get_billing_last_name();
-                $address1 = WC()->customer->get_shipping_address_1() ?: WC()->customer->get_billing_address_1();
-                $city     = WC()->customer->get_shipping_city() ?: WC()->customer->get_billing_city();
-                $state    = WC()->customer->get_shipping_state() ?: WC()->customer->get_billing_state();
-                $country  = WC()->customer->get_shipping_country() ?: WC()->customer->get_billing_country();
-                $postcode = WC()->customer->get_shipping_postcode() ?: WC()->customer->get_billing_postcode();
-
+                // Conekta requires shipping_contact to charge an order.
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
-                        'phone'    => $contact_phone ?: '0000000000',
-                        'receiver' => trim("$first $last") ?: ($name ?: 'Cliente'),
+                        'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
+                        'receiver' => $name ?: self::DEFAULT_CUSTOMER_NAME,
                         'address'  => [
                             'street1'     => $address1,
                             'city'        => $city,
@@ -536,15 +566,61 @@ class WC_Conekta_REST_API {
     }
 
     /**
-     * Pick the phone that should be sent to Conekta when we have two
-     * candidates from WC()->customer. The shipping phone wins because
-     * WC Blocks does NOT sync the phone field on the "use same address for
-     * billing" toggle (only addresses), so billing_phone is frequently
-     * stale relative to what the customer just typed. Billing is the
-     * fallback for the classic flow that only has one phone field.
+     * Whether the customer name went from a placeholder (empty or the
+     * DEFAULT_CUSTOMER_NAME fallback) to a real value. When true, the Conekta
+     * order — created early with the placeholder — must be recreated, because
+     * Conekta freezes the embedded customer at creation and rejects updates on
+     * a paid order. Returns false if it was already real, or is still a
+     * placeholder, so we don't recreate needlessly.
      */
-    public static function resolve_phone(string $billing_phone, string $shipping_phone): string {
-        return $shipping_phone ?: $billing_phone;
+    public static function customer_became_real(string $last_name, string $current_name): bool {
+        $placeholder = ['', self::DEFAULT_CUSTOMER_NAME];
+        return in_array($last_name, $placeholder, true)
+            && !in_array($current_name, $placeholder, true);
+    }
+
+    /**
+     * Pick which address block (shipping or billing) feeds the Conekta
+     * shipping_contact, as a WHOLE block.
+     *
+     * Shipping wins only when the customer actually filled it in — we key the
+     * decision on shipping_address_1 (the street line), NOT on state/country:
+     * WooCommerce themes routinely pre-populate shipping_state and
+     * shipping_country with store defaults even when the customer typed their
+     * real address into billing. A per-field `shipping ?: billing` fallback
+     * would then mix a billing street with a stale shipping state and break
+     * Conekta's antifraud rules. When shipping_address_1 is empty we take the
+     * billing block as a whole.
+     *
+     * first_name / last_name / phone still fall back to the other block when
+     * the chosen block's value is empty, so the receiver name and contact
+     * phone are never blank.
+     *
+     * @param object $customer object exposing get_{shipping,billing}_* getters
+     * @return array{first_name:string,last_name:string,address_1:string,city:string,state:string,country:string,postcode:string,phone:string}
+     */
+    public static function resolve_address_source($customer): array {
+        $get = function (string $prefix, string $field) use ($customer): string {
+            $getter = "get_{$prefix}_{$field}";
+            return method_exists($customer, $getter) ? trim((string) $customer->{$getter}()) : '';
+        };
+
+        $use_shipping = $get('shipping', 'address_1') !== '';
+        $prefix = $use_shipping ? 'shipping' : 'billing';
+        $other  = $use_shipping ? 'billing'  : 'shipping';
+
+        return [
+            'first_name' => $get($prefix, 'first_name') ?: $get('billing', 'first_name'),
+            'last_name'  => $get($prefix, 'last_name')  ?: $get('billing', 'last_name'),
+            'address_1'  => $get($prefix, 'address_1'),
+            'city'       => $get($prefix, 'city'),
+            'state'      => $get($prefix, 'state'),
+            'country'    => $get($prefix, 'country'),
+            'postcode'   => $get($prefix, 'postcode'),
+            // Phone follows the chosen address block; fall back to the other
+            // block's phone so the shipping_contact phone is never empty.
+            'phone'      => $get($prefix, 'phone') ?: $get($other, 'phone'),
+        ];
     }
 
     /**
