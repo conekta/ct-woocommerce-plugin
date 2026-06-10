@@ -321,8 +321,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      * belongs to another order, we cancel this one so it doesn't linger as
      * "Pending payment" next to the real paid order.
      */
-    protected function cancel_duplicate_order($order, $existing): void {
-        if (!$order || in_array($order->get_status(), ['cancelled', 'processing', 'completed'], true)) {
+    protected function cancel_duplicate_order(WC_Order $order, WC_Order $existing): void {
+        if (in_array($order->get_status(), ['cancelled', 'processing', 'completed'], true)) {
             return;
         }
         $order->update_status(
