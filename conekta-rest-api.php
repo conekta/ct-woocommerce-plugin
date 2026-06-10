@@ -161,6 +161,25 @@ class WC_Conekta_REST_API {
             // their address" and replace the 'Pendiente' fallback.
             $current_shipping_hash = self::shipping_contact_hash($snapshot['shipping_contact'] ?? []);
 
+            // Conekta SNAPSHOTS the embedded customer (name/phone) at order
+            // creation — OrderUpdate.setCustomerInfo does NOT change it (only
+            // shipping_contact is updatable). The order is created early (as
+            // soon as we have the email, to mount the iframe) before the shopper
+            // typed their name, so customer_info defaults to 'Cliente' /
+            // 0000000000. When the real name finally arrives, RECREATE the order
+            // so the Conekta customer object shows the real data. This fires
+            // once (placeholder -> real), while the customer is still filling
+            // the form, before any card entry.
+            $last_customer_name    = $state['customer_name'] ?? '';
+            $current_customer_name = $snapshot['customer_info']['name'] ?? '';
+            $customer_became_real  = in_array($last_customer_name, ['', 'Cliente'], true)
+                && !in_array($current_customer_name, ['', 'Cliente'], true);
+            if ($existing_order_id && $customer_became_real) {
+                self::clear_session();
+                $existing_order_id   = null;
+                $existing_request_id = null;
+            }
+
             $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
             // Force WC to commit the session cookie so our writes below
@@ -234,6 +253,7 @@ class WC_Conekta_REST_API {
                         'checkout_request_id'=> $existing_request_id,
                         'last_amount'        => (int) $current_amount,
                         'last_shipping_hash' => $current_shipping_hash,
+                        'customer_name'      => $current_customer_name,
                     ]);
 
                     return new WP_REST_Response([
@@ -331,6 +351,7 @@ class WC_Conekta_REST_API {
                 'checkout_request_id'=> $checkout_request_id,
                 'last_amount'        => (int) $current_amount,
                 'last_shipping_hash' => $current_shipping_hash,
+                'customer_name'      => $current_customer_name,
             ]);
 
             return new WP_REST_Response([
