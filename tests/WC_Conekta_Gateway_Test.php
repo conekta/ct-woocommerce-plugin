@@ -510,9 +510,11 @@ class WC_Conekta_Gateway_Test extends TestCase
         // Customer is sent to a success page (the already-paid order)...
         $this->assertEquals('success', $result['result']);
         $this->assertArrayHasKey('redirect', $result);
-        // ...but the duplicate order 1309 is NOT marked paid.
+        // ...the duplicate order 1309 is NOT marked paid...
         $this->assertNotEquals('completed', $dup->get_status());
         $this->assertNotEquals('processing', $dup->get_status());
+        // ...and it's cancelled so it doesn't linger as pending.
+        $this->assertEquals('cancelled', $dup->get_status());
     }
 
     /**
@@ -561,9 +563,11 @@ class WC_Conekta_Gateway_Test extends TestCase
         // Result is success with a redirect (to the already-paid order)...
         $this->assertEquals('success', $result->status);
         $this->assertNotEmpty($result->redirect_url);
-        // ...but the duplicate order 1309 is NOT marked paid.
+        // ...the duplicate order 1309 is NOT marked paid...
         $this->assertNotEquals('completed', $dup->get_status());
         $this->assertNotEquals('processing', $dup->get_status());
+        // ...and it's cancelled so it doesn't linger as pending.
+        $this->assertEquals('cancelled', $dup->get_status());
     }
 
     // -------------------------------------------------------
