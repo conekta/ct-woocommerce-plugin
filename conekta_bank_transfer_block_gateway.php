@@ -215,7 +215,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         $instructions = $this->form_fields['instructions'];
         if ( $instructions && 'on-hold' === $order->get_status() ) {
-            echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
+            echo wpautop( wptexturize( esc_html($this->get_option('instructions')) ) ) . PHP_EOL;
         }
     }
       /**

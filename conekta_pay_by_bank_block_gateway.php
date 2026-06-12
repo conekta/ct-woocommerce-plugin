@@ -274,7 +274,7 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         $instructions = $this->form_fields['instructions'];
         if ( $instructions && 'pending' === $order->get_status() ) {
-            echo wpautop( wptexturize( esc_html($this->settings['instructions']) ) ) . PHP_EOL;
+            echo wpautop( wptexturize( esc_html($this->get_option('instructions')) ) ) . PHP_EOL;
         }
     }
       /**
