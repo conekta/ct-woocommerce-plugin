@@ -249,6 +249,10 @@ if (!class_exists('WC_Order')) {
 
         public function get_id() { return $this->id; }
         public function get_status() { return $this->status; }
+        public function set_status($status) { $this->status = $status; }
+        public function has_status($status) {
+            return is_array($status) ? in_array($this->status, $status, true) : $this->status === $status;
+        }
 
         // Items
         public function get_items($type = '') {

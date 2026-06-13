@@ -1,3 +1,8 @@
+6.0.3, 2026-06-12
+-------------------------------------
+- Feature: send the WooCommerce order id as metadata.reference_id on the Conekta order for the Blocks checkout (read from the checkout-draft order at checkout-request time). Classic keeps relying on the reverse conekta-order-id order meta.
+- Fix: "Undefined array key instructions" warning during checkout. Gateways read settings via get_option() instead of direct $this->settings[...] access, so configs saved before the instructions field existed fall back to the field default. Affects the cash, bank-transfer and pay-by-bank gateways.
+
 6.0.2, 2026-06-09
 -------------------------------------
 - Fix: prevent a single paid Conekta order from completing more than one WooCommerce order (duplicate orders on checkout resubmission). The gateway now detects the duplicate via the unique conekta-order-id meta and redirects to the already-paid order.

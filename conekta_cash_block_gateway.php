@@ -42,15 +42,16 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
         $this->has_fields = true;
         $this->ckpg_init_form_fields();
         $this->init_settings();
-        $this->title = $this->settings['title'];
-        $this->description = $this->settings['description'];
-        $this->icon        = $this->settings['alternate_imageurl'] ?
-                                                $this->settings['alternate_imageurl'] :
+        $this->title = $this->get_option('title');
+        $this->description = $this->get_option('description');
+        $alternate_imageurl = $this->get_option('alternate_imageurl');
+        $this->icon        = $alternate_imageurl ?
+                                                $alternate_imageurl :
                                                 WP_PLUGIN_URL . "/" . plugin_basename( dirname(__FILE__))
                                                 . '/images/cash.png';
-        $this->api_key = $this->settings['api_key'];
-        $this->webhook_url = $this->settings['webhook_url'];
-        $this->instructions = $this->settings['instructions'];
+        $this->api_key = $this->get_option('api_key');
+        $this->webhook_url = $this->get_option('webhook_url');
+        $this->instructions = $this->get_option('instructions');
         $this->i18n = include plugin_dir_path(__FILE__) . "includes/i18n/{$this->locale}.php";
 
 
@@ -300,7 +301,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
      */
     public function ckpg_email_instructions( $order, $sent_to_admin = false, $plain_text = false ) {
         if (get_post_meta( $order->get_id(), '_payment_method', true ) === $this->id){
-            $instructions = $this->settings['instructions'];
+            $instructions = $this->get_option('instructions');
             if ( $instructions && 'on-hold' === $order->get_status() ) {
                 echo wpautop( wptexturize( esc_html($instructions ) ) ). PHP_EOL;
             }
@@ -318,7 +319,7 @@ class WC_Conekta_Cash_Gateway extends WC_Conekta_Plugin
             {
                 echo '<p style="font-size: 30px"><strong>'.__('Referencia').':</strong> ' . esc_html(get_post_meta( $order->get_id(), 'conekta-referencia', true )). '</p>';
                 echo '<p>Se cobrará una comisión adicional al momento de realizar el pago.</p>';
-                echo '<p>INSTRUCCIONES:'. esc_html($this->settings['instructions']) .'</p>';
+                echo '<p>INSTRUCCIONES:'. esc_html($this->get_option('instructions')) .'</p>';
             }
     }
     public function ckpg_admin_options()

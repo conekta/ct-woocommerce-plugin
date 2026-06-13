@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 6.0.2
+Stable tag: 6.0.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,10 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.3 =
+* Feature: send the WooCommerce order id as the Conekta order reference_id on the Blocks checkout (read from the checkout-draft order before payment). Classic keeps the reverse conekta-order-id order meta.
+* Fix: "Undefined array key instructions" warning during checkout on the cash, bank-transfer and pay-by-bank gateways for configs saved before the instructions field existed.
+
 = 6.0.2 =
 * Fix: prevent duplicate WooCommerce orders from a single Conekta payment when the checkout is resubmitted (double-click, timeout, retry).
 * Fix: build the Conekta shipping contact from a single address block — uses shipping when filled, otherwise billing as a whole; the contact phone follows the same block.

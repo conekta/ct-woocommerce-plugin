@@ -334,6 +334,25 @@ class WC_Conekta_REST_API {
                 $checkout_type = 'unknown';
             }
 
+            $metadata = [
+                'plugin'                    => 'woocommerce',
+                'plugin_conekta_version'    => $gateway->version,
+                'woocommerce_version'       => WC()->version,
+                'payment_method'            => 'WC_Conekta_Gateway',
+                'woocommerce_checkout_type' => $checkout_type,
+            ];
+
+            // Blocks-only: add the WC order id as reference_id when it already
+            // exists. Blocks creates a `checkout-draft` order during checkout
+            // (and it keeps that id once finalized), so we can write it now —
+            // this is the only window, since the Conekta order is already paid
+            // (its metadata frozen) by the time process_payment runs. Classic
+            // has no order yet here, so reference_id stays absent there.
+            $reference_id = self::get_blocks_draft_order_id();
+            if ($reference_id) {
+                $metadata['reference_id'] = (string) $reference_id;
+            }
+
             $balanced = ckpg_check_balance([
                 'line_items'     => $snapshot['line_items'],
                 'shipping_lines' => $snapshot['shipping_lines'],
@@ -349,13 +368,7 @@ class WC_Conekta_REST_API {
                 'tax_lines'      => $balanced['tax_lines'],
                 'customer_info'  => $snapshot['customer_info'],
                 'checkout'       => $checkout,
-                'metadata'       => [
-                    'plugin'                 => 'woocommerce',
-                    'plugin_conekta_version' => $gateway->version,
-                    'woocommerce_version'    => WC()->version,
-                    'payment_method'         => 'WC_Conekta_Gateway',
-                    'woocommerce_checkout_type' => $checkout_type,
-                ],
+                'metadata'       => $metadata,
             ]);
 
             if (!empty($snapshot['shipping_contact'])) {
@@ -553,6 +566,40 @@ class WC_Conekta_REST_API {
         return $wallets_enabled
             ? [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD, 'apple', 'google']
             : [OrderCheckoutRequest::ALLOWED_PAYMENT_METHODS_CARD];
+    }
+
+    /**
+     * WooCommerce order id to write into the Conekta order metadata as
+     * reference_id — BLOCKS ONLY.
+     *
+     * Blocks creates a `checkout-draft` WooCommerce order while the customer is
+     * still on the checkout page (via the Store API) and that draft keeps its id
+     * once the order is finalized. Reading it here, during checkout-request
+     * (pre-payment), is the ONLY window to push the WC order id into Conekta:
+     * by the time process_payment runs, the Conekta order is already paid and
+     * its metadata can no longer be updated.
+     *
+     * Classic checkout has no order at this point (it's created on form submit,
+     * after the charge), so this returns null there — reference_id stays
+     * blocks-only and classic relies on the reverse `conekta-order-id` order
+     * meta instead.
+     *
+     * Returns null unless the session points at a real, still-draft order, so a
+     * stale id from a previous completed checkout never leaks into a new order.
+     */
+    public static function get_blocks_draft_order_id(): ?int {
+        if (!WC()->session) {
+            return null;
+        }
+        $draft_id = (int) WC()->session->get('store_api_draft_order');
+        if ($draft_id <= 0) {
+            return null;
+        }
+        $order = wc_get_order($draft_id);
+        if (!$order || !$order->has_status('checkout-draft')) {
+            return null;
+        }
+        return $draft_id;
     }
 
     /**

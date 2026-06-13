@@ -305,6 +305,59 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // get_blocks_draft_order_id — the blocks-only WC order id
+    // written into the Conekta order metadata as reference_id.
+    // -------------------------------------------------------
+
+    public function test_get_blocks_draft_order_id_returns_id_for_checkout_draft()
+    {
+        global $test_order_registry;
+        $order = new WC_Order(4567);
+        $order->set_status('checkout-draft');
+        $test_order_registry[4567] = $order;
+        WC()->session->set('store_api_draft_order', 4567);
+
+        $this->assertSame(4567, WC_Conekta_REST_API::get_blocks_draft_order_id());
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_get_blocks_draft_order_id_null_when_session_key_absent()
+    {
+        WC()->session->__unset('store_api_draft_order');
+
+        // Classic checkout never sets the blocks draft key.
+        $this->assertNull(WC_Conekta_REST_API::get_blocks_draft_order_id());
+    }
+
+    public function test_get_blocks_draft_order_id_null_when_order_deleted()
+    {
+        global $test_order_registry;
+        // Registry active but the referenced order is gone (wc_get_order -> false).
+        $test_order_registry = [];
+        WC()->session->set('store_api_draft_order', 9999);
+
+        $this->assertNull(WC_Conekta_REST_API::get_blocks_draft_order_id());
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_get_blocks_draft_order_id_null_when_order_not_draft()
+    {
+        global $test_order_registry;
+        // A stale id pointing at an already-finalized order must NOT be reused:
+        // returning it would graft last checkout's id onto a new Conekta order.
+        $order = new WC_Order(4567);
+        $order->set_status('processing');
+        $test_order_registry[4567] = $order;
+        WC()->session->set('store_api_draft_order', 4567);
+
+        $this->assertNull(WC_Conekta_REST_API::get_blocks_draft_order_id());
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    // -------------------------------------------------------
     // update_conekta_order_meta — writes to WC_Order meta
     // -------------------------------------------------------
 
