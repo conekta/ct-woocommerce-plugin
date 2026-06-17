@@ -120,6 +120,15 @@ const state = {
   // callback); we submit the WC checkout only ONCE per Conekta order so a
   // single payment never creates two WC orders.
   submittedOrderId: null,
+  // FormData snapshot taken at the instant the checkout passed server-side
+  // validation, BEFORE the SDK charge. The final wc-ajax=checkout submit posts
+  // THIS snapshot instead of re-reading the form, so the data WooCommerce
+  // validates pre-charge is byte-for-byte the data it receives post-charge.
+  // Without it, a plugin firing `updated_checkout` during the charge window
+  // (e.g. a postcode->colonia repopulator) could mutate a required field
+  // between validation and submit, making WC reject the order AFTER the card
+  // was already charged (paid, but no order created).
+  validatedFormData: null,
 };
 
 const formHandler = {
@@ -241,13 +250,18 @@ const mounter = {
       if (cameFromWalletButton) {
         utils.setLoading(true);
         try {
-          const errors = await submitInterceptor.fetchValidation(form);
+          // Wallet path skips submitInterceptor, so no snapshot was taken
+          // pre-charge. Snapshot now and validate that exact object, then reuse
+          // it for the submit — same consistency guarantee as the card path.
+          const snapshot = new FormData(form);
+          const errors = await submitInterceptor.fetchValidation(snapshot);
           if (errors && errors.length) {
             submitInterceptor.renderValidationErrors(errors);
             utils.setLoading(false);
             mounter.wireOrderListeners();
             return;
           }
+          state.validatedFormData = snapshot;
         } catch (_) {
           // Validation endpoint unreachable — fall through and submit anyway.
           // The customer has already been charged; better to attempt the WC
@@ -255,10 +269,16 @@ const mounter = {
         }
       }
 
-      const formData = new FormData(form);
+      // Submit the snapshot captured at validation time, NOT a fresh read of
+      // the form: a plugin may have mutated a required field during the charge
+      // window. Falls back to the live form only if no snapshot exists (e.g. a
+      // wallet charge whose validation request failed above).
+      const formData = state.validatedFormData || new FormData(form);
+      formData.set("conekta_order_id", orderId);
       formData.append("wc-ajax", "checkout");
       formHandler.submitForm(formData).finally(() => {
         state.payingInProgress = false;
+        state.validatedFormData = null;
       });
       // OrderEmitter wipes listeners after each event; rebind for the next round.
       mounter.wireOrderListeners();
@@ -353,13 +373,19 @@ const submitInterceptor = {
 
   runValidationAndCharge: async (form) => {
     try {
-      const errors = await submitInterceptor.fetchValidation(form);
+      // Snapshot the form ONCE: validate this exact FormData and later submit
+      // the same object. Capturing it up-front (not after the validation
+      // round-trip) closes even the network-gap window — what WC validates is
+      // byte-for-byte what onOrder will post after the charge.
+      const snapshot = new FormData(form);
+      const errors = await submitInterceptor.fetchValidation(snapshot);
       if (errors && errors.length) {
         submitInterceptor.renderValidationErrors(errors);
         state.payingInProgress = false;
         utils.setLoading(false);
         return;
       }
+      state.validatedFormData = snapshot;
       orderEmitter.submit();
     } catch (err) {
       state.payingInProgress = false;
@@ -368,10 +394,11 @@ const submitInterceptor = {
     }
   },
 
-  fetchValidation: async (form) => {
+  // Accepts a FormData snapshot so the caller controls exactly what gets
+  // validated (and can reuse the same object for the final submit).
+  fetchValidation: async (fd) => {
     const formData = {};
-    if (form) {
-      const fd = new FormData(form);
+    if (fd) {
       fd.forEach((value, key) => { formData[key] = value; });
     }
     const res = await fetch(conekta_settings.checkout_request_url, {
