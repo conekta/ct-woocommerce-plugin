@@ -73,6 +73,10 @@ if (!function_exists('wc_get_orders')) {
         $limit = $args['limit'] ?? -1;
         $exclude = $args['exclude'] ?? [];
 
+        if (!is_iterable($test_order_registry)) {
+            return [];
+        }
+
         foreach ($test_order_registry as $order) {
             if (in_array($order->get_id(), $exclude)) {
                 continue;
@@ -296,8 +300,14 @@ if (!class_exists('WC_Order')) {
         public function update_status($status, $note = '') {
             $this->status = $status;
         }
-        public function payment_complete() {
+        // Mirrors WC_Order::payment_complete( $transaction_id = '' ) — the
+        // optional transaction id is what classic/blocks pass (the Conekta
+        // order id); the webhook path calls it with no argument.
+        public function payment_complete($transaction_id = '') {
             $this->status = 'completed';
+            if ($transaction_id !== '') {
+                $this->meta['_transaction_id'] = $transaction_id;
+            }
         }
         public function add_order_note($note) {}
 
