@@ -50,6 +50,7 @@ By following these steps, you'll successfully install and configure the Conekta 
 = 6.0.4 =
 * Fix: classic checkout no longer leaves a card payment without an order. The conekta-order-id link is written on the WooCommerce order before completion, so the order.paid webhook can always recover and finish the order if process_payment fails — the same safety net Blocks already has.
 * Feature: stamp the WooCommerce order id as reference_id on each card charge (PUT /charges/{id}) for Conekta-to-WooCommerce traceability. Best-effort; never blocks checkout.
+* Fix: classic checkout submits the exact data it validated before charging (FormData snapshot), so a third-party plugin changing a required field during the payment window can't make WooCommerce reject the order after the card was charged.
 * Diagnostics: added targeted logs for the silent failure points (post-charge validation rejections, not-paid / amount-mismatch / duplicate branches, missing conekta_order_id).
 
 = 6.0.3 =
