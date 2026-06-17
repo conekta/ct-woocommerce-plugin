@@ -4,14 +4,14 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 6.9.4
 Requires PHP: 7.4
-Stable tag: 6.0.3
+Stable tag: 6.0.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
 
 WooCommerce Payment Gateway for Conekta.io
 
-This bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This bundles functionality to process credit and debit cards, monthly installments (MSI), cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank) securely, as well as send email notifications to your customers when they complete a successful purchase.
 
 == Description ==
 
@@ -47,6 +47,11 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.4 =
+* Fix: classic checkout no longer leaves a card payment without an order. The conekta-order-id link is written on the WooCommerce order before completion, so the order.paid webhook can always recover and finish the order if process_payment fails — the same safety net Blocks already has.
+* Feature: stamp the WooCommerce order id as reference_id on each card charge (PUT /charges/{id}) for Conekta-to-WooCommerce traceability. Best-effort; never blocks checkout.
+* Diagnostics: added targeted logs for the silent failure points (post-charge validation rejections, not-paid / amount-mismatch / duplicate branches, missing conekta_order_id).
+
 = 6.0.3 =
 * Feature: send the WooCommerce order id as the Conekta order reference_id on the Blocks checkout (read from the checkout-draft order before payment). Classic keeps the reverse conekta-order-id order meta.
 * Fix: "Undefined array key instructions" warning during checkout on the cash, bank-transfer and pay-by-bank gateways for configs saved before the instructions field existed.

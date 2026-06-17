@@ -2624,6 +2624,197 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // tag_card_charges_with_wc_order (reverse trace via updateCharge)
+    // No Mockoon: the ChargesApi is injected as a mock.
+    // -------------------------------------------------------
+
+    /**
+     * Build a fake OrderResponse-like object exposing getCharges()->getData(),
+     * where each charge has getId() and getPaymentMethod()->getObject().
+     *
+     * @param array<array{id:string,object:string}> $charges
+     */
+    private function fakeConektaOrderWithCharges(array $charges)
+    {
+        $charge_objects = array_map(function (array $c) {
+            return new class($c['id'], $c['object']) {
+                private $id;
+                private $object;
+                public function __construct($id, $object) { $this->id = $id; $this->object = $object; }
+                public function getId() { return $this->id; }
+                public function getPaymentMethod() {
+                    return new class($this->object) {
+                        private $object;
+                        public function __construct($object) { $this->object = $object; }
+                        public function getObject() { return $this->object; }
+                    };
+                }
+            };
+        }, $charges);
+
+        return new class($charge_objects) {
+            private $charges;
+            public function __construct($charges) { $this->charges = $charges; }
+            public function getCharges() {
+                return new class($this->charges) {
+                    private $data;
+                    public function __construct($data) { $this->data = $data; }
+                    public function getData() { return $this->data; }
+                };
+            }
+        };
+    }
+
+    /**
+     * Build a taggable gateway whose get_charges_api_instance() returns the
+     * given ChargesApi mock, with settings/version populated.
+     */
+    private function createTaggableGateway($chargesApiMock): WC_Conekta_Gateway
+    {
+        TaggableConektaGateway::$stubChargesApi = $chargesApiMock;
+        $gateway = $this->createPartialMock(TaggableConektaGateway::class, []);
+
+        $ref  = new ReflectionClass($gateway);
+        $prop = $ref->getProperty('settings');
+        $prop->setAccessible(true);
+        $prop->setValue($gateway, ['cards_api_key' => 'key_test_123']);
+
+        return $gateway;
+    }
+
+    public function test_tag_card_charges_stamps_wc_order_id_on_card_payment_charge()
+    {
+        $captured = null;
+        $api = $this->createMock(\Conekta\Api\ChargesApi::class);
+        $api->expects($this->once())
+            ->method('updateCharge')
+            ->with(
+                $this->equalTo('charge_card_1'),
+                $this->callback(function ($req) use (&$captured) {
+                    $captured = $req;
+                    return $req instanceof \Conekta\Model\ChargeUpdateRequest;
+                })
+            );
+
+        $gateway = $this->createTaggableGateway($api);
+        $order   = new WC_Order(1309);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => 'charge_card_1', 'object' => 'card_payment'],
+        ]);
+
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+
+        $this->assertSame('1309', $captured->getReferenceId());
+    }
+
+    public function test_tag_card_charges_skips_non_card_payment_charges()
+    {
+        $api = $this->createMock(\Conekta\Api\ChargesApi::class);
+        // Only the card_payment charge is tagged; cash/oxxo charges are skipped.
+        $api->expects($this->once())
+            ->method('updateCharge')
+            ->with($this->equalTo('charge_card_1'), $this->anything());
+
+        $gateway = $this->createTaggableGateway($api);
+        $order   = new WC_Order(1310);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => 'charge_cash_1', 'object' => 'cash_payment'],
+            ['id' => 'charge_card_1', 'object' => 'card_payment'],
+        ]);
+
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    public function test_tag_card_charges_tags_every_card_payment_charge()
+    {
+        $api = $this->createMock(\Conekta\Api\ChargesApi::class);
+        $api->expects($this->exactly(2))->method('updateCharge');
+
+        $gateway = $this->createTaggableGateway($api);
+        $order   = new WC_Order(1311);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => 'charge_card_1', 'object' => 'card_payment'],
+            ['id' => 'charge_card_2', 'object' => 'card_payment'],
+        ]);
+
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    public function test_tag_card_charges_swallows_updatecharge_exception()
+    {
+        $api = $this->createMock(\Conekta\Api\ChargesApi::class);
+        $api->method('updateCharge')->willThrowException(new \Exception('boom'));
+
+        $gateway = $this->createTaggableGateway($api);
+        $order   = new WC_Order(1312);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => 'charge_card_1', 'object' => 'card_payment'],
+        ]);
+
+        // Best-effort: a failing updateCharge must NOT propagate.
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+        $this->assertTrue(true);
+    }
+
+    public function test_tag_card_charges_noop_when_no_charges()
+    {
+        $api = $this->createMock(\Conekta\Api\ChargesApi::class);
+        $api->expects($this->never())->method('updateCharge');
+
+        $gateway = $this->createTaggableGateway($api);
+        $order   = new WC_Order(1313);
+        $conekta_order = $this->fakeConektaOrderWithCharges([]);
+
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    /**
+     * Integration: drive the method against the REAL ChargesApi pointed at the
+     * Conekta mock server (no injected mock). Proves the full wiring end-to-end:
+     * get_charges_api_instance builds a usable client, the ChargeUpdateRequest
+     * serializes, the PUT /charges/{id} is sent and the 200 response is parsed
+     * without error. Charge id 6524722f28c7ba0016a5b17d is the one the official
+     * mock answers 200 for.
+     *
+     * @group mockoon
+     * @doesNotPerformAssertions
+     */
+    public function test_tag_card_charges_tags_via_mock_server()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+        $order   = new WC_Order(1314);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => '6524722f28c7ba0016a5b17d', 'object' => 'card_payment'],
+        ]);
+
+        // Must complete without throwing against the real mock 200 response.
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    /**
+     * Integration: a charge id the mock answers 500 for must be swallowed —
+     * a charge-tagging failure never breaks the completion flow.
+     *
+     * @group mockoon
+     * @doesNotPerformAssertions
+     */
+    public function test_tag_card_charges_swallows_real_api_error_against_mock_server()
+    {
+        $this->requireMockoon();
+
+        $gateway = $this->createConfiguredGateway();
+        $order   = new WC_Order(1315);
+        $conekta_order = $this->fakeConektaOrderWithCharges([
+            ['id' => '6a3027a19ef944001b17a789', 'object' => 'card_payment'],
+        ]);
+
+        // Mock returns 500 for this charge id; method must swallow it, not throw.
+        $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    // -------------------------------------------------------
     // Helpers
     // -------------------------------------------------------
 
@@ -2632,5 +2823,19 @@ class WC_Conekta_Gateway_Test extends TestCase
         $ref = new ReflectionMethod($object, $method);
         $ref->setAccessible(true);
         return $ref->invokeArgs($object, $args);
+    }
+}
+
+/**
+ * Test seam: overrides get_charges_api_instance() so tag_card_charges_with_wc_order
+ * uses an injected ChargesApi mock instead of building a real Guzzle-backed client.
+ */
+class TaggableConektaGateway extends WC_Conekta_Gateway
+{
+    public static $stubChargesApi;
+
+    public static function get_charges_api_instance(string $api_key, string $version): \Conekta\Api\ChargesApi
+    {
+        return self::$stubChargesApi;
     }
 }

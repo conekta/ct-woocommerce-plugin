@@ -1,13 +1,13 @@
 <div align="center">
 
-# Conekta Woocommerce v.6.0.3
+# Conekta Woocommerce v.6.0.4
 [![Made with PHP](https://img.shields.io/badge/made%20with-php-red.svg?style=for-the-badge&colorA=ED4040&colorB=C12C2D)](http://php.net) 
 [![By Conekta](https://img.shields.io/badge/by-conekta-red.svg?style=for-the-badge&colorA=ee6130&colorB=00a4ac)](https://conekta.com)
 </div>
 
 WooCommerce Payment Gateway for Conekta.io
 
-This is an Open Source and Free plugin. It bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This is an Open Source and Free plugin. It bundles functionality to process credit and debit cards, monthly installments (MSI), cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank) securely, as well as send email notifications to your customers when they complete a successful purchase.
 
 
 Features

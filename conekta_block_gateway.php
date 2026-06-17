@@ -10,6 +10,7 @@ require_once(__DIR__ . '/vendor/autoload.php');
 
 use Conekta\ApiException;
 use Conekta\Model\EventTypes;
+use Conekta\Model\ChargeUpdateRequest;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
@@ -60,6 +61,48 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'configure_webhook'));
         }
         add_action('woocommerce_rest_checkout_process_payment_with_context', [$this, 'process_payment_api'], 10, 2);
+
+        // Diagnostic: classic checkout charges the card (Conekta SDK) BEFORE
+        // posting wc-ajax=checkout, so if WooCommerce rejects that submit during
+        // validation the customer ends up paid with no WC order — and today that
+        // rejection leaves no trace in the plugin logs. This listener records the
+        // validation errors ONLY for the post-charge submit (the hidden
+        // conekta_order_id is empty during the pre-charge validate-only call, so
+        // this never fires there). PHP_INT_MAX so we observe every other
+        // validator's errors.
+        add_action('woocommerce_after_checkout_validation', [$this, 'log_post_charge_validation_errors'], PHP_INT_MAX, 2);
+    }
+
+    /**
+     * Log WooCommerce validation errors that would block the post-charge
+     * wc-ajax=checkout submit (classic). Fires only when conekta_order_id is
+     * already set in the request — i.e. the card was charged and WC is about to
+     * refuse to create the order. Read-only: never alters the errors object.
+     *
+     * @param array    $data   Posted checkout data (unused).
+     * @param WP_Error $errors Accumulated validation errors.
+     */
+    public function log_post_charge_validation_errors($data, $errors): void {
+        if (empty($_POST['conekta_order_id'])) {
+            return;
+        }
+        if (!is_wp_error($errors) || !$errors->has_errors()) {
+            return;
+        }
+
+        $conekta_order_id = sanitize_text_field((string) $_POST['conekta_order_id']);
+        $messages = [];
+        foreach ($errors->get_error_codes() as $code) {
+            foreach ($errors->get_error_messages($code) as $msg) {
+                $messages[] = $code . ': ' . wp_strip_all_tags($msg);
+            }
+        }
+
+        error_log(sprintf(
+            'Conekta - POST-CHARGE checkout validation FAILED (Conekta order %s already paid, WC order will NOT be created): %s',
+            $conekta_order_id,
+            implode(' | ', $messages)
+        ));
     }
 
     /**
@@ -248,6 +291,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             // webhooks already rely on via find_order_for_webhook().
             $duplicate = $this->find_existing_order_for_conekta_id($conekta_order_id, $order->get_id());
             if ($duplicate) {
+                error_log(sprintf(
+                    'Conekta - complete_wc_order_from_conekta: DUPLICATE — Conekta order %s already applied to WC order #%d (current WC order #%d)',
+                    $conekta_order_id,
+                    $duplicate->get_id(),
+                    $order->get_id()
+                ));
                 return [
                     'success'        => false,
                     'duplicate'      => true,
@@ -260,10 +309,27 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 ];
             }
 
+            self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
+
             $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
             $conekta_order = $api->getOrderById($conekta_order_id);
 
+            // Best-effort reverse trace: stamp the WooCommerce order id onto
+            // each card_payment charge (reference_id) so a Conekta charge can be
+            // traced back to its WC order from the Conekta dashboard. Classic
+            // can't set the order-level reference_id (no WC order exists at
+            // create time), so the charge-level one is the only Conekta->Woo
+            // link there. Never throws — failure here must not block the
+            // completion flow.
+            $this->tag_card_charges_with_wc_order($order, $conekta_order);
+
             if ($conekta_order->getPaymentStatus() !== 'paid') {
+                error_log(sprintf(
+                    'Conekta - complete_wc_order_from_conekta: NOT PAID — Conekta order %s status "%s" (WC order #%d)',
+                    $conekta_order_id,
+                    $conekta_order->getPaymentStatus(),
+                    $order->get_id()
+                ));
                 return [
                     'success' => false,
                     'error'   => sprintf('Conekta order is not paid (status: %s)', $conekta_order->getPaymentStatus()),
@@ -273,6 +339,13 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $expected_amount = (int) round($order->get_total() * 100);
             $actual_amount   = (int) $conekta_order->getAmount();
             if ($expected_amount !== $actual_amount) {
+                error_log(sprintf(
+                    'Conekta - complete_wc_order_from_conekta: AMOUNT MISMATCH — WC order #%d expects %d cents, Conekta order %s charged %d cents',
+                    $order->get_id(),
+                    $expected_amount,
+                    $conekta_order_id,
+                    $actual_amount
+                ));
                 return [
                     'success' => false,
                     'error'   => sprintf(
@@ -283,7 +356,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 ];
             }
 
-            self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
             $order->payment_complete($conekta_order_id);
             $order->add_order_note(sprintf(__('Pago confirmado con Conekta (orden %s)', 'woocommerce'), $conekta_order_id));
 
@@ -293,6 +365,57 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         } catch (\Exception $e) {
             error_log('Conekta - complete_wc_order_from_conekta: ' . $e->getMessage());
             return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Stamp the WooCommerce order id as reference_id on every card_payment
+     * charge of the Conekta order, via PUT /charges/{id} (updateCharge). Gives
+     * the merchant a Conekta->WooCommerce back-reference visible on the Conekta
+     * dashboard — the only such link for classic checkout, where the order-level
+     * reference_id can't be set at create time.
+     *
+     * Strictly best-effort: every error is swallowed (logged) so a failed PUT
+     * never blocks order completion. The card was already charged; tracing is
+     * a nice-to-have, not a gate.
+     *
+     * @param mixed $conekta_order OrderResponse returned by getOrderById.
+     */
+    protected function tag_card_charges_with_wc_order(WC_Order $order, $conekta_order): void {
+        try {
+            $charges = $conekta_order->getCharges();
+            $data    = $charges ? $charges->getData() : null;
+            if (!is_iterable($data)) {
+                return;
+            }
+
+            $charges_api = $this->get_charges_api_instance($this->settings['cards_api_key'], $this->version);
+            $reference   = (string) $order->get_id();
+
+            foreach ($data as $charge) {
+                $payment_method = $charge->getPaymentMethod();
+                if (!$payment_method || $payment_method->getObject() !== 'card_payment') {
+                    continue;
+                }
+
+                $charge_id = $charge->getId();
+                if (empty($charge_id)) {
+                    continue;
+                }
+
+                try {
+                    $charges_api->updateCharge($charge_id, new ChargeUpdateRequest(['reference_id' => $reference]));
+                } catch (\Throwable $e) {
+                    error_log(sprintf(
+                        'Conekta - tag_card_charges_with_wc_order: updateCharge failed for charge %s (WC order #%d): %s',
+                        $charge_id,
+                        $order->get_id(),
+                        $e->getMessage()
+                    ));
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('Conekta - tag_card_charges_with_wc_order: ' . $e->getMessage());
         }
     }
 
@@ -393,7 +516,21 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
         $conekta_order_id = isset($_POST['conekta_order_id']) ? sanitize_text_field($_POST['conekta_order_id']) : '';
 
+        error_log(sprintf(
+            'Conekta - process_payment (classic): WC order #%d, conekta_order_id "%s"',
+            $order_id,
+            $conekta_order_id
+        ));
+
         if (empty($conekta_order_id)) {
+            // The card may already be charged on the Conekta side: the SDK
+            // emits onOrder, the JS posts wc-ajax=checkout, and if the hidden
+            // conekta_order_id field didn't reach the server the WC order is
+            // created but left unpaid. Logged so this surfaces in debug.log.
+            error_log(sprintf(
+                'Conekta - process_payment (classic): MISSING conekta_order_id on WC order #%d — card may be charged with no linked order',
+                $order_id
+            ));
             wc_add_notice(__('Error: Falta la orden de Conekta.', 'woocommerce'), 'error');
             return ['result' => 'failure'];
         }
@@ -418,6 +555,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             ];
         }
 
+        error_log(sprintf(
+            'Conekta - process_payment (classic): FAILED for WC order #%d (Conekta order %s): %s',
+            $order_id,
+            $conekta_order_id,
+            $outcome['error'] ?? 'unknown'
+        ));
         wc_add_notice(__('Error al procesar el pago con Conekta: ', 'woocommerce') . ($outcome['error'] ?? 'unknown'), 'error');
         return ['result' => 'failure'];
     }
