@@ -2,7 +2,7 @@
 Contributors: conekta, interfacesconekta
 Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
-Tested up to: 6.9.4
+Tested up to: 7.0
 Requires PHP: 7.4
 Stable tag: 6.0.4
 License: GPLv2 or later
