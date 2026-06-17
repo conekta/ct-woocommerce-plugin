@@ -11,7 +11,7 @@ License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
 WooCommerce Payment Gateway for Conekta.io
 
-This bundles functionality to process credit cards and cash payments securely as well as send email notifications to your customers when they complete a successful purchase.
+This bundles functionality to process credit and debit cards, monthly installments (MSI), cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank) securely, as well as send email notifications to your customers when they complete a successful purchase.
 
 == Description ==
 
