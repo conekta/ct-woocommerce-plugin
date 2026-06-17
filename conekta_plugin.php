@@ -22,7 +22,7 @@ require_once(__DIR__ . '/conekta-rest-api.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
-	public $version  = "6.0.4";
+	public $version  = "6.0.5";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit and debit cards, monthly installments (MSI) for Mexican cards, cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
