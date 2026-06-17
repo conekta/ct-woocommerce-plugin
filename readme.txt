@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.0.4
+Stable tag: 6.0.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.5 =
+* Fix: classic checkout submits the exact data it validated before charging (FormData snapshot), so a third-party plugin changing a required field during the payment window (e.g. a postcode->colonia repopulator) can't make WooCommerce reject the order after the card was already charged. Covers card and wallet paths.
+
 = 6.0.4 =
 * Fix: classic checkout no longer leaves a card payment without an order. The conekta-order-id link is written on the WooCommerce order before completion, so the order.paid webhook can always recover and finish the order if process_payment fails — the same safety net Blocks already has.
 * Feature: stamp the WooCommerce order id as reference_id on each card charge (PUT /charges/{id}) for Conekta-to-WooCommerce traceability. Best-effort; never blocks checkout.
