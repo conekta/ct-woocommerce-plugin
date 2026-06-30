@@ -350,6 +350,7 @@ class WC_Conekta_Pay_By_Bank_Gateway extends WC_Conekta_Plugin
             'tax_lines'      => $tax_lines,
         ], amount_validation((float) $order->get_total()));
         $tax_lines = $balanced['tax_lines'];
+        $discount_lines = $balanced['discount_lines'];
 
         $orderData = [
             'line_items' => $line_items,

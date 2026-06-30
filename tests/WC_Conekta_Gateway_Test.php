@@ -1172,14 +1172,21 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(0, $result['tax_lines'][0]['amount']);
     }
 
+    // -------------------------------------------------------
+    // ckpg_check_balance — rounding reconciliation border cases.
+    // Semantics: undercount (charging too little) -> add to TAX;
+    //            overcount  (charging too much)   -> round_adjustment DISCOUNT.
+    // The reported tax is never reduced, and the order total always matches
+    // $total exactly so the rounding error never reaches Conekta.
+    // -------------------------------------------------------
+
     /**
-     * Exact rounding scenario observed in staging (WC #7344): unit_price
+     * Exact overcount scenario observed in staging (WC #7344): unit_price
      * 25991 * 3 = 77973 (+1¢ from line_subtotal/qty rounding) and tax 14889
      * (+1¢), so the lines sum to 107943 but the WooCommerce total is 107941.
-     * The 2¢ overcount must be absorbed (subtracted) so Conekta charges exactly
-     * the WC total — the rounding error must never reach Conekta.
+     * The 2¢ overcount becomes a round_adjustment discount; tax is untouched.
      */
-    public function test_check_balance_absorbs_two_cent_overcount()
+    public function test_check_balance_overcount_becomes_discount()
     {
         $order = [
             'line_items'     => [['unit_price' => 25991, 'quantity' => 3]], // 77973
@@ -1190,12 +1197,55 @@ class WC_Conekta_Gateway_Test extends TestCase
         // Lines sum = 77973 + 15081 + 14889 = 107943; WC total = 107941.
         $result = ckpg_check_balance($order, 107941);
 
-        // Tax absorbs the -2¢ so the order total matches the WC total exactly.
-        $this->assertEquals(14887, $result['tax_lines'][0]['amount']);
+        // Tax keeps its true value; the 2¢ excess becomes a discount.
+        $this->assertEquals(14889, $result['tax_lines'][0]['amount']);
+        $this->assertCount(1, $result['discount_lines']);
+        $this->assertEquals('round_adjustment', $result['discount_lines'][0]['code']);
+        $this->assertEquals('campaign', $result['discount_lines'][0]['type']);
+        $this->assertEquals(2, $result['discount_lines'][0]['amount']);
         $this->assertEquals(107941, $this->sumOrder($result));
     }
 
-    public function test_check_balance_absorbs_undercount()
+    public function test_check_balance_overcount_with_no_tax_line()
+    {
+        // Tax-exclusive cart with no tax, items overcount by 1¢.
+        $order = [
+            'line_items'     => [['unit_price' => 9734, 'quantity' => 3]], // 29202
+            'shipping_lines' => [],
+            'discount_lines' => [],
+            'tax_lines'      => [],
+        ];
+        // Lines sum = 29202; WC total = 29201 (1¢ too much).
+        $result = ckpg_check_balance($order, 29201);
+
+        $this->assertEmpty($result['tax_lines']);
+        $this->assertCount(1, $result['discount_lines']);
+        $this->assertEquals('round_adjustment', $result['discount_lines'][0]['code']);
+        $this->assertEquals(1, $result['discount_lines'][0]['amount']);
+        $this->assertEquals(29201, $this->sumOrder($result));
+    }
+
+    public function test_check_balance_overcount_preserves_existing_discounts()
+    {
+        // A real coupon is already present; the round_adjustment is appended.
+        $order = [
+            'line_items'     => [['unit_price' => 25991, 'quantity' => 3]], // 77973
+            'shipping_lines' => [],
+            'discount_lines' => [['code' => 'VERANO', 'amount' => 5000, 'type' => 'coupon']],
+            'tax_lines'      => [['amount' => 12476, 'description' => 'IVA']],
+        ];
+        // Lines sum = 77973 - 5000 + 12476 = 85449; WC total = 85447 (2¢ too much).
+        $result = ckpg_check_balance($order, 85447);
+
+        $this->assertCount(2, $result['discount_lines']);
+        $this->assertEquals('VERANO', $result['discount_lines'][0]['code']); // untouched
+        $this->assertEquals('round_adjustment', $result['discount_lines'][1]['code']);
+        $this->assertEquals(2, $result['discount_lines'][1]['amount']);
+        $this->assertEquals(12476, $result['tax_lines'][0]['amount']); // tax untouched
+        $this->assertEquals(85447, $this->sumOrder($result));
+    }
+
+    public function test_check_balance_undercount_adds_to_tax()
     {
         $order = [
             'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
@@ -1207,10 +1257,11 @@ class WC_Conekta_Gateway_Test extends TestCase
         $result = ckpg_check_balance($order, 11603);
 
         $this->assertEquals(1603, $result['tax_lines'][0]['amount']);
+        $this->assertEmpty($result['discount_lines']); // no discount on undercount
         $this->assertEquals(11603, $this->sumOrder($result));
     }
 
-    public function test_check_balance_adds_tax_line_when_missing()
+    public function test_check_balance_undercount_adds_tax_line_when_missing()
     {
         $order = [
             'line_items'     => [['unit_price' => 33333, 'quantity' => 3]], // 99999
@@ -1227,13 +1278,29 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(100000, $this->sumOrder($result));
     }
 
+    public function test_check_balance_exact_total_no_adjustment()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 2]], // 20000
+            'shipping_lines' => [['amount' => 5000]],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 4000, 'description' => 'IVA']],
+        ];
+        // Lines sum = 29000 == WC total → nothing to reconcile.
+        $result = ckpg_check_balance($order, 29000);
+
+        $this->assertEquals(4000, $result['tax_lines'][0]['amount']);
+        $this->assertEmpty($result['discount_lines']);
+        $this->assertEquals(29000, $this->sumOrder($result));
+    }
+
     /** Recompute an order's net total the same way Conekta does. */
     private function sumOrder(array $order): int
     {
         $amount = 0;
         foreach ($order['line_items'] as $li)     { $amount += $li['unit_price'] * $li['quantity']; }
         foreach ($order['shipping_lines'] as $sl) { $amount += $sl['amount']; }
-        foreach ($order['discount_lines'] as $dl) { $amount -= $dl['amount']; }
+        foreach (($order['discount_lines'] ?? []) as $dl) { $amount -= $dl['amount']; }
         foreach ($order['tax_lines'] as $tl)      { $amount += $tl['amount']; }
         return $amount;
     }

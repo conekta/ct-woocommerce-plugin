@@ -492,7 +492,8 @@ class WC_Conekta_REST_API {
                 'discount_lines' => $discount_lines,
                 'tax_lines'      => $tax_lines,
             ], amount_validation((float) WC()->cart->get_total('edit')));
-            $tax_lines = $balanced['tax_lines'];
+            $tax_lines      = $balanced['tax_lines'];
+            $discount_lines = $balanced['discount_lines'];
         }
 
         $customer_info    = [];

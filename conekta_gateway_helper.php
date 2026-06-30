@@ -26,26 +26,31 @@ function ckpg_check_balance($order, $total): array
         $amount = $amount + $tax_line['amount'];
     }
 
-    // Signed delta: positive when we under-counted (charge too little),
-    // negative when we over-counted. unit_price is line_subtotal/qty rounded to
-    // cents, so unit_price * quantity (plus tax rounding) can drift a cent or
-    // two in EITHER direction. Absorb that delta into the tax line so the order
-    // total matches $total exactly. (The previous code only ever ADDED abs(),
-    // which over-charged when the lines already exceeded the total.)
+    // unit_price is line_subtotal/qty rounded to cents, so unit_price * quantity
+    // (plus tax rounding) can drift a cent or two from the real WooCommerce
+    // total in EITHER direction. Reconcile so the order total matches $total
+    // exactly, keeping the tax line at its true value:
+    //   - charging too little  -> add the missing cents to tax.
+    //   - charging too much     -> refund the extra cents as a round_adjustment
+    //                              discount (never reduce the reported tax).
     $delta = intval($total) - $amount;
-    if ($delta !== 0) {
+    if ($delta > 0) {
         if (empty($order['tax_lines'])) {
             $order['tax_lines'] = [['amount' => 0, 'description' => 'Round Adjustment']];
         }
-
-        // Never push the tax line negative; only absorb small rounding noise.
-        if ($order['tax_lines'][0]['amount'] + $delta >= 0) {
-            $order['tax_lines'][0]['amount'] += $delta;
-        }
-
+        $order['tax_lines'][0]['amount'] += $delta;
         if (empty($order['tax_lines'][0]['description'])) {
             $order['tax_lines'][0]['description'] = 'Round Adjustment';
         }
+    } elseif ($delta < 0) {
+        if (empty($order['discount_lines'])) {
+            $order['discount_lines'] = [];
+        }
+        $order['discount_lines'][] = [
+            'code'   => 'round_adjustment',
+            'amount' => abs($delta),
+            'type'   => 'campaign',
+        ];
     }
 
     return $order;
