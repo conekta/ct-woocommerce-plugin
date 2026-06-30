@@ -480,6 +480,30 @@ class WC_Conekta_REST_API {
                     'method'  => $method_label,
                 ];
             }
+
+            // Reconcile rounding to the exact WooCommerce total. unit_price is
+            // line_subtotal/qty rounded to cents, so unit_price * quantity can
+            // drift a cent or two from the real line total, and tax rounding can
+            // add more. Adjust the tax line so the amount Conekta charges matches
+            // the WC cart total exactly. (build_snapshot is the card path and,
+            // unlike the block gateways, does not run ckpg_check_balance.)
+            $lines_total = 0;
+            foreach ($line_items as $li)     { $lines_total += $li['unit_price'] * $li['quantity']; }
+            foreach ($shipping_lines as $sl) { $lines_total += $sl['amount']; }
+            foreach ($discount_lines as $dl) { $lines_total -= $dl['amount']; }
+            foreach ($tax_lines as $tl)      { $lines_total += $tl['amount']; }
+
+            $cart_total_cents = amount_validation((float) WC()->cart->get_total('edit'));
+            $delta = $cart_total_cents - $lines_total;
+            if ($delta !== 0) {
+                if (empty($tax_lines)) {
+                    $tax_lines[] = ['description' => 'Round Adjustment', 'amount' => 0];
+                }
+                // Only absorb small rounding noise into tax; never push it negative.
+                if ($tax_lines[0]['amount'] + $delta >= 0) {
+                    $tax_lines[0]['amount'] += $delta;
+                }
+            }
         }
 
         $customer_info    = [];
