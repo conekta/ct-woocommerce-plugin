@@ -67,6 +67,25 @@ h.run('Classic Checkout — tax-inclusive not reported as discount', { checkoutT
   assert(typeof body.conekta_order_id === 'string' && body.conekta_order_id.length > 0,
     `checkout-request returned conekta_order_id = ${body.conekta_order_id}`);
 
-  // Core regression assertions against the real Conekta order.
+  // Core regression assertions against the real Conekta order, BEFORE paying,
+  // so they always run even if the 3DS happy path below flakes.
+  await h.verifyTaxInclusiveOrder(body.conekta_order_id);
+
+  // ---------------------------------------------------------------
+  // Happy path — pay with the test card so the order is fully charged
+  // and we can compare the paid Conekta order against WooCommerce.
+  // ---------------------------------------------------------------
+  console.log('\n--- happy path (pay with card) ---');
+  await h.waitForIntegrationIframe();
+  await h.fillIntegrationCard(h.TEST_CARD);
+  assert(true, 'card filled inside Conekta iframe');
+
+  await h.clickPlaceOrder();
+  await h.waitForOrderReceivedWith3DS();
+  assert(true, 'redirected to order-received');
+
+  // Confirms the Conekta order reached payment_status = paid. Re-verifies the
+  // tax classification on the now-paid order (structure must be unchanged).
+  await h.testOrderStatus(body.conekta_order_id);
   await h.verifyTaxInclusiveOrder(body.conekta_order_id);
 }).then(passed => process.exit(passed ? 0 : 1));
