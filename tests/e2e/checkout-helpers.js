@@ -472,11 +472,18 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
  */
 async function verifyConektaTotalMatchesWoo(conektaOrderId) {
   console.log('\n--- Conekta amount vs WooCommerce total (rounding reconciliation) ---');
+  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/transactions/payments/${conektaOrderId})`);
   const order = await fetchConektaOrder(conektaOrderId);
   const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
   const amount = order.amount;
   const taxLines = list(order.tax_lines);
   const discountLines = list(order.discount_lines);
+
+  // Dump the Conekta order's tax / discount lines so the rounding items are
+  // visible directly on the order (cross-check against the panel link above).
+  console.log(`  Conekta amount=${amount}`);
+  console.log(`  Conekta tax_lines=${JSON.stringify(taxLines)}`);
+  console.log(`  Conekta discount_lines=${JSON.stringify(discountLines)}`);
 
   const roundAdj = discountLines.find(d => d.code === 'round_adjustment');
   if (roundAdj) {
