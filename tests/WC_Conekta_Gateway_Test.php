@@ -37,10 +37,11 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     protected function tearDown(): void
     {
-        global $test_product_registry, $test_order_registry;
+        global $test_product_registry, $test_order_registry, $test_prices_include_tax;
         WC()->cart = null;
         $test_product_registry = [];
         $test_order_registry = null;
+        $test_prices_include_tax = false;
         parent::tearDown();
     }
 
@@ -48,13 +49,14 @@ class WC_Conekta_Gateway_Test extends TestCase
      * Register a product in the global registry so both `new WC_Product($id)`
      * and `wc_get_product($id)` return the configured data.
      */
-    private function registerProduct(int $id, float $regular_price, float $price = 0, string $name = ''): void
+    private function registerProduct(int $id, float $regular_price, float $price = 0, string $name = '', bool $taxable = true): void
     {
         global $test_product_registry;
         $test_product_registry[$id] = [
             'regular_price' => $regular_price,
             'price'         => $price ?: $regular_price,
             'name'          => $name ?: "Test Product {$id}",
+            'taxable'       => $taxable,
         ];
     }
 
@@ -869,6 +871,168 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $this->assertCount(1, $line_items);
         $this->assertEquals(50000, $line_items[0]['unit_price']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_line_items — tax-inclusive pricing must NOT be
+    // mistaken for a price-level (dynamic_pricing) discount.
+    // Regression: with prices entered tax-inclusive, get_regular_price()
+    // is gross (incl. IVA) while line_subtotal is net, so the IVA was
+    // being reported as a -$discount in Conekta.
+    // -------------------------------------------------------
+
+    public function test_build_line_items_tax_inclusive_no_false_discount()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = true;
+
+        // Regular price entered tax-inclusive: 2610 gross = 2250 net @ 16% IVA.
+        $this->registerProduct(10, 2610.00);
+
+        $items = [[
+            'line_subtotal' => 2250.00, // WooCommerce stores the NET subtotal
+            'qty'           => 1,
+            'product_id'    => 10,
+            'name'          => 'Tax Inclusive Product',
+            'variation_id'  => 0,
+        ]];
+
+        $discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
+
+        // The 360 IVA is NOT a discount — both sides compared net of tax.
+        $this->assertEquals(0, $discount);
+        // unit_price stays at the net line subtotal: 2250 * 100.
+        $this->assertEquals(225000, $line_items[0]['unit_price']);
+    }
+
+    public function test_build_line_items_tax_inclusive_detects_real_discount()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = true;
+
+        // Regular gross 2610 -> net 2250. Sold for net 2000 (a real discount).
+        $this->registerProduct(10, 2610.00);
+
+        $items = [[
+            'line_subtotal' => 2000.00, // net effective price below net regular
+            'qty'           => 1,
+            'product_id'    => 10,
+            'name'          => 'Tax Inclusive Discounted',
+            'variation_id'  => 0,
+        ]];
+
+        $discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
+
+        // Net regular 2250 vs net effective 2000 -> 250 real discount.
+        $this->assertEquals(225000, $line_items[0]['unit_price']);
+        $this->assertEquals(25000, $discount);
+    }
+
+    public function test_build_line_items_tax_exclusive_unaffected_by_normalization()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = false; // explicit: prices entered net
+
+        // Net regular 500, effective 400 -> genuine 100/unit discount.
+        $this->registerProduct(10, 500.00);
+
+        $items = [[
+            'line_subtotal' => 800.00, // 400 each x 2
+            'qty'           => 2,
+            'product_id'    => 10,
+            'name'          => 'Tax Exclusive Discounted',
+            'variation_id'  => 0,
+        ]];
+
+        $discount = 0;
+        $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
+
+        // No tax normalization applied; regular price used as-is.
+        $this->assertEquals(50000, $line_items[0]['unit_price']);
+        $this->assertEquals(20000, $discount); // (50000 - 40000) * 2
+    }
+
+    // -------------------------------------------------------
+    // ckpg_build_line_items — tax_included metadata flag
+    // -------------------------------------------------------
+
+    public function test_build_line_items_metadata_tax_included_true_when_inclusive()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = true;
+
+        $this->registerProduct(10, 2610.00); // taxable by default
+
+        $items = [[
+            'line_subtotal' => 2250.00,
+            'qty'           => 1,
+            'product_id'    => 10,
+            'name'          => 'Tax Inclusive Product',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        $this->assertTrue($line_items[0]['metadata']['tax_included']);
+    }
+
+    public function test_build_line_items_metadata_tax_included_false_when_exclusive()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = false;
+
+        $this->registerProduct(10, 500.00);
+
+        $items = [[
+            'line_subtotal' => 500.00,
+            'qty'           => 1,
+            'product_id'    => 10,
+            'name'          => 'Tax Exclusive Product',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        $this->assertFalse($line_items[0]['metadata']['tax_included']);
+    }
+
+    public function test_build_line_items_metadata_tax_included_false_for_exempt_product()
+    {
+        global $test_prices_include_tax;
+        $test_prices_include_tax = true; // store is inclusive...
+
+        // ...but this product is tax-exempt, so its price carries no tax.
+        $this->registerProduct(10, 500.00, 0, '', false);
+
+        $items = [[
+            'line_subtotal' => 500.00,
+            'qty'           => 1,
+            'product_id'    => 10,
+            'name'          => 'Tax Exempt Product',
+            'variation_id'  => 0,
+        ]];
+
+        $line_items = ckpg_build_line_items($items, '5.4.12');
+
+        $this->assertFalse($line_items[0]['metadata']['tax_included']);
+    }
+
+    // -------------------------------------------------------
+    // ckpg_item_tax_included — store + product taxability matrix
+    // -------------------------------------------------------
+
+    public function test_item_tax_included_matrix()
+    {
+        global $test_prices_include_tax;
+        $taxable = new WC_Product(0); // stub is taxable by default
+
+        $test_prices_include_tax = true;
+        $this->assertTrue(ckpg_item_tax_included($taxable));
+
+        $test_prices_include_tax = false;
+        $this->assertFalse(ckpg_item_tax_included($taxable));
     }
 
     // -------------------------------------------------------

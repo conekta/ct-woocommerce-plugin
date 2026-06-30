@@ -1,3 +1,8 @@
+6.0.6, 2026-06-30
+-------------------------------------
+- Fix: tax-inclusive stores no longer report IVA as a dynamic_pricing discount on the Conekta order. The price-level discount detection compared a gross regular price against the net line subtotal, so the tax was misread as a discount. The regular price is now normalized to net via wc_get_price_excluding_tax() before comparing when prices are entered tax-inclusive; tax-exclusive stores are unaffected. Covers card (classic + Blocks), cash, bank transfer, BNPL and pay by bank.
+- Feature: each Conekta line item carries a tax_included metadata flag indicating whether its unit_price already includes tax (true only when the store is tax-inclusive and the product is taxable).
+
 6.0.3, 2026-06-12
 -------------------------------------
 - Feature: send the WooCommerce order id as metadata.reference_id on the Conekta order for the Blocks checkout (read from the checkout-draft order at checkout-request time). Classic keeps relying on the reverse conekta-order-id order meta.

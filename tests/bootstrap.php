@@ -115,6 +115,30 @@ if (!function_exists('wc_get_product')) {
     }
 }
 
+// Tax-mode toggles — tests flip these to exercise tax-inclusive vs
+// tax-exclusive pricing. Default: prices NOT inclusive (matches the legacy
+// fixtures), so existing tests are unaffected.
+global $test_prices_include_tax, $test_tax_rate;
+$test_prices_include_tax = false;
+$test_tax_rate           = 0.16; // 16% IVA used by the stub
+
+if (!function_exists('wc_prices_include_tax')) {
+    function wc_prices_include_tax() {
+        global $test_prices_include_tax;
+        return (bool) $test_prices_include_tax;
+    }
+}
+
+if (!function_exists('wc_get_price_excluding_tax')) {
+    function wc_get_price_excluding_tax($product, $args = []) {
+        global $test_tax_rate;
+        $price = isset($args['price']) ? (float) $args['price'] : (float) $product->get_price();
+        $qty   = isset($args['qty']) ? (float) $args['qty'] : 1;
+        // Strip the inclusive tax the same way WooCommerce does for gross prices.
+        return ($price / (1 + (float) $test_tax_rate)) * $qty;
+    }
+}
+
 // info_log is defined in conekta_gateway_helper.php — no stub needed
 
 // get_expired_at is defined in conekta_gateway_helper.php — no stub needed
@@ -131,6 +155,7 @@ if (!class_exists('WC_Product')) {
         private $name;
         private $regular_price = 0;
         private $price = 0;
+        private $taxable = true;
         public function __construct($id = 0) {
             global $test_product_registry;
             $this->id = $id;
@@ -140,8 +165,10 @@ if (!class_exists('WC_Product')) {
                 $this->regular_price = $src['regular_price'] ?? 0;
                 $this->price         = $src['price'] ?? 0;
                 $this->name          = $src['name'] ?? $this->name;
+                $this->taxable       = $src['taxable'] ?? true;
             }
         }
+        public function is_taxable() { return $this->taxable; }
         public function get_id() { return $this->id; }
         public function get_name() { return $this->name; }
         public function set_name($name) { $this->name = $name; return $this; }

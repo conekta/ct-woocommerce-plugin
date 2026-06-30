@@ -66,6 +66,23 @@ function ckpg_build_order_metadata($data): array
     return $metadata;
 }
 
+/**
+ * Whether the unit_price reported to Conekta for this product already
+ * includes tax. True only when the store enters prices tax-inclusive AND the
+ * product is actually taxable (a tax-exempt product never carries tax even in
+ * an inclusive store).
+ */
+function ckpg_item_tax_included(?WC_Product $product): bool
+{
+    if (!function_exists('wc_prices_include_tax') || !wc_prices_include_tax()) {
+        return false;
+    }
+    if ($product && method_exists($product, 'is_taxable')) {
+        return (bool) $product->is_taxable();
+    }
+    return true;
+}
+
 function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
 {
     $line_items = array();
@@ -88,6 +105,13 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
         $price_product = $variation_id ? wc_get_product($variation_id) : $productmeta;
         $regular_price = $price_product ? (float) $price_product->get_regular_price() : 0;
         if ($regular_price > 0) {
+            // line_subtotal is always net of tax. When the store enters prices
+            // tax-inclusive, get_regular_price() is gross, so the tax would
+            // otherwise be misread as a price-level discount. Normalize the
+            // regular price to net before comparing.
+            if (function_exists('wc_prices_include_tax') && wc_prices_include_tax()) {
+                $regular_price = (float) wc_get_price_excluding_tax($price_product, array('qty' => 1, 'price' => $regular_price));
+            }
             $regular_unit_cents = amount_validation($regular_price);
             if ($regular_unit_cents > $unit_price) {
                 $price_level_discount += ($regular_unit_cents - $unit_price) * $quantity;
@@ -105,6 +129,7 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
             'metadata'    => array(
                                     'soft_validations' => true,
                                     'images' =>  $productmeta->get_gallery_image_ids(),
+                                    'tax_included' => ckpg_item_tax_included($price_product ?: $productmeta),
                                   ),
            'description' => $productmeta->get_description() ?: 'no description',
         );

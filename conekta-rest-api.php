@@ -430,6 +430,13 @@ class WC_Conekta_REST_API {
                 $unit_price_cents = amount_validation((float) $cart_item['line_subtotal'] / max(1, (int) $cart_item['quantity']));
                 $regular_price    = (float) $product->get_regular_price();
                 if ($regular_price > 0) {
+                    // line_subtotal is always net of tax. When the store enters
+                    // prices tax-inclusive, get_regular_price() is gross, so the
+                    // tax would otherwise be misread as a price-level discount.
+                    // Normalize the regular price to net before comparing.
+                    if (wc_prices_include_tax()) {
+                        $regular_price = (float) wc_get_price_excluding_tax($product, array('qty' => 1, 'price' => $regular_price));
+                    }
                     $regular_unit_cents = amount_validation($regular_price);
                     if ($regular_unit_cents > $unit_price_cents) {
                         $price_level_discount += ($regular_unit_cents - $unit_price_cents) * (int) $cart_item['quantity'];
@@ -441,6 +448,9 @@ class WC_Conekta_REST_API {
                     'name'       => item_name_validation($product->get_name()),
                     'unit_price' => $unit_price_cents,
                     'quantity'   => (int) $cart_item['quantity'],
+                    'metadata'   => [
+                        'tax_included' => ckpg_item_tax_included($product),
+                    ],
                 ];
             }
 
