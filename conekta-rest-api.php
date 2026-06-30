@@ -230,7 +230,7 @@ class WC_Conekta_REST_API {
 
                     $update = new OrderUpdate([
                         'line_items'     => $snapshot['line_items'],
-                        'discount_lines' => $snapshot['discount_lines'],
+                        'discount_lines' => $balanced['discount_lines'],
                         'shipping_lines' => $snapshot['shipping_lines'],
                         'tax_lines'      => $balanced['tax_lines'],
                     ]);
@@ -363,7 +363,7 @@ class WC_Conekta_REST_API {
             $order_request = new OrderRequest([
                 'currency'       => $snapshot['currency'],
                 'line_items'     => $snapshot['line_items'],
-                'discount_lines' => $snapshot['discount_lines'],
+                'discount_lines' => $balanced['discount_lines'],
                 'shipping_lines' => $snapshot['shipping_lines'],
                 'tax_lines'      => $balanced['tax_lines'],
                 'customer_info'  => $snapshot['customer_info'],
@@ -480,20 +480,10 @@ class WC_Conekta_REST_API {
                     'method'  => $method_label,
                 ];
             }
-
-            // Reconcile rounding to the exact WooCommerce total. unit_price is
-            // line_subtotal/qty rounded to cents, so unit_price * quantity (plus
-            // tax rounding) can drift a cent or two from the real total. Absorb
-            // that delta into the tax line so Conekta charges exactly the WC cart
-            // total. The card path doesn't otherwise run ckpg_check_balance.
-            $balanced = ckpg_check_balance([
-                'line_items'     => $line_items,
-                'shipping_lines' => $shipping_lines,
-                'discount_lines' => $discount_lines,
-                'tax_lines'      => $tax_lines,
-            ], amount_validation((float) WC()->cart->get_total('edit')));
-            $tax_lines      = $balanced['tax_lines'];
-            $discount_lines = $balanced['discount_lines'];
+            // NOTE: rounding reconciliation happens once in the request handler
+            // (ckpg_check_balance against $current_amount), which emits the
+            // round_adjustment discount / tax delta. build_snapshot returns the
+            // raw lines so we don't reconcile twice.
         }
 
         $customer_info    = [];
