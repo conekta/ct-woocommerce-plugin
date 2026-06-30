@@ -421,7 +421,7 @@ async function fetchConektaOrder(conektaOrderId) {
  */
 async function verifyTaxInclusiveOrder(conektaOrderId) {
   console.log('\n--- Tax-inclusive verification (Conekta API) ---');
-  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/orders/${conektaOrderId})`);
+  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/transactions/payments/${conektaOrderId})`);
   const order = await fetchConektaOrder(conektaOrderId);
   const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
 
