@@ -80,7 +80,7 @@ const BILLING = {
 // Test runner state
 // -------------------------------------------------------
 
-let browser, page, productId, couponId, couponCode;
+let browser, page, productId, couponId, couponCode, taxRateId, taxInclusiveEnabled;
 const counters = { passed: 0, failed: 0 };
 
 const STATUS = { true: '\x1b[32m✓\x1b[0m', false: '\x1b[31m✗\x1b[0m' };
@@ -149,7 +149,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType } = options;
+  const { checkoutType, taxInclusive } = options;
   browser = await chromium.launch({ headless: config.headless });
   const context = await browser.newContext({ recordVideo: config.video });
   page = await context.newPage();
@@ -219,25 +219,56 @@ async function setup(options = {}) {
 
   console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}, quantity=${QUANTITY}`);
 
-  const product = await wcApi('POST', 'wc/v3/products', {
+  // Tax-inclusive mode: configure the store to enter prices WITH tax and add a
+  // 16% IVA rate. Used by the tax-inclusive spec to prove the IVA is reported
+  // to Conekta as a tax_line and NOT folded into a dynamic_pricing discount.
+  if (taxInclusive) {
+    await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'yes' });
+    await wcApi('PUT', 'wc/v3/settings/general/woocommerce_prices_include_tax', { value: 'yes' });
+    const rate = await wcApi('POST', 'wc/v3/taxes', {
+      country: 'MX',
+      rate: '16.0000',
+      name: 'IVA',
+      shipping: false,
+      priority: 1,
+    });
+    taxRateId = rate.id;
+    taxInclusiveEnabled = true;
+    console.log(`Setup: tax-inclusive enabled, IVA rate created (ID: ${taxRateId})`);
+  }
+
+  // The tax-inclusive spec uses a full-price taxable product (no sale_price) so
+  // the ONLY possible price-level discount would be the regression bug. Other
+  // specs keep the sale_price to exercise a genuine dynamic_pricing discount.
+  const productPayload = {
     name: 'E2E Discount Test',
     type: 'simple',
     regular_price: REGULAR_PRICE,
-    sale_price: DISCOUNT_AMOUNT,
     status: 'publish',
-  });
+  };
+  if (taxInclusive) {
+    productPayload.tax_status = 'taxable';
+    productPayload.tax_class = ''; // standard rate
+  } else {
+    productPayload.sale_price = DISCOUNT_AMOUNT;
+  }
+  const product = await wcApi('POST', 'wc/v3/products', productPayload);
   productId = product.id;
   console.log(`Setup: Product created (ID: ${productId})${product.id ? '' : ' ERROR: ' + JSON.stringify(product).substring(0, 200)}`);
 
-  couponCode = 'e2e_' + Date.now();
-  const coupon = await wcApi('POST', 'wc/v3/coupons', {
-    code: couponCode,
-    discount_type: 'fixed_product',
-    amount: COUPON_AMOUNT,
-    product_ids: [productId],
-  });
-  couponId = coupon.id;
-  console.log(`Setup: Coupon created (${couponCode})`);
+  // The coupon is only needed by the discount specs; the tax-inclusive spec
+  // verifies tax classification on a plain full-price line item.
+  if (!taxInclusive) {
+    couponCode = 'e2e_' + Date.now();
+    const coupon = await wcApi('POST', 'wc/v3/coupons', {
+      code: couponCode,
+      discount_type: 'fixed_product',
+      amount: COUPON_AMOUNT,
+      product_ids: [productId],
+    });
+    couponId = coupon.id;
+    console.log(`Setup: Coupon created (${couponCode})`);
+  }
 
   if (checkoutType) {
     await setCheckoutType(checkoutType);
@@ -320,8 +351,17 @@ async function applyBlocksCoupon(code) {
 
 async function teardown() {
   console.log('\nTeardown...');
-  try { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } catch (_) {}
+  try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
   try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
+  // Undo the tax-inclusive store config so other specs/store state stay clean.
+  try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
+  try {
+    if (taxInclusiveEnabled) {
+      await wcApi('PUT', 'wc/v3/settings/general/woocommerce_prices_include_tax', { value: 'no' });
+      await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'no' });
+      console.log('  Reset tax settings');
+    }
+  } catch (_) {}
   try { await browser.close(); } catch (_) {}
 }
 
@@ -348,6 +388,52 @@ async function testOrderStatus(conektaOrderId) {
     }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
 
     assert(conektaOrder.payment_status === 'paid', `Conekta payment_status = ${conektaOrder.payment_status}`);
+  }
+}
+
+/**
+ * Fetch a Conekta order from the live API (v2.2.0). Returns the parsed JSON.
+ */
+async function fetchConektaOrder(conektaOrderId) {
+  return page.evaluate(async ({ url, key }) => {
+    const res = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + key, 'Accept': 'application/vnd.conekta-v2.2.0+json' },
+    });
+    return res.json();
+  }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
+}
+
+/**
+ * Regression check for tax-inclusive pricing (BE-924): the IVA must be reported
+ * to Conekta as a tax_line, NEVER as a `dynamic_pricing` discount. Conekta v2
+ * returns list fields as { object:'list', data:[...] }, so we normalize both
+ * the array and the wrapped shapes.
+ */
+async function verifyTaxInclusiveOrder(conektaOrderId) {
+  console.log('\n--- Tax-inclusive verification (Conekta API) ---');
+  const order = await fetchConektaOrder(conektaOrderId);
+  const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
+
+  const discountLines = list(order.discount_lines);
+  const taxLines = list(order.tax_lines);
+  const lineItems = list(order.line_items);
+
+  // The bug: tax surfaced as a dynamic_pricing campaign discount.
+  const phantom = discountLines.find(d => d.code === 'dynamic_pricing');
+  assert(!phantom, `no dynamic_pricing discount line${phantom ? ` (found amount ${phantom.amount})` : ''}`);
+
+  // The IVA must be present as a tax line instead.
+  const taxTotal = taxLines.reduce((sum, t) => sum + (t.amount || 0), 0);
+  assert(taxLines.length > 0 && taxTotal > 0, `Conekta order has tax_lines totaling ${taxTotal}`);
+
+  // New feature: each line item carries metadata.tax_included = true. The API
+  // only echoes it back when present, so assert defensively.
+  const meta = lineItems[0] && lineItems[0].metadata;
+  if (meta && 'tax_included' in meta) {
+    assert(meta.tax_included === true || meta.tax_included === 'true',
+      `line item metadata.tax_included = ${meta.tax_included}`);
+  } else {
+    console.log('  (line item metadata.tax_included not echoed by the API — skipped)');
   }
 }
 
@@ -932,6 +1018,7 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
+  fetchConektaOrder, verifyTaxInclusiveOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
