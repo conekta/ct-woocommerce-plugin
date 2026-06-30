@@ -26,15 +26,22 @@ function ckpg_check_balance($order, $total): array
         $amount = $amount + $tax_line['amount'];
     }
 
-    if ($amount != $total) {
-        $adjustment = abs($amount - $total);
-
+    // Signed delta: positive when we under-counted (charge too little),
+    // negative when we over-counted. unit_price is line_subtotal/qty rounded to
+    // cents, so unit_price * quantity (plus tax rounding) can drift a cent or
+    // two in EITHER direction. Absorb that delta into the tax line so the order
+    // total matches $total exactly. (The previous code only ever ADDED abs(),
+    // which over-charged when the lines already exceeded the total.)
+    $delta = intval($total) - $amount;
+    if ($delta !== 0) {
         if (empty($order['tax_lines'])) {
-            $order['tax_lines'] = [['amount' => 0, 'description' => '']];
+            $order['tax_lines'] = [['amount' => 0, 'description' => 'Round Adjustment']];
         }
 
-        $order['tax_lines'][0]['amount'] =
-            $order['tax_lines'][0]['amount'] + intval($adjustment);
+        // Never push the tax line negative; only absorb small rounding noise.
+        if ($order['tax_lines'][0]['amount'] + $delta >= 0) {
+            $order['tax_lines'][0]['amount'] += $delta;
+        }
 
         if (empty($order['tax_lines'][0]['description'])) {
             $order['tax_lines'][0]['description'] = 'Round Adjustment';

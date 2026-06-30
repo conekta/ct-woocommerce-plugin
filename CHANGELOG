@@ -1,7 +1,7 @@
 6.0.6, 2026-06-30
 -------------------------------------
 - Change: line items are sent to Conekta at the effective unit price the customer pays. The plugin no longer reports the regular price plus a synthesized dynamic_pricing discount for sales / dynamic-pricing plugins (that confused merchants and, on tax-inclusive stores, made the IVA appear as a phantom dynamic_pricing discount). Tax is always itemized in tax_lines; real coupons and negative fees stay as discount_lines. Covers card (classic + Blocks), cash, bank transfer, BNPL and pay by bank.
-- Fix: the card order total now matches the WooCommerce cart total to the cent. build_snapshot reconciles per-unit and tax rounding into the tax line so Conekta charges exactly the WC total (the card path does not run ckpg_check_balance).
+- Fix: the order total now matches the WooCommerce total to the cent on every path. build_snapshot (card) reconciles per-unit/tax rounding via ckpg_check_balance, and ckpg_check_balance was fixed to absorb the rounding delta in BOTH directions (it previously only added abs(), over-charging when the lines exceeded the total — affecting cash, bank transfer, BNPL and pay by bank).
 - Feature: each Conekta line item carries a tax_included metadata flag (true only when the store is tax-inclusive and the product is taxable).
 
 6.0.3, 2026-06-12

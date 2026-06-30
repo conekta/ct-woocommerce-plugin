@@ -1172,6 +1172,72 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(0, $result['tax_lines'][0]['amount']);
     }
 
+    /**
+     * Exact rounding scenario observed in staging (WC #7344): unit_price
+     * 25991 * 3 = 77973 (+1¢ from line_subtotal/qty rounding) and tax 14889
+     * (+1¢), so the lines sum to 107943 but the WooCommerce total is 107941.
+     * The 2¢ overcount must be absorbed (subtracted) so Conekta charges exactly
+     * the WC total — the rounding error must never reach Conekta.
+     */
+    public function test_check_balance_absorbs_two_cent_overcount()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 25991, 'quantity' => 3]], // 77973
+            'shipping_lines' => [['amount' => 15081]],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 14889, 'description' => 'IVA GENERAL']],
+        ];
+        // Lines sum = 77973 + 15081 + 14889 = 107943; WC total = 107941.
+        $result = ckpg_check_balance($order, 107941);
+
+        // Tax absorbs the -2¢ so the order total matches the WC total exactly.
+        $this->assertEquals(14887, $result['tax_lines'][0]['amount']);
+        $this->assertEquals(107941, $this->sumOrder($result));
+    }
+
+    public function test_check_balance_absorbs_undercount()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 10000, 'quantity' => 1]],
+            'shipping_lines' => [],
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 1600, 'description' => 'IVA']],
+        ];
+        // Lines sum = 11600; WC total = 11603 (we under-counted by 3¢).
+        $result = ckpg_check_balance($order, 11603);
+
+        $this->assertEquals(1603, $result['tax_lines'][0]['amount']);
+        $this->assertEquals(11603, $this->sumOrder($result));
+    }
+
+    public function test_check_balance_adds_tax_line_when_missing()
+    {
+        $order = [
+            'line_items'     => [['unit_price' => 33333, 'quantity' => 3]], // 99999
+            'shipping_lines' => [],
+            'discount_lines' => [],
+            'tax_lines'      => [],
+        ];
+        // Lines sum = 99999; WC total = 100000 (1¢ short, no tax line yet).
+        $result = ckpg_check_balance($order, 100000);
+
+        $this->assertCount(1, $result['tax_lines']);
+        $this->assertEquals(1, $result['tax_lines'][0]['amount']);
+        $this->assertEquals('Round Adjustment', $result['tax_lines'][0]['description']);
+        $this->assertEquals(100000, $this->sumOrder($result));
+    }
+
+    /** Recompute an order's net total the same way Conekta does. */
+    private function sumOrder(array $order): int
+    {
+        $amount = 0;
+        foreach ($order['line_items'] as $li)     { $amount += $li['unit_price'] * $li['quantity']; }
+        foreach ($order['shipping_lines'] as $sl) { $amount += $sl['amount']; }
+        foreach ($order['discount_lines'] as $dl) { $amount -= $dl['amount']; }
+        foreach ($order['tax_lines'] as $tl)      { $amount += $tl['amount']; }
+        return $amount;
+    }
+
     // =========================================================
     // conekta_gateway_helper.php — comprehensive function tests
     // =========================================================

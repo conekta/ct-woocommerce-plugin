@@ -451,6 +451,26 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
   }
 }
 
+/**
+ * Assert the amount Conekta charged equals the WooCommerce order total to the
+ * cent. Catches per-unit / tax rounding drift (unit_price = line_subtotal/qty
+ * rounded, then × quantity) that must be reconciled before reaching Conekta.
+ * Fetches the Conekta order from the storefront FIRST (CSP allows api.conekta.io
+ * there), THEN re-authenticates as admin to read the WC order.
+ */
+async function verifyConektaTotalMatchesWoo(conektaOrderId) {
+  console.log('\n--- Conekta amount vs WooCommerce total ---');
+  const order = await fetchConektaOrder(conektaOrderId); // storefront CSP
+  const amount = order.amount;
+
+  const wcOrders = await findOrdersByConektaOrderId(conektaOrderId); // navigates to admin
+  assert(wcOrders.length >= 1, `found a WooCommerce order for ${conektaOrderId}`);
+  const wcTotalCents = Math.round(parseFloat(wcOrders[0].total) * 100);
+
+  assert(amount === wcTotalCents,
+    `Conekta amount (${amount}) === WooCommerce total (${wcTotalCents})`);
+}
+
 function getProductId() { return productId; }
 
 /**
@@ -1032,7 +1052,7 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
-  fetchConektaOrder, verifyTaxInclusiveOrder,
+  fetchConektaOrder, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,

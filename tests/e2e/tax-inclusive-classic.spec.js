@@ -88,4 +88,8 @@ h.run('Classic Checkout — tax-inclusive not reported as discount', { checkoutT
   // tax classification on the now-paid order (structure must be unchanged).
   await h.testOrderStatus(body.conekta_order_id);
   await h.verifyTaxInclusiveOrder(body.conekta_order_id);
+
+  // The amount Conekta charged must equal the WooCommerce order total to the
+  // cent (no rounding drift). Runs last: it re-authenticates as admin.
+  await h.verifyConektaTotalMatchesWoo(body.conekta_order_id);
 }).then(passed => process.exit(passed ? 0 : 1));
