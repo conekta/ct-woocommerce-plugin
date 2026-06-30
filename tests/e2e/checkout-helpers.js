@@ -417,12 +417,16 @@ async function fetchConektaOrder(conektaOrderId) {
  */
 async function verifyTaxInclusiveOrder(conektaOrderId) {
   console.log('\n--- Tax-inclusive verification (Conekta API) ---');
+  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/orders/${conektaOrderId})`);
   const order = await fetchConektaOrder(conektaOrderId);
   const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
 
   const discountLines = list(order.discount_lines);
   const taxLines = list(order.tax_lines);
   const lineItems = list(order.line_items);
+
+  console.log(`  amount=${order.amount} discount_lines=${JSON.stringify(discountLines)} tax_lines=${JSON.stringify(taxLines)}`);
+  console.log(`  line_items[0].metadata=${JSON.stringify(lineItems[0] && lineItems[0].metadata)}`);
 
   // The bug: tax surfaced as a dynamic_pricing campaign discount.
   const phantom = discountLines.find(d => d.code === 'dynamic_pricing');
