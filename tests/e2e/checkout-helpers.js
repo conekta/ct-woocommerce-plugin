@@ -150,7 +150,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType, taxInclusive } = options;
+  const { checkoutType, taxInclusive, roundingPrice, roundingQty } = options;
   browser = await chromium.launch({ headless: config.headless });
   const context = await browser.newContext({ recordVideo: config.video });
   page = await context.newPage();
@@ -250,7 +250,10 @@ async function setup(options = {}) {
   const productPayload = {
     name: 'E2E Discount Test',
     type: 'simple',
-    regular_price: REGULAR_PRICE,
+    // A fixed roundingPrice forces a deterministic per-unit rounding drift
+    // (gross / 1.16 not landing on a clean cent when divided by qty); otherwise
+    // a clean price × qty never drifts.
+    regular_price: (taxInclusive && roundingPrice) ? roundingPrice : REGULAR_PRICE,
     status: 'publish',
   };
   if (taxInclusive) {
@@ -288,7 +291,8 @@ async function setup(options = {}) {
   // A guest session is cookie-only and fresh on every run.
   await page.context().clearCookies();
 
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${QUANTITY}`);
+  const cartQty = roundingQty || QUANTITY;
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${cartQty}`);
   await page.waitForLoadState('networkidle');
 }
 
@@ -505,6 +509,67 @@ async function verifyConektaTotalMatchesWoo(conektaOrderId) {
 
   assert(amount === wcTotalCents,
     `Conekta amount (${amount}) === WooCommerce total (${wcTotalCents})`);
+}
+
+/**
+ * Drive the classic checkout far enough to mint the Conekta order: fill billing,
+ * select Conekta, capture the checkout-request response and return its
+ * conekta_order_id. Order creation is where tax / discount / rounding is
+ * decided, so this is enough to inspect those on the Conekta order.
+ */
+async function classicCheckoutCreateOrder() {
+  const captured = [];
+  page.on('response', async (response) => {
+    if (response.url().includes('conekta_checkout_request') && response.request().method() === 'POST') {
+      try { captured.push(await response.json()); } catch (_) { /* body unavailable */ }
+    }
+  });
+
+  await page.goto(`${STORE_URL}/checkout/`);
+  await page.waitForLoadState('networkidle');
+  await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
+
+  await page.fill('#billing_first_name', BILLING.first_name);
+  await page.fill('#billing_last_name', BILLING.last_name);
+  await page.fill('#billing_address_1', BILLING.address_1);
+  await page.fill('#billing_city', BILLING.city);
+  await page.selectOption('#billing_state', BILLING.state);
+  await page.fill('#billing_postcode', BILLING.postcode);
+  await page.fill('#billing_phone', BILLING.phone);
+  await page.fill('#billing_email', BILLING.email);
+
+  // Flush the email through update_order_review so WC()->customer is synced
+  // before checkout-request fires (otherwise it races with a stale email).
+  await page.locator('#billing_email').blur().catch(() => {});
+  await page.waitForResponse(
+    r => r.url().includes('wc-ajax=update_order_review'),
+    { timeout: 10000 }
+  ).catch(() => {});
+  await page.waitForTimeout(500);
+
+  await page.click('label[for="payment_method_conekta"]');
+
+  const start = Date.now();
+  while (captured.length < 1 && Date.now() - start < 30000) {
+    await page.waitForTimeout(100);
+  }
+  if (!captured.length) throw new Error('Timeout waiting for checkout-request POST');
+
+  const conektaOrderId = captured[0].conekta_order_id;
+  assert(typeof conektaOrderId === 'string' && conektaOrderId.length > 0,
+    `checkout-request returned conekta_order_id = ${conektaOrderId}`);
+  return conektaOrderId;
+}
+
+/** Pay the mounted Conekta order with the test card (3DS happy path). */
+async function payClassicCardOrder() {
+  console.log('\n--- happy path (pay with card) ---');
+  await waitForIntegrationIframe();
+  await fillIntegrationCard(TEST_CARD);
+  assert(true, 'card filled inside Conekta iframe');
+  await clickPlaceOrder();
+  await waitForOrderReceivedWith3DS();
+  assert(true, 'redirected to order-received');
 }
 
 function getProductId() { return productId; }
@@ -1089,6 +1154,7 @@ module.exports = {
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
   fetchConektaOrder, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
+  classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
