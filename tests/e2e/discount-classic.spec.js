@@ -98,6 +98,11 @@ h.run('Classic Checkout — Integration component', { checkoutType: 'classic' },
 
   await h.testOrderStatus(secondBody.conekta_order_id);
 
+  // The charged amount must equal the WooCommerce total to the cent, and any
+  // rounding drift on this sale+coupon order must be reconciled correctly
+  // (round_adjustment discount on over-count, tax on under-count).
+  await h.verifyConektaTotalMatchesWoo(secondBody.conekta_order_id);
+
   // ---------------------------------------------------------------
   // (c) AMOUNT-MISMATCH GUARD — TODO: requires forging a Conekta order
   //     whose amount diverges from the WC total. We cannot mint such an

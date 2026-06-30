@@ -26,19 +26,31 @@ function ckpg_check_balance($order, $total): array
         $amount = $amount + $tax_line['amount'];
     }
 
-    if ($amount != $total) {
-        $adjustment = abs($amount - $total);
-
+    // unit_price is line_subtotal/qty rounded to cents, so unit_price * quantity
+    // (plus tax rounding) can drift a cent or two from the real WooCommerce
+    // total in EITHER direction. Reconcile so the order total matches $total
+    // exactly, keeping the tax line at its true value:
+    //   - charging too little  -> add the missing cents to tax.
+    //   - charging too much     -> refund the extra cents as a round_adjustment
+    //                              discount (never reduce the reported tax).
+    $delta = intval($total) - $amount;
+    if ($delta > 0) {
         if (empty($order['tax_lines'])) {
-            $order['tax_lines'] = [['amount' => 0, 'description' => '']];
+            $order['tax_lines'] = [['amount' => 0, 'description' => 'Round Adjustment']];
         }
-
-        $order['tax_lines'][0]['amount'] =
-            $order['tax_lines'][0]['amount'] + intval($adjustment);
-
+        $order['tax_lines'][0]['amount'] += $delta;
         if (empty($order['tax_lines'][0]['description'])) {
             $order['tax_lines'][0]['description'] = 'Round Adjustment';
         }
+    } elseif ($delta < 0) {
+        if (empty($order['discount_lines'])) {
+            $order['discount_lines'] = [];
+        }
+        $order['discount_lines'][] = [
+            'code'   => 'round_adjustment',
+            'amount' => abs($delta),
+            'type'   => 'campaign',
+        ];
     }
 
     return $order;
@@ -66,6 +78,23 @@ function ckpg_build_order_metadata($data): array
     return $metadata;
 }
 
+/**
+ * Whether the unit_price reported to Conekta for this product already
+ * includes tax. True only when the store enters prices tax-inclusive AND the
+ * product is actually taxable (a tax-exempt product never carries tax even in
+ * an inclusive store).
+ */
+function ckpg_item_tax_included(?WC_Product $product): bool
+{
+    if (!function_exists('wc_prices_include_tax') || !wc_prices_include_tax()) {
+        return false;
+    }
+    if ($product && method_exists($product, 'is_taxable')) {
+        return (bool) $product->is_taxable();
+    }
+    return true;
+}
+
 function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
 {
     $line_items = array();
@@ -82,18 +111,14 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
         $unit_price  = intval(round(floatval($unit_price) / 10), 2);
         $quantity    = intval($item['qty']);
 
-        // Detect price-level discounts (dynamic pricing plugins modify the product
-        // price directly; Conekta needs the original price + an explicit discount_line).
+        // Send the effective unit price the customer actually pays (net of tax;
+        // tax is itemized in tax_lines). We intentionally do NOT report the
+        // regular price plus a `dynamic_pricing` discount line for sales /
+        // dynamic-pricing plugins — that confused merchants. Real coupons and
+        // negative fees remain explicit discount_lines. $price_level_discount is
+        // kept at 0 for backward compatibility with callers.
         $variation_id = isset($item['variation_id']) ? intval($item['variation_id']) : 0;
         $price_product = $variation_id ? wc_get_product($variation_id) : $productmeta;
-        $regular_price = $price_product ? (float) $price_product->get_regular_price() : 0;
-        if ($regular_price > 0) {
-            $regular_unit_cents = amount_validation($regular_price);
-            if ($regular_unit_cents > $unit_price) {
-                $price_level_discount += ($regular_unit_cents - $unit_price) * $quantity;
-                $unit_price = $regular_unit_cents;
-            }
-        }
         $tags = wp_get_post_terms($item['product_id'], 'product_tag', array('fields' => 'names'));
         $brands = wp_get_post_terms($item['product_id'], 'product_brand', array('fields' => 'names'));
 
@@ -105,6 +130,7 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
             'metadata'    => array(
                                     'soft_validations' => true,
                                     'images' =>  $productmeta->get_gallery_image_ids(),
+                                    'tax_included' => ckpg_item_tax_included($price_product ?: $productmeta),
                                   ),
            'description' => $productmeta->get_description() ?: 'no description',
         );

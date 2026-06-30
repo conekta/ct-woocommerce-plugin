@@ -230,7 +230,7 @@ class WC_Conekta_REST_API {
 
                     $update = new OrderUpdate([
                         'line_items'     => $snapshot['line_items'],
-                        'discount_lines' => $snapshot['discount_lines'],
+                        'discount_lines' => $balanced['discount_lines'],
                         'shipping_lines' => $snapshot['shipping_lines'],
                         'tax_lines'      => $balanced['tax_lines'],
                     ]);
@@ -363,7 +363,7 @@ class WC_Conekta_REST_API {
             $order_request = new OrderRequest([
                 'currency'       => $snapshot['currency'],
                 'line_items'     => $snapshot['line_items'],
-                'discount_lines' => $snapshot['discount_lines'],
+                'discount_lines' => $balanced['discount_lines'],
                 'shipping_lines' => $snapshot['shipping_lines'],
                 'tax_lines'      => $balanced['tax_lines'],
                 'customer_info'  => $snapshot['customer_info'],
@@ -422,25 +422,24 @@ class WC_Conekta_REST_API {
 
             $tax_lines = ckpg_build_tax_lines_from_cart(WC()->cart);
 
-            $price_level_discount = 0;
             foreach (WC()->cart->get_cart() as $cart_item) {
                 $product = $cart_item['data'];
                 if (!$product) continue;
 
+                // Send the effective unit price the customer actually pays (net
+                // of tax; tax is itemized in tax_lines). We intentionally do NOT
+                // report the regular price plus a `dynamic_pricing` discount for
+                // sales / dynamic-pricing plugins — that confused merchants.
+                // Real coupons and negative fees remain explicit discount_lines.
                 $unit_price_cents = amount_validation((float) $cart_item['line_subtotal'] / max(1, (int) $cart_item['quantity']));
-                $regular_price    = (float) $product->get_regular_price();
-                if ($regular_price > 0) {
-                    $regular_unit_cents = amount_validation($regular_price);
-                    if ($regular_unit_cents > $unit_price_cents) {
-                        $price_level_discount += ($regular_unit_cents - $unit_price_cents) * (int) $cart_item['quantity'];
-                        $unit_price_cents      = $regular_unit_cents;
-                    }
-                }
 
                 $line_items[] = [
                     'name'       => item_name_validation($product->get_name()),
                     'unit_price' => $unit_price_cents,
                     'quantity'   => (int) $cart_item['quantity'],
+                    'metadata'   => [
+                        'tax_included' => ckpg_item_tax_included($product),
+                    ],
                 ];
             }
 
@@ -465,14 +464,6 @@ class WC_Conekta_REST_API {
                 }
             }
 
-            if ($price_level_discount > 0) {
-                $discount_lines[] = [
-                    'code'   => 'dynamic_pricing',
-                    'amount' => $price_level_discount,
-                    'type'   => 'campaign',
-                ];
-            }
-
             $chosen_methods = WC()->session ? (WC()->session->get('chosen_shipping_methods') ?: []) : [];
             $shipping_total = amount_validation(WC()->cart->get_shipping_total());
             if ($shipping_total > 0 && !empty($chosen_methods[0])) {
@@ -489,6 +480,10 @@ class WC_Conekta_REST_API {
                     'method'  => $method_label,
                 ];
             }
+            // NOTE: rounding reconciliation happens once in the request handler
+            // (ckpg_check_balance against $current_amount), which emits the
+            // round_adjustment discount / tax delta. build_snapshot returns the
+            // raw lines so we don't reconcile twice.
         }
 
         $customer_info    = [];

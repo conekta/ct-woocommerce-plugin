@@ -4,6 +4,7 @@
 const { chromium } = require('playwright');
 const { mkdirSync, readFileSync } = require('fs');
 const { join } = require('path');
+const { Configuration, OrdersApi } = require('conekta');
 const config = require('./e2e.config');
 
 const EXPECTED_VERSION = JSON.parse(
@@ -80,7 +81,7 @@ const BILLING = {
 // Test runner state
 // -------------------------------------------------------
 
-let browser, page, productId, couponId, couponCode;
+let browser, page, productId, couponId, couponCode, taxRateId, taxInclusiveEnabled;
 const counters = { passed: 0, failed: 0 };
 
 const STATUS = { true: '\x1b[32m✓\x1b[0m', false: '\x1b[31m✗\x1b[0m' };
@@ -149,7 +150,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType } = options;
+  const { checkoutType, taxInclusive, roundingPrice, roundingQty } = options;
   browser = await chromium.launch({ headless: config.headless });
   const context = await browser.newContext({ recordVideo: config.video });
   page = await context.newPage();
@@ -219,25 +220,65 @@ async function setup(options = {}) {
 
   console.log(`Setup: regular_price=$${REGULAR_PRICE}, discount=$${DISCOUNT_AMOUNT}, quantity=${QUANTITY}`);
 
-  const product = await wcApi('POST', 'wc/v3/products', {
+  // Tax-inclusive mode: configure the store to enter prices WITH tax and add a
+  // 16% IVA rate. Used by the tax-inclusive spec to prove the IVA is reported
+  // to Conekta as a tax_line and NOT folded into a dynamic_pricing discount.
+  if (taxInclusive) {
+    // "Enable taxes" lives in the general group; "prices include tax" lives in
+    // the TAX group (NOT general — PUTting it to general 404s silently and the
+    // store stays tax-exclusive).
+    await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'yes' });
+    await wcApi('PUT', 'wc/v3/settings/tax/woocommerce_prices_include_tax', { value: 'yes' });
+    const rate = await wcApi('POST', 'wc/v3/taxes', {
+      country: 'MX',
+      rate: '16.0000',
+      name: 'IVA',
+      shipping: false,
+      priority: 1,
+    });
+    taxRateId = rate.id;
+    taxInclusiveEnabled = true;
+    // Read the values back so a silently-rejected PUT is visible in the log.
+    const calc = (await wcApi('GET', 'wc/v3/settings/general/woocommerce_calc_taxes')).value;
+    const incl = (await wcApi('GET', 'wc/v3/settings/tax/woocommerce_prices_include_tax')).value;
+    console.log(`Setup: tax-inclusive enabled (calc_taxes=${calc}, prices_include_tax=${incl}), IVA rate created (ID: ${taxRateId})`);
+  }
+
+  // The tax-inclusive spec uses a full-price taxable product (no sale_price) so
+  // the ONLY possible price-level discount would be the regression bug. Other
+  // specs keep the sale_price to exercise a genuine dynamic_pricing discount.
+  const productPayload = {
     name: 'E2E Discount Test',
     type: 'simple',
-    regular_price: REGULAR_PRICE,
-    sale_price: DISCOUNT_AMOUNT,
+    // A fixed roundingPrice forces a deterministic per-unit rounding drift
+    // (gross / 1.16 not landing on a clean cent when divided by qty); otherwise
+    // a clean price × qty never drifts.
+    regular_price: (taxInclusive && roundingPrice) ? roundingPrice : REGULAR_PRICE,
     status: 'publish',
-  });
+  };
+  if (taxInclusive) {
+    productPayload.tax_status = 'taxable';
+    productPayload.tax_class = ''; // standard rate
+  } else {
+    productPayload.sale_price = DISCOUNT_AMOUNT;
+  }
+  const product = await wcApi('POST', 'wc/v3/products', productPayload);
   productId = product.id;
   console.log(`Setup: Product created (ID: ${productId})${product.id ? '' : ' ERROR: ' + JSON.stringify(product).substring(0, 200)}`);
 
-  couponCode = 'e2e_' + Date.now();
-  const coupon = await wcApi('POST', 'wc/v3/coupons', {
-    code: couponCode,
-    discount_type: 'fixed_product',
-    amount: COUPON_AMOUNT,
-    product_ids: [productId],
-  });
-  couponId = coupon.id;
-  console.log(`Setup: Coupon created (${couponCode})`);
+  // The coupon is only needed by the discount specs; the tax-inclusive spec
+  // verifies tax classification on a plain full-price line item.
+  if (!taxInclusive) {
+    couponCode = 'e2e_' + Date.now();
+    const coupon = await wcApi('POST', 'wc/v3/coupons', {
+      code: couponCode,
+      discount_type: 'fixed_product',
+      amount: COUPON_AMOUNT,
+      product_ids: [productId],
+    });
+    couponId = coupon.id;
+    console.log(`Setup: Coupon created (${couponCode})`);
+  }
 
   if (checkoutType) {
     await setCheckoutType(checkoutType);
@@ -250,7 +291,8 @@ async function setup(options = {}) {
   // A guest session is cookie-only and fresh on every run.
   await page.context().clearCookies();
 
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${QUANTITY}`);
+  const cartQty = roundingQty || QUANTITY;
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${cartQty}`);
   await page.waitForLoadState('networkidle');
 }
 
@@ -320,8 +362,17 @@ async function applyBlocksCoupon(code) {
 
 async function teardown() {
   console.log('\nTeardown...');
-  try { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } catch (_) {}
+  try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
   try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
+  // Undo the tax-inclusive store config so other specs/store state stay clean.
+  try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
+  try {
+    if (taxInclusiveEnabled) {
+      await wcApi('PUT', 'wc/v3/settings/tax/woocommerce_prices_include_tax', { value: 'no' });
+      await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'no' });
+      console.log('  Reset tax settings');
+    }
+  } catch (_) {}
   try { await browser.close(); } catch (_) {}
 }
 
@@ -337,18 +388,188 @@ async function testOrderStatus(conektaOrderId) {
   const orderIdMatch = currentUrl.match(/order-received\/(\d+)/);
   assert(orderIdMatch !== null, 'order ID in URL');
 
-  // Verify the Conekta order is paid via API (works for guest sessions).
+  // Verify the Conekta order is paid via the SDK (works for guest sessions).
   if (conektaOrderId) {
     console.log('--- Conekta order verification ---');
-    const conektaOrder = await page.evaluate(async ({ url, key }) => {
-      const res = await fetch(url, {
-        headers: { 'Authorization': 'Bearer ' + key, 'Accept': 'application/vnd.conekta-v2.2.0+json' },
-      });
-      return res.json();
-    }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
-
+    const conektaOrder = await fetchConektaOrder(conektaOrderId);
     assert(conektaOrder.payment_status === 'paid', `Conekta payment_status = ${conektaOrder.payment_status}`);
   }
+}
+
+// Lazily-built Conekta SDK client (official conekta-node package). Reused across
+// helpers instead of hand-rolled fetch calls so we get the right base URL,
+// API version header and typed responses for free.
+let _ordersApi = null;
+function conektaOrdersApi() {
+  if (!_ordersApi) {
+    _ordersApi = new OrdersApi(new Configuration({ accessToken: CONEKTA_API_KEY }));
+  }
+  return _ordersApi;
+}
+
+/**
+ * Fetch a Conekta order from the live API via the official conekta-node SDK.
+ * Returns the OrderResponse (snake_case fields, list fields wrapped as {data}),
+ * the same shape the callers already consume.
+ */
+async function fetchConektaOrder(conektaOrderId) {
+  const { data } = await conektaOrdersApi().getOrderById(conektaOrderId);
+  return data;
+}
+
+/**
+ * Regression check for tax-inclusive pricing (BE-924): the IVA must be reported
+ * to Conekta as a tax_line, NEVER as a `dynamic_pricing` discount. Conekta v2
+ * returns list fields as { object:'list', data:[...] }, so we normalize both
+ * the array and the wrapped shapes.
+ */
+async function verifyTaxInclusiveOrder(conektaOrderId) {
+  console.log('\n--- Tax-inclusive verification (Conekta API) ---');
+  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/transactions/payments/${conektaOrderId})`);
+  const order = await fetchConektaOrder(conektaOrderId);
+  const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
+
+  const discountLines = list(order.discount_lines);
+  const taxLines = list(order.tax_lines);
+  const lineItems = list(order.line_items);
+
+  console.log(`  amount=${order.amount} discount_lines=${JSON.stringify(discountLines)} tax_lines=${JSON.stringify(taxLines)}`);
+  console.log(`  line_items[0].metadata=${JSON.stringify(lineItems[0] && lineItems[0].metadata)}`);
+
+  // The bug: tax surfaced as a dynamic_pricing campaign discount.
+  const phantom = discountLines.find(d => d.code === 'dynamic_pricing');
+  assert(!phantom, `no dynamic_pricing discount line${phantom ? ` (found amount ${phantom.amount})` : ''}`);
+
+  // The IVA must be present as a tax line instead.
+  const taxTotal = taxLines.reduce((sum, t) => sum + (t.amount || 0), 0);
+  assert(taxLines.length > 0 && taxTotal > 0, `Conekta order has tax_lines totaling ${taxTotal}`);
+
+  // New feature: this spec always runs with taxes enabled, prices entered
+  // inclusive, and a taxable product, so the line item's tax_included flag must
+  // be true. (We can't read the store settings back here to derive the
+  // expectation — the spec body runs as a guest after clearCookies(), and
+  // wcApi needs the admin REST nonce.)
+  const meta = lineItems[0] && lineItems[0].metadata;
+  if (meta && 'tax_included' in meta) {
+    const actual = meta.tax_included === true || meta.tax_included === 'true';
+    assert(actual === true,
+      `line item metadata.tax_included = ${meta.tax_included} (expected true: tax-inclusive store + taxable product)`);
+  } else {
+    console.log('  (line item metadata.tax_included not echoed by the API — skipped)');
+  }
+}
+
+/**
+ * Assert the amount Conekta charged equals the WooCommerce order total to the
+ * cent, and that any rounding drift was reconciled correctly. unit_price is
+ * line_subtotal/qty rounded, so unit_price × qty (plus tax rounding) can drift
+ * a cent or two; ckpg_check_balance reconciles it:
+ *   - under-count (charging too little) -> added to the tax line.
+ *   - over-count  (charging too much)   -> a small round_adjustment discount.
+ * The exact direction depends on WooCommerce's internal tax rounding for the
+ * cart, so this asserts whichever branch occurred is correct (and logs it);
+ * the per-direction guarantee is covered deterministically by the unit tests.
+ *
+ * The Conekta order is read via the SDK (a Node-side call, independent of the
+ * browser page); findOrdersByConektaOrderId then re-authenticates as admin to
+ * read the WooCommerce order.
+ */
+async function verifyConektaTotalMatchesWoo(conektaOrderId) {
+  console.log('\n--- Conekta amount vs WooCommerce total (rounding reconciliation) ---');
+  console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/transactions/payments/${conektaOrderId})`);
+  const order = await fetchConektaOrder(conektaOrderId);
+  const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
+  const amount = order.amount;
+  const taxLines = list(order.tax_lines);
+  const discountLines = list(order.discount_lines);
+
+  // Dump the Conekta order's tax / discount lines so the rounding items are
+  // visible directly on the order (cross-check against the panel link above).
+  console.log(`  Conekta amount=${amount}`);
+  console.log(`  Conekta tax_lines=${JSON.stringify(taxLines)}`);
+  console.log(`  Conekta discount_lines=${JSON.stringify(discountLines)}`);
+
+  const roundAdj = discountLines.find(d => d.code === 'round_adjustment');
+  if (roundAdj) {
+    // Over-count branch: the excess is a small discount and the real tax line
+    // is left intact (never reduced to absorb rounding).
+    console.log(`  rounding absorbed as DISCOUNT round_adjustment = ${roundAdj.amount}`);
+    assert(roundAdj.amount > 0 && roundAdj.amount <= 100,
+      `round_adjustment discount is a few cents (${roundAdj.amount})`);
+    const taxTotal = taxLines.reduce((s, t) => s + (t.amount || 0), 0);
+    assert(taxTotal > 0, `tax line preserved alongside round_adjustment (tax total ${taxTotal})`);
+  } else {
+    // Under-count branch (or exact): any drift went into the tax line.
+    console.log('  no round_adjustment discount (drift, if any, absorbed in tax or exact)');
+  }
+
+  const wcOrders = await findOrdersByConektaOrderId(conektaOrderId); // navigates to admin
+  assert(wcOrders.length >= 1, `found a WooCommerce order for ${conektaOrderId}`);
+  const wcTotalCents = Math.round(parseFloat(wcOrders[0].total) * 100);
+
+  assert(amount === wcTotalCents,
+    `Conekta amount (${amount}) === WooCommerce total (${wcTotalCents})`);
+}
+
+/**
+ * Drive the classic checkout far enough to mint the Conekta order: fill billing,
+ * select Conekta, capture the checkout-request response and return its
+ * conekta_order_id. Order creation is where tax / discount / rounding is
+ * decided, so this is enough to inspect those on the Conekta order.
+ */
+async function classicCheckoutCreateOrder() {
+  const captured = [];
+  page.on('response', async (response) => {
+    if (response.url().includes('conekta_checkout_request') && response.request().method() === 'POST') {
+      try { captured.push(await response.json()); } catch (_) { /* body unavailable */ }
+    }
+  });
+
+  await page.goto(`${STORE_URL}/checkout/`);
+  await page.waitForLoadState('networkidle');
+  await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
+
+  await page.fill('#billing_first_name', BILLING.first_name);
+  await page.fill('#billing_last_name', BILLING.last_name);
+  await page.fill('#billing_address_1', BILLING.address_1);
+  await page.fill('#billing_city', BILLING.city);
+  await page.selectOption('#billing_state', BILLING.state);
+  await page.fill('#billing_postcode', BILLING.postcode);
+  await page.fill('#billing_phone', BILLING.phone);
+  await page.fill('#billing_email', BILLING.email);
+
+  // Flush the email through update_order_review so WC()->customer is synced
+  // before checkout-request fires (otherwise it races with a stale email).
+  await page.locator('#billing_email').blur().catch(() => {});
+  await page.waitForResponse(
+    r => r.url().includes('wc-ajax=update_order_review'),
+    { timeout: 10000 }
+  ).catch(() => {});
+  await page.waitForTimeout(500);
+
+  await page.click('label[for="payment_method_conekta"]');
+
+  const start = Date.now();
+  while (captured.length < 1 && Date.now() - start < 30000) {
+    await page.waitForTimeout(100);
+  }
+  if (!captured.length) throw new Error('Timeout waiting for checkout-request POST');
+
+  const conektaOrderId = captured[0].conekta_order_id;
+  assert(typeof conektaOrderId === 'string' && conektaOrderId.length > 0,
+    `checkout-request returned conekta_order_id = ${conektaOrderId}`);
+  return conektaOrderId;
+}
+
+/** Pay the mounted Conekta order with the test card (3DS happy path). */
+async function payClassicCardOrder() {
+  console.log('\n--- happy path (pay with card) ---');
+  await waitForIntegrationIframe();
+  await fillIntegrationCard(TEST_CARD);
+  assert(true, 'card filled inside Conekta iframe');
+  await clickPlaceOrder();
+  await waitForOrderReceivedWith3DS();
+  assert(true, 'redirected to order-received');
 }
 
 function getProductId() { return productId; }
@@ -932,6 +1153,8 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
+  fetchConektaOrder, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
+  classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,

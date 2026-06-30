@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.0.5
+Stable tag: 6.0.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,10 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.6 =
+* Change: line items are sent to Conekta at the effective price the customer pays; the plugin no longer reports the regular price plus a dynamic_pricing discount for sales (that confused merchants and made the IVA appear as a phantom discount on tax-inclusive stores). Tax is itemized in tax_lines; real coupons and fees stay as discounts. Covers card, cash, bank transfer, BNPL and pay by bank.
+* Feature: each line item carries a tax_included metadata flag (true only when the store is tax-inclusive and the product is taxable).
+
 = 6.0.5 =
 * Fix: classic checkout submits the exact data it validated before charging (FormData snapshot), so a third-party plugin changing a required field during the payment window (e.g. a postcode->colonia repopulator) can't make WooCommerce reject the order after the card was already charged. Covers card and wallet paths.
 
