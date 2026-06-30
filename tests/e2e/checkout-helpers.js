@@ -432,20 +432,16 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
   const taxTotal = taxLines.reduce((sum, t) => sum + (t.amount || 0), 0);
   assert(taxLines.length > 0 && taxTotal > 0, `Conekta order has tax_lines totaling ${taxTotal}`);
 
-  // New feature: the line item's tax_included flag must reflect the store's
-  // REAL config — true iff taxes are enabled AND prices are entered inclusive.
-  // Read the effective settings back (rather than assume) so the assertion is
-  // correct even if the store didn't honor the inclusive setting. NOTE: this
-  // uses wcApi, which navigates to wp-admin, so it must run AFTER the Conekta
-  // fetch above (which needs the storefront CSP to reach api.conekta.io).
+  // New feature: this spec always runs with taxes enabled, prices entered
+  // inclusive, and a taxable product, so the line item's tax_included flag must
+  // be true. (We can't read the store settings back here to derive the
+  // expectation — the spec body runs as a guest after clearCookies(), and
+  // wcApi needs the admin REST nonce.)
   const meta = lineItems[0] && lineItems[0].metadata;
   if (meta && 'tax_included' in meta) {
-    const calc = (await wcApi('GET', 'wc/v3/settings/general/woocommerce_calc_taxes')).value;
-    const incl = (await wcApi('GET', 'wc/v3/settings/tax/woocommerce_prices_include_tax')).value;
-    const expected = calc === 'yes' && incl === 'yes';
     const actual = meta.tax_included === true || meta.tax_included === 'true';
-    assert(actual === expected,
-      `line item metadata.tax_included = ${meta.tax_included} (store calc_taxes=${calc}, prices_include_tax=${incl}, expected ${expected})`);
+    assert(actual === true,
+      `line item metadata.tax_included = ${meta.tax_included} (expected true: tax-inclusive store + taxable product)`);
   } else {
     console.log('  (line item metadata.tax_included not echoed by the API — skipped)');
   }
