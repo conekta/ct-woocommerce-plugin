@@ -48,8 +48,8 @@ By following these steps, you'll successfully install and configure the Conekta 
 
 == Changelog ==
 = 6.0.6 =
-* Fix: tax-inclusive stores no longer report tax (IVA) as a dynamic_pricing discount on the Conekta order. The regular price is now normalized to net before the price-level discount comparison, so a tax-inclusive item no longer shows a phantom discount. Tax-exclusive stores are unaffected. Covers card, cash, bank transfer, BNPL and pay by bank.
-* Feature: each line item now carries a tax_included metadata flag indicating whether its unit price already includes tax.
+* Change: line items are sent to Conekta at the effective price the customer pays; the plugin no longer reports the regular price plus a dynamic_pricing discount for sales (that confused merchants and made the IVA appear as a phantom discount on tax-inclusive stores). Tax is itemized in tax_lines; real coupons and fees stay as discounts. Covers card, cash, bank transfer, BNPL and pay by bank.
+* Feature: each line item carries a tax_included metadata flag (true only when the store is tax-inclusive and the product is taxable).
 
 = 6.0.5 =
 * Fix: classic checkout submits the exact data it validated before charging (FormData snapshot), so a third-party plugin changing a required field during the payment window (e.g. a postcode->colonia repopulator) can't make WooCommerce reject the order after the card was already charged. Covers card and wallet paths.

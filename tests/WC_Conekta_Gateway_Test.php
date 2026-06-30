@@ -803,9 +803,10 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals(40000, $line_items[0]['unit_price']); // 800/2 * 100
     }
 
-    public function test_build_line_items_detects_price_discount_via_registry()
+    public function test_build_line_items_uses_effective_price_no_dynamic_pricing()
     {
-        // Register product 10 with regular_price = 500
+        // A product on sale (regular 500, effective 400) must be sent at the
+        // EFFECTIVE price with NO dynamic_pricing discount synthesized.
         $this->registerProduct(10, 500.00);
 
         $items = [[
@@ -819,16 +820,16 @@ class WC_Conekta_Gateway_Test extends TestCase
         $discount = 0;
         $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
 
-        // unit_price should be bumped to regular: 500 * 100 = 50000
-        $this->assertEquals(50000, $line_items[0]['unit_price']);
-        // discount = (50000 - 40000) * 2 = 20000
-        $this->assertEquals(20000, $discount);
+        // unit_price = effective price (800/2 = 400 → 40000), NOT the regular.
+        $this->assertEquals(40000, $line_items[0]['unit_price']);
+        // No price-level discount is produced anymore.
+        $this->assertEquals(0, $discount);
     }
 
-    public function test_build_line_items_mixed_products_only_discounted_counted()
+    public function test_build_line_items_mixed_products_all_at_effective_price()
     {
         $this->registerProduct(10, 500.00); // regular=500, effective=400
-        $this->registerProduct(20, 300.00); // regular=300, effective=300 (no discount)
+        $this->registerProduct(20, 300.00); // regular=300, effective=300
 
         $items = [
             [
@@ -851,9 +852,9 @@ class WC_Conekta_Gateway_Test extends TestCase
         $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
 
         $this->assertCount(2, $line_items);
-        $this->assertEquals(50000, $line_items[0]['unit_price']); // bumped to regular
+        $this->assertEquals(40000, $line_items[0]['unit_price']); // effective, not regular
         $this->assertEquals(30000, $line_items[1]['unit_price']); // unchanged
-        $this->assertEquals(20000, $discount); // only item 10 contributes
+        $this->assertEquals(0, $discount); // no dynamic_pricing produced
     }
 
     public function test_build_line_items_backward_compatible_without_third_param()
@@ -874,11 +875,10 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
-    // ckpg_build_line_items — tax-inclusive pricing must NOT be
-    // mistaken for a price-level (dynamic_pricing) discount.
-    // Regression: with prices entered tax-inclusive, get_regular_price()
-    // is gross (incl. IVA) while line_subtotal is net, so the IVA was
-    // being reported as a -$discount in Conekta.
+    // ckpg_build_line_items — line items always carry the EFFECTIVE net
+    // price and never synthesize a dynamic_pricing discount (BE-924).
+    // The original bug (tax reported as a discount) is gone simply because
+    // no price-level discount line is produced at all; tax stays in tax_lines.
     // -------------------------------------------------------
 
     public function test_build_line_items_tax_inclusive_no_false_discount()
@@ -900,22 +900,22 @@ class WC_Conekta_Gateway_Test extends TestCase
         $discount = 0;
         $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
 
-        // The 360 IVA is NOT a discount — both sides compared net of tax.
+        // The IVA is NOT a discount; no dynamic_pricing produced.
         $this->assertEquals(0, $discount);
-        // unit_price stays at the net line subtotal: 2250 * 100.
+        // unit_price is the net line subtotal: 2250 * 100.
         $this->assertEquals(225000, $line_items[0]['unit_price']);
     }
 
-    public function test_build_line_items_tax_inclusive_detects_real_discount()
+    public function test_build_line_items_tax_inclusive_sale_uses_effective_price()
     {
         global $test_prices_include_tax;
         $test_prices_include_tax = true;
 
-        // Regular gross 2610 -> net 2250. Sold for net 2000 (a real discount).
+        // Regular gross 2610. Sold for net 2000 (a real sale).
         $this->registerProduct(10, 2610.00);
 
         $items = [[
-            'line_subtotal' => 2000.00, // net effective price below net regular
+            'line_subtotal' => 2000.00, // net effective price
             'qty'           => 1,
             'product_id'    => 10,
             'name'          => 'Tax Inclusive Discounted',
@@ -925,17 +925,17 @@ class WC_Conekta_Gateway_Test extends TestCase
         $discount = 0;
         $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
 
-        // Net regular 2250 vs net effective 2000 -> 250 real discount.
-        $this->assertEquals(225000, $line_items[0]['unit_price']);
-        $this->assertEquals(25000, $discount);
+        // unit_price = effective net price (2000), NOT the regular; no discount.
+        $this->assertEquals(200000, $line_items[0]['unit_price']);
+        $this->assertEquals(0, $discount);
     }
 
-    public function test_build_line_items_tax_exclusive_unaffected_by_normalization()
+    public function test_build_line_items_tax_exclusive_sale_uses_effective_price()
     {
         global $test_prices_include_tax;
         $test_prices_include_tax = false; // explicit: prices entered net
 
-        // Net regular 500, effective 400 -> genuine 100/unit discount.
+        // Net regular 500, effective 400.
         $this->registerProduct(10, 500.00);
 
         $items = [[
@@ -949,9 +949,9 @@ class WC_Conekta_Gateway_Test extends TestCase
         $discount = 0;
         $line_items = ckpg_build_line_items($items, '5.4.12', $discount);
 
-        // No tax normalization applied; regular price used as-is.
-        $this->assertEquals(50000, $line_items[0]['unit_price']);
-        $this->assertEquals(20000, $discount); // (50000 - 40000) * 2
+        // unit_price = effective price (400), no dynamic_pricing produced.
+        $this->assertEquals(40000, $line_items[0]['unit_price']);
+        $this->assertEquals(0, $discount);
     }
 
     // -------------------------------------------------------
@@ -2074,15 +2074,14 @@ class WC_Conekta_Gateway_Test extends TestCase
     // -------------------------------------------------------
 
     /**
-     * Simulates the exact discount-building pipeline from conekta-rest-api.php
-     * lines 347-358 to verify no double-counting of dynamic_pricing entries.
+     * A product on sale no longer produces a dynamic_pricing discount line:
+     * the line item carries the effective price and discount_lines stays empty.
      */
-    public function test_rest_api_pipeline_no_double_counting_price_level_only()
+    public function test_rest_api_pipeline_sale_produces_no_dynamic_pricing()
     {
-        // Setup: product with regular_price=500, effective=400 (price-level discount)
+        // Setup: product with regular_price=500, effective=400
         $this->registerProduct(10, 500.00);
 
-        // Simulate order items (as returned by $order->get_items())
         $items = [[
             'line_subtotal' => 800.00, // 400 * 2
             'qty'           => 2,
@@ -2091,35 +2090,32 @@ class WC_Conekta_Gateway_Test extends TestCase
             'variation_id'  => 0,
         ]];
 
-        // Simulate $data from ckpg_get_request_data($order) — no coupons, no dynamic_pricing
-        $data = [
-            'discount_lines' => [], // order has no coupons
-        ];
-
-        // Simulate empty fees (no negative fees)
+        // No coupons, no fees.
+        $data = ['discount_lines' => []];
         $fees = [];
 
-        // === Reproduce the REST API pipeline (lines 347-358) ===
         $fees_formatted = ckpg_build_get_fees($fees);
-        $discounts_data = $fees_formatted['discounts'];   // empty
-        $discount_lines = ckpg_build_discount_lines($data); // empty (no coupons)
-        $discount_lines = array_merge($discount_lines, $discounts_data); // still empty
+        $discounts_data = $fees_formatted['discounts'];
+        $discount_lines = ckpg_build_discount_lines($data);
+        $discount_lines = array_merge($discount_lines, $discounts_data);
 
         $price_level_discount = 0;
         $line_items = ckpg_build_line_items($items, '5.4.12', $price_level_discount);
         ckpg_add_price_level_discount($discount_lines, $price_level_discount);
 
-        // Assert: exactly ONE dynamic_pricing entry, not two
-        $dynamic_entries = array_filter($discount_lines, fn($d) => $d['code'] === 'dynamic_pricing');
-        $this->assertCount(1, $dynamic_entries, 'Should have exactly 1 dynamic_pricing entry, not duplicated');
-        $this->assertEquals(20000, $price_level_discount); // (50000-40000)*2
+        // No dynamic_pricing is generated; the line item carries the effective price.
+        $this->assertEquals(0, $price_level_discount);
+        $dynamic_entries = array_filter($discount_lines, fn($d) => ($d['code'] ?? '') === 'dynamic_pricing');
+        $this->assertCount(0, $dynamic_entries, 'No dynamic_pricing discount should be produced');
+        $this->assertEmpty($discount_lines);
+        $this->assertEquals(40000, $line_items[0]['unit_price']); // effective 400
     }
 
     /**
-     * Same pipeline but with a negative fee AND a price-level discount.
-     * These are DIFFERENT discount mechanisms — both should appear.
+     * A negative fee (real cart-level discount) still becomes a discount_line.
+     * Price-level markdowns no longer add a separate dynamic_pricing entry.
      */
-    public function test_rest_api_pipeline_fee_and_price_level_are_separate()
+    public function test_rest_api_pipeline_negative_fee_still_discounted()
     {
         $this->registerProduct(10, 500.00);
 
@@ -2133,7 +2129,7 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $data = ['discount_lines' => []];
 
-        // Negative fee from dynamic pricing
+        // Negative fee (e.g. a cart discount) — a real discount, kept.
         $fees = [
             new class {
                 public function get_total() { return -50.00; }
@@ -2141,7 +2137,6 @@ class WC_Conekta_Gateway_Test extends TestCase
             },
         ];
 
-        // === REST API pipeline ===
         $fees_formatted = ckpg_build_get_fees($fees);
         $discounts_data = $fees_formatted['discounts'];
         $discount_lines = ckpg_build_discount_lines($data);
@@ -2151,12 +2146,11 @@ class WC_Conekta_Gateway_Test extends TestCase
         $line_items = ckpg_build_line_items($items, '5.4.12', $price_level_discount);
         ckpg_add_price_level_discount($discount_lines, $price_level_discount);
 
-        // Fee discount and price-level discount are separate mechanisms
-        $this->assertCount(2, $discount_lines);
+        // Only the fee discount appears — no dynamic_pricing.
+        $this->assertCount(1, $discount_lines);
         $this->assertEquals('Cart Discount', $discount_lines[0]['code']);
         $this->assertEquals(5000, $discount_lines[0]['amount']);
-        $this->assertEquals('dynamic_pricing', $discount_lines[1]['code']);
-        $this->assertEquals(20000, $discount_lines[1]['amount']);
+        $this->assertEquals(0, $price_level_discount);
     }
 
     /**

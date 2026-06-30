@@ -422,27 +422,16 @@ class WC_Conekta_REST_API {
 
             $tax_lines = ckpg_build_tax_lines_from_cart(WC()->cart);
 
-            $price_level_discount = 0;
             foreach (WC()->cart->get_cart() as $cart_item) {
                 $product = $cart_item['data'];
                 if (!$product) continue;
 
+                // Send the effective unit price the customer actually pays (net
+                // of tax; tax is itemized in tax_lines). We intentionally do NOT
+                // report the regular price plus a `dynamic_pricing` discount for
+                // sales / dynamic-pricing plugins — that confused merchants.
+                // Real coupons and negative fees remain explicit discount_lines.
                 $unit_price_cents = amount_validation((float) $cart_item['line_subtotal'] / max(1, (int) $cart_item['quantity']));
-                $regular_price    = (float) $product->get_regular_price();
-                if ($regular_price > 0) {
-                    // line_subtotal is always net of tax. When the store enters
-                    // prices tax-inclusive, get_regular_price() is gross, so the
-                    // tax would otherwise be misread as a price-level discount.
-                    // Normalize the regular price to net before comparing.
-                    if (wc_prices_include_tax()) {
-                        $regular_price = (float) wc_get_price_excluding_tax($product, array('qty' => 1, 'price' => $regular_price));
-                    }
-                    $regular_unit_cents = amount_validation($regular_price);
-                    if ($regular_unit_cents > $unit_price_cents) {
-                        $price_level_discount += ($regular_unit_cents - $unit_price_cents) * (int) $cart_item['quantity'];
-                        $unit_price_cents      = $regular_unit_cents;
-                    }
-                }
 
                 $line_items[] = [
                     'name'       => item_name_validation($product->get_name()),
@@ -473,14 +462,6 @@ class WC_Conekta_REST_API {
                         'type'   => 'campaign',
                     ];
                 }
-            }
-
-            if ($price_level_discount > 0) {
-                $discount_lines[] = [
-                    'code'   => 'dynamic_pricing',
-                    'amount' => $price_level_discount,
-                    'type'   => 'campaign',
-                ];
             }
 
             $chosen_methods = WC()->session ? (WC()->session->get('chosen_shipping_methods') ?: []) : [];

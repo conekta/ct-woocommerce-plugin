@@ -99,25 +99,14 @@ function ckpg_build_line_items($items, $version, &$price_level_discount = 0)
         $unit_price  = intval(round(floatval($unit_price) / 10), 2);
         $quantity    = intval($item['qty']);
 
-        // Detect price-level discounts (dynamic pricing plugins modify the product
-        // price directly; Conekta needs the original price + an explicit discount_line).
+        // Send the effective unit price the customer actually pays (net of tax;
+        // tax is itemized in tax_lines). We intentionally do NOT report the
+        // regular price plus a `dynamic_pricing` discount line for sales /
+        // dynamic-pricing plugins — that confused merchants. Real coupons and
+        // negative fees remain explicit discount_lines. $price_level_discount is
+        // kept at 0 for backward compatibility with callers.
         $variation_id = isset($item['variation_id']) ? intval($item['variation_id']) : 0;
         $price_product = $variation_id ? wc_get_product($variation_id) : $productmeta;
-        $regular_price = $price_product ? (float) $price_product->get_regular_price() : 0;
-        if ($regular_price > 0) {
-            // line_subtotal is always net of tax. When the store enters prices
-            // tax-inclusive, get_regular_price() is gross, so the tax would
-            // otherwise be misread as a price-level discount. Normalize the
-            // regular price to net before comparing.
-            if (function_exists('wc_prices_include_tax') && wc_prices_include_tax()) {
-                $regular_price = (float) wc_get_price_excluding_tax($price_product, array('qty' => 1, 'price' => $regular_price));
-            }
-            $regular_unit_cents = amount_validation($regular_price);
-            if ($regular_unit_cents > $unit_price) {
-                $price_level_discount += ($regular_unit_cents - $unit_price) * $quantity;
-                $unit_price = $regular_unit_cents;
-            }
-        }
         $tags = wp_get_post_terms($item['product_id'], 'product_tag', array('fields' => 'names'));
         $brands = wp_get_post_terms($item['product_id'], 'product_brand', array('fields' => 'names'));
 
