@@ -223,8 +223,11 @@ async function setup(options = {}) {
   // 16% IVA rate. Used by the tax-inclusive spec to prove the IVA is reported
   // to Conekta as a tax_line and NOT folded into a dynamic_pricing discount.
   if (taxInclusive) {
+    // "Enable taxes" lives in the general group; "prices include tax" lives in
+    // the TAX group (NOT general — PUTting it to general 404s silently and the
+    // store stays tax-exclusive).
     await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'yes' });
-    await wcApi('PUT', 'wc/v3/settings/general/woocommerce_prices_include_tax', { value: 'yes' });
+    await wcApi('PUT', 'wc/v3/settings/tax/woocommerce_prices_include_tax', { value: 'yes' });
     const rate = await wcApi('POST', 'wc/v3/taxes', {
       country: 'MX',
       rate: '16.0000',
@@ -234,7 +237,10 @@ async function setup(options = {}) {
     });
     taxRateId = rate.id;
     taxInclusiveEnabled = true;
-    console.log(`Setup: tax-inclusive enabled, IVA rate created (ID: ${taxRateId})`);
+    // Read the values back so a silently-rejected PUT is visible in the log.
+    const calc = (await wcApi('GET', 'wc/v3/settings/general/woocommerce_calc_taxes')).value;
+    const incl = (await wcApi('GET', 'wc/v3/settings/tax/woocommerce_prices_include_tax')).value;
+    console.log(`Setup: tax-inclusive enabled (calc_taxes=${calc}, prices_include_tax=${incl}), IVA rate created (ID: ${taxRateId})`);
   }
 
   // The tax-inclusive spec uses a full-price taxable product (no sale_price) so
@@ -357,7 +363,7 @@ async function teardown() {
   try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
   try {
     if (taxInclusiveEnabled) {
-      await wcApi('PUT', 'wc/v3/settings/general/woocommerce_prices_include_tax', { value: 'no' });
+      await wcApi('PUT', 'wc/v3/settings/tax/woocommerce_prices_include_tax', { value: 'no' });
       await wcApi('PUT', 'wc/v3/settings/general/woocommerce_calc_taxes', { value: 'no' });
       console.log('  Reset tax settings');
     }
@@ -426,12 +432,20 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
   const taxTotal = taxLines.reduce((sum, t) => sum + (t.amount || 0), 0);
   assert(taxLines.length > 0 && taxTotal > 0, `Conekta order has tax_lines totaling ${taxTotal}`);
 
-  // New feature: each line item carries metadata.tax_included = true. The API
-  // only echoes it back when present, so assert defensively.
+  // New feature: the line item's tax_included flag must reflect the store's
+  // REAL config — true iff taxes are enabled AND prices are entered inclusive.
+  // Read the effective settings back (rather than assume) so the assertion is
+  // correct even if the store didn't honor the inclusive setting. NOTE: this
+  // uses wcApi, which navigates to wp-admin, so it must run AFTER the Conekta
+  // fetch above (which needs the storefront CSP to reach api.conekta.io).
   const meta = lineItems[0] && lineItems[0].metadata;
   if (meta && 'tax_included' in meta) {
-    assert(meta.tax_included === true || meta.tax_included === 'true',
-      `line item metadata.tax_included = ${meta.tax_included}`);
+    const calc = (await wcApi('GET', 'wc/v3/settings/general/woocommerce_calc_taxes')).value;
+    const incl = (await wcApi('GET', 'wc/v3/settings/tax/woocommerce_prices_include_tax')).value;
+    const expected = calc === 'yes' && incl === 'yes';
+    const actual = meta.tax_included === true || meta.tax_included === 'true';
+    assert(actual === expected,
+      `line item metadata.tax_included = ${meta.tax_included} (store calc_taxes=${calc}, prices_include_tax=${incl}, expected ${expected})`);
   } else {
     console.log('  (line item metadata.tax_included not echoed by the API — skipped)');
   }
