@@ -4,6 +4,7 @@
 const { chromium } = require('playwright');
 const { mkdirSync, readFileSync } = require('fs');
 const { join } = require('path');
+const { Configuration, OrdersApi } = require('conekta');
 const config = require('./e2e.config');
 
 const EXPECTED_VERSION = JSON.parse(
@@ -383,30 +384,33 @@ async function testOrderStatus(conektaOrderId) {
   const orderIdMatch = currentUrl.match(/order-received\/(\d+)/);
   assert(orderIdMatch !== null, 'order ID in URL');
 
-  // Verify the Conekta order is paid via API (works for guest sessions).
+  // Verify the Conekta order is paid via the SDK (works for guest sessions).
   if (conektaOrderId) {
     console.log('--- Conekta order verification ---');
-    const conektaOrder = await page.evaluate(async ({ url, key }) => {
-      const res = await fetch(url, {
-        headers: { 'Authorization': 'Bearer ' + key, 'Accept': 'application/vnd.conekta-v2.2.0+json' },
-      });
-      return res.json();
-    }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
-
+    const conektaOrder = await fetchConektaOrder(conektaOrderId);
     assert(conektaOrder.payment_status === 'paid', `Conekta payment_status = ${conektaOrder.payment_status}`);
   }
 }
 
+// Lazily-built Conekta SDK client (official conekta-node package). Reused across
+// helpers instead of hand-rolled fetch calls so we get the right base URL,
+// API version header and typed responses for free.
+let _ordersApi = null;
+function conektaOrdersApi() {
+  if (!_ordersApi) {
+    _ordersApi = new OrdersApi(new Configuration({ accessToken: CONEKTA_API_KEY }));
+  }
+  return _ordersApi;
+}
+
 /**
- * Fetch a Conekta order from the live API (v2.2.0). Returns the parsed JSON.
+ * Fetch a Conekta order from the live API via the official conekta-node SDK.
+ * Returns the OrderResponse (snake_case fields, list fields wrapped as {data}),
+ * the same shape the callers already consume.
  */
 async function fetchConektaOrder(conektaOrderId) {
-  return page.evaluate(async ({ url, key }) => {
-    const res = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + key, 'Accept': 'application/vnd.conekta-v2.2.0+json' },
-    });
-    return res.json();
-  }, { url: `https://api.conekta.io/orders/${conektaOrderId}`, key: CONEKTA_API_KEY });
+  const { data } = await conektaOrdersApi().getOrderById(conektaOrderId);
+  return data;
 }
 
 /**
@@ -462,12 +466,13 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
  * cart, so this asserts whichever branch occurred is correct (and logs it);
  * the per-direction guarantee is covered deterministically by the unit tests.
  *
- * Fetches the Conekta order from the storefront FIRST (CSP allows
- * api.conekta.io there), THEN re-authenticates as admin to read the WC order.
+ * The Conekta order is read via the SDK (a Node-side call, independent of the
+ * browser page); findOrdersByConektaOrderId then re-authenticates as admin to
+ * read the WooCommerce order.
  */
 async function verifyConektaTotalMatchesWoo(conektaOrderId) {
   console.log('\n--- Conekta amount vs WooCommerce total (rounding reconciliation) ---');
-  const order = await fetchConektaOrder(conektaOrderId); // storefront CSP
+  const order = await fetchConektaOrder(conektaOrderId);
   const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
   const amount = order.amount;
   const taxLines = list(order.tax_lines);
