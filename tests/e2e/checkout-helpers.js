@@ -453,15 +453,39 @@ async function verifyTaxInclusiveOrder(conektaOrderId) {
 
 /**
  * Assert the amount Conekta charged equals the WooCommerce order total to the
- * cent. Catches per-unit / tax rounding drift (unit_price = line_subtotal/qty
- * rounded, then × quantity) that must be reconciled before reaching Conekta.
- * Fetches the Conekta order from the storefront FIRST (CSP allows api.conekta.io
- * there), THEN re-authenticates as admin to read the WC order.
+ * cent, and that any rounding drift was reconciled correctly. unit_price is
+ * line_subtotal/qty rounded, so unit_price × qty (plus tax rounding) can drift
+ * a cent or two; ckpg_check_balance reconciles it:
+ *   - under-count (charging too little) -> added to the tax line.
+ *   - over-count  (charging too much)   -> a small round_adjustment discount.
+ * The exact direction depends on WooCommerce's internal tax rounding for the
+ * cart, so this asserts whichever branch occurred is correct (and logs it);
+ * the per-direction guarantee is covered deterministically by the unit tests.
+ *
+ * Fetches the Conekta order from the storefront FIRST (CSP allows
+ * api.conekta.io there), THEN re-authenticates as admin to read the WC order.
  */
 async function verifyConektaTotalMatchesWoo(conektaOrderId) {
-  console.log('\n--- Conekta amount vs WooCommerce total ---');
+  console.log('\n--- Conekta amount vs WooCommerce total (rounding reconciliation) ---');
   const order = await fetchConektaOrder(conektaOrderId); // storefront CSP
+  const list = (field) => (Array.isArray(field) ? field : (field && field.data) || []);
   const amount = order.amount;
+  const taxLines = list(order.tax_lines);
+  const discountLines = list(order.discount_lines);
+
+  const roundAdj = discountLines.find(d => d.code === 'round_adjustment');
+  if (roundAdj) {
+    // Over-count branch: the excess is a small discount and the real tax line
+    // is left intact (never reduced to absorb rounding).
+    console.log(`  rounding absorbed as DISCOUNT round_adjustment = ${roundAdj.amount}`);
+    assert(roundAdj.amount > 0 && roundAdj.amount <= 100,
+      `round_adjustment discount is a few cents (${roundAdj.amount})`);
+    const taxTotal = taxLines.reduce((s, t) => s + (t.amount || 0), 0);
+    assert(taxTotal > 0, `tax line preserved alongside round_adjustment (tax total ${taxTotal})`);
+  } else {
+    // Under-count branch (or exact): any drift went into the tax line.
+    console.log('  no round_adjustment discount (drift, if any, absorbed in tax or exact)');
+  }
 
   const wcOrders = await findOrdersByConektaOrderId(conektaOrderId); // navigates to admin
   assert(wcOrders.length >= 1, `found a WooCommerce order for ${conektaOrderId}`);
