@@ -306,7 +306,6 @@ class WC_Conekta_REST_API {
                         'state'       => 'Pendiente',
                         'country'     => 'MX',
                     ],
-                    'metadata' => ['soft_validations' => true],
                 ];
             }
 
@@ -510,34 +509,27 @@ class WC_Conekta_REST_API {
                 $name          = trim("$first $last");
                 $contact_phone = sanitize_text_field($addr['phone']);
 
-                // soft_validations tells Conekta to WARN on malformed address
-                // fields instead of hard-rejecting the whole order with a 422.
-                // Without it, a shopper typing e.g. a city Conekta's strict
-                // format check dislikes ("Invalid format for shipping_contact
-                // ... city") breaks the entire card checkout — both the update
-                // and the recreate fail. The cash/BNPL/bank block gateways
-                // already set this via ckpg_build_shipping_contact /
-                // ckpg_build_customer_info; the card (REST) path must match.
                 $customer_info = [
-                    'email'    => $email,
-                    'name'     => $name ?: self::DEFAULT_CUSTOMER_NAME,
-                    'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
-                    'metadata' => ['soft_validations' => true],
+                    'email' => $email,
+                    'name'  => $name ?: self::DEFAULT_CUSTOMER_NAME,
+                    'phone' => $contact_phone ?: self::DEFAULT_PHONE,
                 ];
 
                 // Conekta requires shipping_contact to charge an order.
+                // street1/city are normalized so Conekta's strict address
+                // validation (street1.too_short, city.invalid) can't 422 the
+                // whole checkout — soft_validations does NOT relax those.
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
                         'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
                         'receiver' => $name ?: self::DEFAULT_CUSTOMER_NAME,
                         'address'  => [
-                            'street1'     => $address1,
-                            'city'        => $city,
+                            'street1'     => ckpg_pad_street1($address1),
+                            'city'        => ckpg_default_if_blank($city),
                             'state'       => $state,
                             'country'     => $country ?: 'MX',
                             'postal_code' => $postcode,
                         ],
-                        'metadata' => ['soft_validations' => true],
                     ];
                 }
             }

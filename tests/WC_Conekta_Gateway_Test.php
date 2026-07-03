@@ -1888,6 +1888,43 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // ckpg_pad_street1 — guards Conekta's street1.too_short (422)
+    // -------------------------------------------------------
+
+    public function test_pad_street1_left_pads_short_values_to_five()
+    {
+        // Conekta rejects street1 shorter than its minimum; left-pad with '-'.
+        $this->assertSame('-----', ckpg_pad_street1(''));       // empty -> all dashes
+        $this->assertSame('----5', ckpg_pad_street1('5'));      // single char
+        $this->assertSame('--abc', ckpg_pad_street1('abc'));    // 3 chars
+        $this->assertSame('-----', ckpg_pad_street1('   '));    // whitespace-only trims to empty
+    }
+
+    public function test_pad_street1_leaves_long_enough_values_untouched()
+    {
+        $this->assertSame('Calle', ckpg_pad_street1('Calle'));                  // exactly 5
+        $this->assertSame('Av Reforma 100', ckpg_pad_street1('Av Reforma 100')); // longer
+        $this->assertSame('Calle 5', ckpg_pad_street1('  Calle 5  '));          // trimmed, still >= 5
+    }
+
+    // -------------------------------------------------------
+    // ckpg_default_if_blank — guards Conekta's city.invalid (422).
+    // city (unlike street1) rejects dashes, so blanks fall back to "default".
+    // -------------------------------------------------------
+
+    public function test_default_if_blank_falls_back_on_blank()
+    {
+        $this->assertSame('default', ckpg_default_if_blank(''));      // empty
+        $this->assertSame('default', ckpg_default_if_blank('   '));   // whitespace-only
+    }
+
+    public function test_default_if_blank_keeps_real_values_trimmed()
+    {
+        $this->assertSame('CDMX', ckpg_default_if_blank('CDMX'));
+        $this->assertSame('Ciudad de Mexico', ckpg_default_if_blank('  Ciudad de Mexico  '));
+    }
+
+    // -------------------------------------------------------
     // ckpg_build_customer_info
     // -------------------------------------------------------
 
@@ -2774,33 +2811,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         $contact = $update->getShippingContact();
         $this->assertNotNull($contact);
         $this->assertSame('3143159054', $contact->getPhone());
-    }
-
-    public function test_shipping_contact_carries_soft_validations_metadata_via_sdk()
-    {
-        // Regression: a shopper's city that fails Conekta's STRICT address
-        // format check ("Invalid format for shipping_contact ... city") used to
-        // hard-fail the whole card checkout with a 422 on both the update and
-        // the recreate. build_snapshot now stamps metadata.soft_validations on
-        // the shipping_contact (matching the cash/BNPL/bank block gateways) so
-        // Conekta warns instead of rejecting. Pin the SDK contract: the flag
-        // must survive round-tripping through CustomerShippingContactsRequest,
-        // otherwise the fix silently stops reaching Conekta on an SDK bump.
-        $contact = new \Conekta\Model\CustomerShippingContactsRequest([
-            'phone'    => '3143159054',
-            'receiver' => 'Test User',
-            'address'  => [
-                'street1'     => 'Calle Test 123',
-                'city'        => 'Tlahuac', // the kind of value strict mode dislikes
-                'state'       => 'CDMX',
-                'postal_code' => '11010',
-                'country'     => 'MX',
-            ],
-            'metadata' => ['soft_validations' => true],
-        ]);
-        $metadata = $contact->getMetadata();
-        $this->assertIsArray($metadata);
-        $this->assertTrue($metadata['soft_validations']);
     }
 
     // -------------------------------------------------------

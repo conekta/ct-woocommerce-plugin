@@ -262,6 +262,31 @@ function ckpg_add_price_level_discount(array &$discount_lines, int $amount): voi
     $discount_lines[] = ['code' => 'dynamic_pricing', 'amount' => $amount, 'type' => 'campaign'];
 }
 
+/**
+ * Conekta rejects a shipping_contact whose address.street1 is too short
+ * (shipping_contact.address.street1.too_short / "contiene menos de 1
+ * caracteres") and hard-fails the checkout with a 422. street1 accepts dashes
+ * (e.g. "----a" is valid), so left-pad it with '-' up to a minimum of 5
+ * characters; a street already >= 5 chars is returned unchanged.
+ */
+function ckpg_pad_street1(string $street): string
+{
+    return str_pad(trim($street), 5, '-', STR_PAD_LEFT);
+}
+
+/**
+ * Conekta rejects a blank city with shipping_contact.address.city.invalid
+ * ("Formato inválido para city") and, unlike street1, its format check does
+ * NOT accept dashes — nor does metadata.soft_validations relax it. Fall back
+ * to a plain "default" token, which clears the format check. A non-blank value
+ * is returned trimmed and unchanged.
+ */
+function ckpg_default_if_blank(string $value): string
+{
+    $value = trim($value);
+    return $value !== '' ? $value : 'default';
+}
+
 function ckpg_build_shipping_contact($data): array
 {
     $shipping_contact = array();
@@ -368,9 +393,9 @@ function ckpg_get_request_data($order)
                 'phone'    => $order->get_billing_phone(),
                 'receiver' => sprintf('%s %s', $name, $last),
                 'address' => array(
-                    'street1'     => $address1,
+                    'street1'     => ckpg_pad_street1($address1),
                     'street2'     => $address2,
-                    'city'        => $city,
+                    'city'        => ckpg_default_if_blank($city),
                     'state'       => $state,
                     'country'     => $country,
                     'postal_code' => $postal
@@ -396,9 +421,9 @@ function ckpg_get_request_data($order)
                 'phone'    => $order->get_billing_phone(),
                 'receiver' => sprintf('%s %s', $name, $last),
                 'address' => array(
-                    'street1'     => $address1,
+                    'street1'     => ckpg_pad_street1($address1),
                     'street2'     => $address2,
-                    'city'        => $city,
+                    'city'        => ckpg_default_if_blank($city),
                     'state'       => $state,
                     'country'     => $country,
                     'postal_code' => $postal
