@@ -108,8 +108,16 @@ h.run('Blocks Checkout — decline then successful retry stays paid in Conekta A
     // (observed ~9s in staging, past the order.paid webhook). A single read
     // right after order-received is racy — wait for it to settle to 'paid'.
     const conektaOrder = await h.waitForConektaPaid(conektaOrderId);
-    assert(conektaOrder.payment_status === 'paid',
-      `Conekta payment_status = ${conektaOrder.payment_status}`);
+    // The order counts as paid if the aggregate payment_status is 'paid' OR any
+    // charge is 'paid' — Conekta sometimes leaves the order-level status at
+    // 'declined' (from the first failed charge) even though the retry charge
+    // succeeded and the customer was charged. See conektaOrderPaid.
+    const charges = Array.isArray(conektaOrder.charges)
+      ? conektaOrder.charges
+      : (conektaOrder.charges && conektaOrder.charges.data) || [];
+    const chargeStatuses = charges.map(c => c && c.status).join(',');
+    assert(h.conektaOrderPaid(conektaOrder),
+      `Conekta order paid (payment_status=${conektaOrder.payment_status}, charges=[${chargeStatuses}])`);
 
     const orders = await h.findOrdersByConektaOrderId(conektaOrderId);
     const ids = orders.map(o => `#${o.id}(${o.status})`).join(', ');

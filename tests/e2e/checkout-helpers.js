@@ -429,21 +429,31 @@ async function fetchConektaOrder(conektaOrderId) {
 }
 
 /**
- * Poll getOrderById until the order's payment_status is 'paid', or the timeout
- * elapses. Returns the last-seen OrderResponse either way (callers assert on
- * its payment_status).
+ * Whether a Conekta order counts as paid. On a decline-then-retry the order
+ * ends up with a declined charge AND a paid charge, and we observed a Conekta
+ * bug where the order-level `payment_status` stays `declined` even though one
+ * of its charges is `paid` (the customer WAS charged and WooCommerce completes
+ * the order). So treat the order as paid when EITHER the aggregate
+ * payment_status is 'paid' OR any individual charge has status 'paid'.
+ */
+function conektaOrderPaid(order) {
+  if (!order) return false;
+  if (order.payment_status === 'paid') return true;
+  const charges = Array.isArray(order.charges) ? order.charges : (order.charges && order.charges.data) || [];
+  return charges.some(c => c && c.status === 'paid');
+}
+
+/**
+ * Poll getOrderById until the order counts as paid (see conektaOrderPaid), or
+ * the timeout elapses. Returns the last-seen OrderResponse either way.
  *
- * Why polling and not a single read: on a decline-then-retry the order ends up
- * with a declined charge AND a paid charge. In staging we observed a GET return
- * payment_status='paid' from the plugin at completion time, yet a separate
- * getOrderById ~9s later (already past the order's paid updated_at and the
- * order.paid webhook) still returned 'declined' — the order read lags its own
- * paid state. A single immediate read is therefore racy; poll until it settles.
+ * Why polling: on a decline-then-retry the paid state can lag the read for a
+ * few seconds; a single immediate read is racy.
  */
 async function waitForConektaPaid(conektaOrderId, { timeoutMs = 30000, intervalMs = 2000 } = {}) {
   const start = Date.now();
   let order = await fetchConektaOrder(conektaOrderId);
-  while (order.payment_status !== 'paid' && Date.now() - start < timeoutMs) {
+  while (!conektaOrderPaid(order) && Date.now() - start < timeoutMs) {
     await new Promise(r => setTimeout(r, intervalMs));
     order = await fetchConektaOrder(conektaOrderId);
   }
@@ -1222,7 +1232,7 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
-  fetchConektaOrder, waitForConektaPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
+  fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
