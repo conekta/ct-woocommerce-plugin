@@ -100,7 +100,11 @@ h.run('Blocks Checkout — decline then successful retry stays paid in Conekta A
     // ---------------------------------------------------------------
     console.log('\n--- (3) assert paid in Conekta AND in WooCommerce ---');
     console.log(`  Conekta order id: ${conektaOrderId}  (https://panel.conekta.com/transactions/payments/${conektaOrderId})`);
-    const conektaOrder = await h.fetchConektaOrder(conektaOrderId);
+    // Poll: after a decline-then-retry the order carries a declined + a paid
+    // charge, and getOrderById can lag its own paid state by several seconds
+    // (observed ~9s in staging, past the order.paid webhook). A single read
+    // right after order-received is racy — wait for it to settle to 'paid'.
+    const conektaOrder = await h.waitForConektaPaid(conektaOrderId);
     assert(conektaOrder.payment_status === 'paid',
       `Conekta payment_status = ${conektaOrder.payment_status}`);
 

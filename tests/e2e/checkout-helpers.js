@@ -429,6 +429,28 @@ async function fetchConektaOrder(conektaOrderId) {
 }
 
 /**
+ * Poll getOrderById until the order's payment_status is 'paid', or the timeout
+ * elapses. Returns the last-seen OrderResponse either way (callers assert on
+ * its payment_status).
+ *
+ * Why polling and not a single read: on a decline-then-retry the order ends up
+ * with a declined charge AND a paid charge. In staging we observed a GET return
+ * payment_status='paid' from the plugin at completion time, yet a separate
+ * getOrderById ~9s later (already past the order's paid updated_at and the
+ * order.paid webhook) still returned 'declined' — the order read lags its own
+ * paid state. A single immediate read is therefore racy; poll until it settles.
+ */
+async function waitForConektaPaid(conektaOrderId, { timeoutMs = 30000, intervalMs = 2000 } = {}) {
+  const start = Date.now();
+  let order = await fetchConektaOrder(conektaOrderId);
+  while (order.payment_status !== 'paid' && Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    order = await fetchConektaOrder(conektaOrderId);
+  }
+  return order;
+}
+
+/**
  * Regression check for tax-inclusive pricing (BE-924): the IVA must be reported
  * to Conekta as a tax_line, NEVER as a `dynamic_pricing` discount. Conekta v2
  * returns list fields as { object:'list', data:[...] }, so we normalize both
@@ -1200,7 +1222,7 @@ module.exports = {
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
-  fetchConektaOrder, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
+  fetchConektaOrder, waitForConektaPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
