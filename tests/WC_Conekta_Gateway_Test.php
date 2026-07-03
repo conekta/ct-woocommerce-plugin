@@ -2448,6 +2448,34 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     /**
+     * Regression for the 422 "Invalid format for shipping_contact ... city":
+     * the chosen block (shipping here — it has the street) is missing the city,
+     * so without a fallback we'd send an EMPTY city and Conekta rejects the
+     * whole order. The city must borrow the other block's value instead of
+     * going out blank.
+     */
+    public function test_resolve_address_source_city_falls_back_when_chosen_block_empty()
+    {
+        $customer = $this->makeAddressCustomer(
+            // shipping wins (has the street) but the city slot is empty
+            [
+                'first_name' => 'Ana', 'last_name' => 'Lopez',
+                'address_1' => 'Av Reforma 100', 'city' => '',
+                'state' => 'DF', 'country' => 'MX', 'postcode' => '06600',
+                'phone' => '5512345678',
+            ],
+            // billing carries the real city
+            ['city' => 'Ciudad de Mexico']
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('Av Reforma 100', $addr['address_1']);
+        $this->assertNotSame('', $addr['city'], 'city must never be sent empty');
+        $this->assertEquals('Ciudad de Mexico', $addr['city']);
+    }
+
+    /**
      * Regression for the "customer object shows Cliente / 0000000000" bug:
      * the shopper filled ONLY the shipping block (billing empty) — the common
      * WC Blocks case. resolve_address_source feeds BOTH customer_info and
@@ -2746,6 +2774,33 @@ class WC_Conekta_Gateway_Test extends TestCase
         $contact = $update->getShippingContact();
         $this->assertNotNull($contact);
         $this->assertSame('3143159054', $contact->getPhone());
+    }
+
+    public function test_shipping_contact_carries_soft_validations_metadata_via_sdk()
+    {
+        // Regression: a shopper's city that fails Conekta's STRICT address
+        // format check ("Invalid format for shipping_contact ... city") used to
+        // hard-fail the whole card checkout with a 422 on both the update and
+        // the recreate. build_snapshot now stamps metadata.soft_validations on
+        // the shipping_contact (matching the cash/BNPL/bank block gateways) so
+        // Conekta warns instead of rejecting. Pin the SDK contract: the flag
+        // must survive round-tripping through CustomerShippingContactsRequest,
+        // otherwise the fix silently stops reaching Conekta on an SDK bump.
+        $contact = new \Conekta\Model\CustomerShippingContactsRequest([
+            'phone'    => '3143159054',
+            'receiver' => 'Test User',
+            'address'  => [
+                'street1'     => 'Calle Test 123',
+                'city'        => 'Tlahuac', // the kind of value strict mode dislikes
+                'state'       => 'CDMX',
+                'postal_code' => '11010',
+                'country'     => 'MX',
+            ],
+            'metadata' => ['soft_validations' => true],
+        ]);
+        $metadata = $contact->getMetadata();
+        $this->assertIsArray($metadata);
+        $this->assertTrue($metadata['soft_validations']);
     }
 
     // -------------------------------------------------------

@@ -1,3 +1,8 @@
+6.0.7, 2026-07-03
+-------------------------------------
+- Fix: the card checkout no longer 422s with "Invalid format for shipping_contact attribute address attribute city". Two causes, both closed: (1) an EMPTY city was sent when the chosen address block had a street but no city (resolve_address_source only fell back name/phone) — city now falls back to the other block; (2) an odd-but-usable city hard-failed strict validation — build_snapshot (card path, classic + Blocks) now sends shipping_contact and customer_info with metadata.soft_validations => true so Conekta warns instead of rejecting, matching the cash, bank transfer, BNPL and pay by bank gateways. Previously both the update and the recreate failed, stranding the shopper.
+- Tests: city-fallback coverage in resolve_address_source plus an SDK contract pin for metadata.soft_validations. 181 unit tests pass.
+
 6.0.6, 2026-06-30
 -------------------------------------
 - Change: line items are sent to Conekta at the effective unit price the customer pays. The plugin no longer reports the regular price plus a synthesized dynamic_pricing discount for sales / dynamic-pricing plugins (that confused merchants and, on tax-inclusive stores, made the IVA appear as a phantom dynamic_pricing discount). Tax is always itemized in tax_lines; real coupons and negative fees stay as discount_lines. Covers card (classic + Blocks), cash, bank transfer, BNPL and pay by bank.

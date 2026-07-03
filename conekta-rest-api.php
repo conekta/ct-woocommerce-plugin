@@ -306,6 +306,7 @@ class WC_Conekta_REST_API {
                         'state'       => 'Pendiente',
                         'country'     => 'MX',
                     ],
+                    'metadata' => ['soft_validations' => true],
                 ];
             }
 
@@ -509,10 +510,19 @@ class WC_Conekta_REST_API {
                 $name          = trim("$first $last");
                 $contact_phone = sanitize_text_field($addr['phone']);
 
+                // soft_validations tells Conekta to WARN on malformed address
+                // fields instead of hard-rejecting the whole order with a 422.
+                // Without it, a shopper typing e.g. a city Conekta's strict
+                // format check dislikes ("Invalid format for shipping_contact
+                // ... city") breaks the entire card checkout — both the update
+                // and the recreate fail. The cash/BNPL/bank block gateways
+                // already set this via ckpg_build_shipping_contact /
+                // ckpg_build_customer_info; the card (REST) path must match.
                 $customer_info = [
-                    'email' => $email,
-                    'name'  => $name ?: self::DEFAULT_CUSTOMER_NAME,
-                    'phone' => $contact_phone ?: self::DEFAULT_PHONE,
+                    'email'    => $email,
+                    'name'     => $name ?: self::DEFAULT_CUSTOMER_NAME,
+                    'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
+                    'metadata' => ['soft_validations' => true],
                 ];
 
                 // Conekta requires shipping_contact to charge an order.
@@ -527,6 +537,7 @@ class WC_Conekta_REST_API {
                             'country'     => $country ?: 'MX',
                             'postal_code' => $postcode,
                         ],
+                        'metadata' => ['soft_validations' => true],
                     ];
                 }
             }
@@ -655,7 +666,15 @@ class WC_Conekta_REST_API {
             'first_name' => $get($prefix, 'first_name') ?: $get('billing', 'first_name'),
             'last_name'  => $get($prefix, 'last_name')  ?: $get('billing', 'last_name'),
             'address_1'  => $get($prefix, 'address_1'),
-            'city'       => $get($prefix, 'city'),
+            // City falls back to the other block when the chosen block left it
+            // empty. Unlike state/country — which themes pre-fill with stale
+            // store defaults, so a per-field fallback there would pair a real
+            // street with a WRONG state — city is never auto-prefilled: an empty
+            // city means the block genuinely lacks it, and sending '' makes
+            // Conekta reject the WHOLE order with "Invalid format for
+            // shipping_contact ... city". Borrowing the other block's city is
+            // strictly better than shipping an empty string.
+            'city'       => $get($prefix, 'city') ?: $get($other, 'city'),
             'state'      => $get($prefix, 'state'),
             'country'    => $get($prefix, 'country'),
             'postcode'   => $get($prefix, 'postcode'),
