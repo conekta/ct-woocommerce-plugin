@@ -92,7 +92,7 @@ h.run('Blocks Checkout — decline then successful retry stays paid in Conekta A
     console.log('\n--- (2) retry: pay with 4242424242424242 (approved) ---');
     // Give Conekta a beat to settle the declined charge before the retry, so
     // the second attempt charges cleanly instead of racing the first.
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(15000);
     await h.fillIntegrationCard(h.SUCCESS_CARD);
     await h.clickPlaceOrder();
     await h.waitForOrderReceivedWith3DS();
