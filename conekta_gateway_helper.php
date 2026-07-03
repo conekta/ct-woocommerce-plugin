@@ -58,6 +58,27 @@ function ckpg_check_balance($order, $total): array
 
 
 
+/**
+ * Report whether the current checkout submission came through WooCommerce
+ * Blocks or the classic checkout, for the Conekta order metadata.
+ *
+ * Blocks submits via the Store API (a REST request to /wc/store/v1/checkout);
+ * classic posts to wc-ajax=checkout (admin-ajax, not REST). The card gateway
+ * gets this from an explicit frontend param on the checkout-request, but the
+ * cash, bank transfer, BNPL and pay-by-bank gateways run a single
+ * process_payment() for both flows, so we detect it server-side here.
+ */
+function ckpg_detect_checkout_type(): string
+{
+    if (function_exists('WC') && method_exists(WC(), 'is_store_api_request') && WC()->is_store_api_request()) {
+        return 'blocks';
+    }
+    if (defined('REST_REQUEST') && REST_REQUEST) {
+        return 'blocks';
+    }
+    return 'classic';
+}
+
 function ckpg_build_order_metadata($data): array
 {
     $metadata = array(
@@ -66,6 +87,10 @@ function ckpg_build_order_metadata($data): array
         'plugin' => 'woocommerce',
         'woocommerce_version' => $data['woocommerce_version'],
         'payment_method' => $data['payment_method'],
+        // Mirror the card gateway's metadata so every payment method records
+        // whether the order came from Blocks or classic. Callers may override
+        // by passing woocommerce_checkout_type in $data; otherwise detect it.
+        'woocommerce_checkout_type' => $data['woocommerce_checkout_type'] ?? ckpg_detect_checkout_type(),
     );
 
     if (!empty($data['customer_message'])) {

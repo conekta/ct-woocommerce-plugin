@@ -1531,6 +1531,44 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertArrayNotHasKey('customer_message', $result);
     }
 
+    public function test_build_order_metadata_includes_checkout_type()
+    {
+        // Every payment method now records blocks-vs-classic. Outside a REST
+        // (Store API) request the detector reports 'classic'.
+        $data = [
+            'order_id'               => 123,
+            'plugin_conekta_version' => '6.0.7',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Cash_Gateway',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertArrayHasKey('woocommerce_checkout_type', $result);
+        $this->assertEquals('classic', $result['woocommerce_checkout_type']);
+    }
+
+    public function test_build_order_metadata_checkout_type_can_be_overridden()
+    {
+        $data = [
+            'order_id'                  => 123,
+            'plugin_conekta_version'    => '6.0.7',
+            'woocommerce_version'       => '9.0.0',
+            'payment_method'            => 'WC_Conekta_Cash_Gateway',
+            'woocommerce_checkout_type' => 'blocks',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertEquals('blocks', $result['woocommerce_checkout_type']);
+    }
+
+    public function test_detect_checkout_type_defaults_to_classic_without_rest()
+    {
+        // No REST_REQUEST in the PHPUnit CLI context -> classic.
+        $this->assertSame('classic', ckpg_detect_checkout_type());
+    }
+
     public function test_build_order_metadata_with_customer_message()
     {
         $data = [
