@@ -66,6 +66,17 @@ const TEST_CARD = {
   expYear: '30',
   cvc: '123',
 };
+// Decline-then-retry cards. Used by the "paid in Conekta but not in Woo"
+// regression spec: a first charge is declined, then a second charge on the
+// SAME mounted Conekta order succeeds — the exact shape where a store can end
+// up with a paid Conekta order and an unpaid WooCommerce order.
+//   4000000000000127 -> insufficient funds; Conekta declines it and the SDK
+//                       fires onChargeFailed (see loadConektaScript.js).
+//   4242424242424242 -> generic approved card.
+// Both reuse TEST_CARD's random holder name / expiry / cvc so the only thing
+// that varies is the PAN.
+const DECLINE_CARD = { ...TEST_CARD, number: '4000000000000127' };
+const SUCCESS_CARD = { ...TEST_CARD, number: '4242424242424242' };
 const BILLING = {
   first_name: FIRST_NAME,
   last_name: LAST_NAME,
@@ -1092,6 +1103,42 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
 }
 
 /**
+ * Wait for a FAILED payment attempt to surface, without ever reaching
+ * order-received. On a decline the SDK fires onChargeFailed -> the OrderEmitter
+ * rejects the orderPromise -> onPaymentSetup returns an ERROR response, which WC
+ * renders as a store notice (blocks) / woocommerce-error (classic). We poll for
+ * that notice while asserting the page never navigated to order-received.
+ *
+ * Returns { errored, message }:
+ *   errored=true  -> an error notice appeared (the expected decline outcome).
+ *   errored=false -> either we reached order-received (charge unexpectedly
+ *                    succeeded) or timed out; `message` says which.
+ */
+async function waitForPaymentError(timeoutMs = 60000) {
+  const errorSelector = [
+    '.wc-block-components-notice-banner.is-error',
+    '.wc-block-components-validation-error',
+    '.wc-block-store-notice.is-error',
+    '.woocommerce-error',
+    'li.woocommerce-error',
+  ].join(', ');
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (page.url().includes('order-received')) {
+      return { errored: false, message: 'reached order-received (charge unexpectedly succeeded)' };
+    }
+    const notice = page.locator(errorSelector).first();
+    if (await notice.isVisible({ timeout: 200 }).catch(() => false)) {
+      const message = (await notice.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      if (message) return { errored: true, message };
+    }
+    await page.waitForTimeout(500);
+  }
+  return { errored: false, message: 'timed out waiting for a payment error notice' };
+}
+
+/**
  * Dispatch a synthetic "payment finalized" signal into the page so the
  * frontend writes conekta_order_id and submits to WooCommerce, without
  * depending on the real Integration iframe.
@@ -1149,7 +1196,7 @@ async function run(label, optionsOrFn, maybeFn) {
 
 module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
-  TEST_CARD, BILLING,
+  TEST_CARD, DECLINE_CARD, SUCCESS_CARD, BILLING,
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
@@ -1158,4 +1205,5 @@ module.exports = {
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
+  waitForPaymentError,
 };
