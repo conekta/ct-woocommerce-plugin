@@ -275,6 +275,13 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 'meta_key'   => 'conekta-order-id',
                 'meta_value' => $conekta_id,
                 'limit'      => 1,
+                // Include 'checkout-draft': in Blocks the paid charge can land
+                // on an order still in the draft status (process_payment_api
+                // never ran — tab closed, network drop). wc_get_orders() omits
+                // checkout-draft by default, so without this the webhook can't
+                // recover it and returns "Order not found" — paid in Conekta,
+                // never completed in WooCommerce.
+                'status'     => ['pending', 'processing', 'on-hold', 'completed', 'cancelled', 'refunded', 'failed', 'checkout-draft'],
             ]);
             if (!empty($orders)) {
                 return $orders[0];

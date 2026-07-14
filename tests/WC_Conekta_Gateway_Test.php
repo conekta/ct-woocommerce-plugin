@@ -287,6 +287,40 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     /**
+     * BUG REPRO (paid in Conekta, not in Woo): a Blocks card order whose
+     * Conekta order carries NO reference_id (created before the WC draft
+     * existed) and whose process_payment_api never ran leaves the WC order
+     * sitting in 'checkout-draft' with the conekta-order-id meta as the ONLY
+     * link. The order.paid webhook must still recover it — but the fallback
+     * query in find_order_for_webhook() omits a status, so WooCommerce's
+     * default status set (which excludes 'checkout-draft') hides the order and
+     * the webhook returns "Order not found".
+     */
+    public function test_find_order_for_webhook_recovers_checkout_draft_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $draft = new WC_Order(5000);
+        $draft->set_status('checkout-draft');
+        $draft->update_meta_data('conekta-order-id', 'ord_draftpaid');
+        $test_order_registry[5000] = $draft;
+
+        // order.paid payload as seen in production: no reference_id in metadata.
+        $conekta_order = [
+            'id'       => 'ord_draftpaid',
+            'metadata' => [],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertNotFalse(
+            $found,
+            'Webhook must recover a still-draft order via conekta-order-id meta (else paid in Conekta, not in Woo)'
+        );
+        $this->assertEquals(5000, $found->get_id());
+    }
+
+    /**
      * When reference_id arrives as integer (observed in production),
      * lookup should still work.
      */
@@ -322,6 +356,103 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertSame(4567, WC_Conekta_REST_API::get_blocks_draft_order_id());
 
         WC()->session->__unset('store_api_draft_order');
+    }
+
+    // -------------------------------------------------------
+    // link_draft_order_to_conekta — stamps the reverse conekta-order-id
+    // meta on the Blocks draft order so the order.paid webhook can recover
+    // a paid-but-uncompleted order (paid in Conekta, not in Woo).
+    // -------------------------------------------------------
+
+    public function test_link_draft_order_stamps_conekta_meta_on_draft()
+    {
+        global $test_order_registry;
+        $draft = new WC_Order(6100);
+        $draft->set_status('checkout-draft');
+        $test_order_registry[6100] = $draft;
+        WC()->session->set('store_api_draft_order', 6100);
+
+        $linked = WC_Conekta_REST_API::link_draft_order_to_conekta('ord_link1');
+
+        $this->assertSame(6100, $linked);
+        $this->assertSame('ord_link1', $draft->get_meta('conekta-order-id'),
+            'draft order must carry the conekta-order-id meta so the webhook can recover it');
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_link_draft_order_recoverable_by_webhook_end_to_end()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+        $draft = new WC_Order(6101);
+        $draft->set_status('checkout-draft');
+        $test_order_registry[6101] = $draft;
+        WC()->session->set('store_api_draft_order', 6101);
+
+        // Link happens at checkout-request time (pre-payment)...
+        WC_Conekta_REST_API::link_draft_order_to_conekta('ord_e2e_link');
+
+        // ...so the order.paid webhook (no reference_id in metadata) recovers it.
+        $found = WC_Conekta_Plugin::find_order_for_webhook([
+            'id'       => 'ord_e2e_link',
+            'metadata' => [],
+        ]);
+        $this->assertNotFalse($found);
+        $this->assertSame(6101, $found->get_id());
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_link_draft_order_returns_null_without_draft()
+    {
+        WC()->session->__unset('store_api_draft_order');
+        $this->assertNull(WC_Conekta_REST_API::link_draft_order_to_conekta('ord_link2'));
+    }
+
+    // -------------------------------------------------------
+    // build_conekta_metadata / resolve_checkout_type — shared by the
+    // create path and the reference_id backfill on the update path.
+    // -------------------------------------------------------
+
+    public function test_build_conekta_metadata_includes_reference_id_when_present()
+    {
+        $gateway = new stdClass();
+        $gateway->version = '6.0.7';
+
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', 6100);
+
+        $this->assertSame('woocommerce', $md['plugin']);
+        $this->assertSame('6.0.7', $md['plugin_conekta_version']);
+        $this->assertSame('WC_Conekta_Gateway', $md['payment_method']);
+        $this->assertSame('blocks', $md['woocommerce_checkout_type']);
+        // reference_id is the webhook's primary Conekta->Woo link.
+        $this->assertSame('6100', $md['reference_id']);
+    }
+
+    public function test_build_conekta_metadata_omits_reference_id_when_absent()
+    {
+        $gateway = new stdClass();
+        $gateway->version = '6.0.7';
+
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'classic', null);
+
+        $this->assertArrayNotHasKey('reference_id', $md);
+        $this->assertSame('classic', $md['woocommerce_checkout_type']);
+    }
+
+    public function test_resolve_checkout_type_normalizes_value()
+    {
+        $mk = fn($v) => new class($v) {
+            private $v;
+            public function __construct($v) { $this->v = $v; }
+            public function get_param($k) { return $this->v; }
+        };
+
+        $this->assertSame('blocks',  WC_Conekta_REST_API::resolve_checkout_type($mk('blocks')));
+        $this->assertSame('classic', WC_Conekta_REST_API::resolve_checkout_type($mk('classic')));
+        $this->assertSame('unknown', WC_Conekta_REST_API::resolve_checkout_type($mk('weird')));
+        $this->assertSame('unknown', WC_Conekta_REST_API::resolve_checkout_type(null));
     }
 
     public function test_get_blocks_draft_order_id_null_when_session_key_absent()

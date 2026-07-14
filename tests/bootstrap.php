@@ -73,12 +73,26 @@ if (!function_exists('wc_get_orders')) {
         $limit = $args['limit'] ?? -1;
         $exclude = $args['exclude'] ?? [];
 
+        // Model WooCommerce's status filtering. With no `status` arg, WC_Order_Query
+        // defaults to array_keys(wc_get_order_statuses()) — the standard order
+        // statuses, which do NOT include 'checkout-draft'. So a query without an
+        // explicit status will NOT return checkout-draft orders (this is exactly
+        // why the order.paid webhook fails to recover a still-draft order). A
+        // 'any' status disables the filter.
+        $default_statuses = ['pending', 'processing', 'on-hold', 'completed', 'cancelled', 'refunded', 'failed'];
+        $status_arg = $args['status'] ?? $default_statuses;
+        $allow_any  = ($status_arg === 'any') || (is_array($status_arg) && in_array('any', $status_arg, true));
+        $allowed    = array_map(fn($s) => preg_replace('/^wc-/', '', (string) $s), (array) $status_arg);
+
         if (!is_iterable($test_order_registry)) {
             return [];
         }
 
         foreach ($test_order_registry as $order) {
             if (in_array($order->get_id(), $exclude)) {
+                continue;
+            }
+            if (!$allow_any && !in_array($order->get_status(), $allowed, true)) {
                 continue;
             }
             if ($meta_key && $meta_value && $order->get_meta($meta_key) === $meta_value) {
