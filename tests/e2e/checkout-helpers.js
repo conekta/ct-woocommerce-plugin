@@ -120,20 +120,32 @@ async function wcApi(method, endpoint, body) {
   // namespaces briefly unregistered while another run updates plugins on the
   // store) or rest_cookie_invalid_nonce (stale nonce right after login). Both
   // are rejected BEFORE the route handler runs, so retrying is side-effect-free
-  // even for POST/PUT/DELETE.
-  const TRANSIENT_CODES = ['rest_no_route', 'rest_cookie_invalid_nonce'];
+  // even for POST/PUT/DELETE. During the same outage the rest-nonce endpoint
+  // can answer an HTML error page instead of a nonce (newlines are an invalid
+  // header value, so fetch itself throws "Invalid value") — everything inside
+  // the evaluate is caught and surfaced as a retryable code too. Outages have
+  // been observed to outlive a ~6s window, so back off up to ~30s total.
+  const TRANSIENT_CODES = ['rest_no_route', 'rest_cookie_invalid_nonce', 'e2e_bad_nonce_response', 'e2e_fetch_failed'];
+  const ATTEMPTS = 5;
   let result;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     result = await page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
-      const nonce = await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text();
-      const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
-      if (body) opts.body = JSON.stringify(body);
-      const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
-      return res.json();
+      try {
+        const nonce = (await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text()).trim();
+        if (!/^[A-Za-z0-9]+$/.test(nonce)) {
+          return { code: 'e2e_bad_nonce_response', message: nonce.slice(0, 200) };
+        }
+        const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
+        return await res.json();
+      } catch (e) {
+        return { code: 'e2e_fetch_failed', message: String(e).slice(0, 200) };
+      }
     }, { baseUrl: STORE_URL, method, endpoint, body });
     if (!TRANSIENT_CODES.includes(result?.code)) break;
-    console.log(`  [wcApi] ${method} ${endpoint} attempt ${attempt}/3 failed with ${result.code}, retrying...`);
-    await new Promise(r => setTimeout(r, 2000 * attempt));
+    console.log(`  [wcApi] ${method} ${endpoint} attempt ${attempt}/${ATTEMPTS} failed with ${result.code}, retrying...`);
+    await new Promise(r => setTimeout(r, 2500 * attempt));
   }
   return result;
 }
