@@ -192,6 +192,20 @@ async function setCheckoutType(type) {
 
 async function setup(options = {}) {
   const { checkoutType, taxInclusive, roundingPrice, roundingQty } = options;
+
+  // Health gate: the shared staging store can be down entirely (frontend 500,
+  // WooCommerce fataled/paused so wc/v3 never registers — observed 2026-07-14).
+  // In that state EVERY wc/v3 call rest_no_routes and no amount of per-call
+  // retrying helps, so fail the spec up front with an actionable message.
+  const health = await fetch(`${STORE_URL}/wp-json/`).then(r => r.json()).catch(() => null);
+  if (!health?.namespaces?.includes('wc/v3')) {
+    throw new Error(
+      `staging store unhealthy: wc/v3 REST namespace not registered ` +
+      `(namespaces: ${JSON.stringify(health?.namespaces ?? 'wp-json unreachable')}). ` +
+      `WooCommerce is not loading on ${STORE_URL} — fix the store before re-running e2e.`
+    );
+  }
+
   browser = await chromium.launch({ headless: config.headless });
   const context = await browser.newContext({ recordVideo: config.video });
   page = await context.newPage();
