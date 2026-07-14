@@ -91,9 +91,10 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     
     public static function check_if_payment_payment_method_webhook(string $payment_method, array $event){
         $conekta_order = $event['data']['object'];
-        if ($conekta_order["metadata"]["payment_method"] !==  $payment_method){
+        $order_payment_method = $conekta_order["metadata"]["payment_method"] ?? null;
+        if ($order_payment_method !== $payment_method){
             header('Content-Type: application/json');
-            echo json_encode(['message' => 'OK', 'payment_method'=> $conekta_order["metadata"]["payment_method"]]);
+            echo json_encode(['message' => 'OK', 'payment_method'=> $order_payment_method]);
             exit;
         }
     }
