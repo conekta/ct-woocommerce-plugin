@@ -455,6 +455,88 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertSame('unknown', WC_Conekta_REST_API::resolve_checkout_type(null));
     }
 
+    // -------------------------------------------------------
+    // send_webhook_diagnostic — read-only GET beacon that stamps a WC-side
+    // error code as header + query params so it lands in Conekta's request
+    // logs (the only channel Conekta can see when the failure never touches
+    // the API, e.g. order.paid with no recoverable WC order).
+    // -------------------------------------------------------
+
+    /** OrdersApi wired to a Guzzle MockHandler through the real plugin middleware. */
+    private function beacon_api(\GuzzleHttp\Handler\MockHandler $mock): \Conekta\Api\OrdersApi
+    {
+        // Closure::bind instead of ReflectionMethod: reaches the private
+        // static without setAccessible(), which PHP 8.1+ deprecates but
+        // PHP 7.4 (still in the CI matrix) requires.
+        $build = Closure::bind(
+            fn(string $version, callable $handler) => WC_Conekta_Plugin::build_http_client($version, $handler),
+            null,
+            WC_Conekta_Plugin::class
+        );
+        return new \Conekta\Api\OrdersApi(
+            $build('6.0.7', $mock),
+            (new \Conekta\Configuration())->setAccessToken('key_test')
+        );
+    }
+
+    public function test_webhook_diagnostic_stamps_header_and_query()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_beacon","object":"order"}'),
+        ]);
+
+        WC_Conekta_Plugin::send_webhook_diagnostic(
+            $this->beacon_api($mock),
+            'ord_beacon',
+            'mismatch_amount',
+            ['reference_id' => '123', 'event' => 'order.paid']
+        );
+
+        $req = $mock->getLastRequest();
+        $this->assertNotNull($req, 'beacon must actually send the GET');
+        $this->assertSame('GET', $req->getMethod());
+        $this->assertStringContainsString('/orders/ord_beacon', $req->getUri()->getPath());
+        $this->assertSame('mismatch_amount', $req->getHeaderLine('X-Wc-Error-Code'));
+        parse_str($req->getUri()->getQuery(), $query);
+        $this->assertSame('mismatch_amount', $query['wc_error_code'] ?? null);
+        $this->assertSame('123', $query['reference_id'] ?? null);
+        $this->assertSame('order.paid', $query['event'] ?? null);
+        // conekta-php 7.2.0: the SDK's own `client` query param identifies the integration.
+        $this->assertSame('woocommerce', $query['client'] ?? null);
+        // The version header from the base middleware must survive.
+        $this->assertNotEmpty($req->getHeaderLine('X-Conekta-Client-User-Agent'));
+    }
+
+    public function test_webhook_diagnostic_disarms_after_the_beacon_request()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_beacon","object":"order"}'),
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_plain","object":"order"}'),
+        ]);
+        $api = $this->beacon_api($mock);
+
+        WC_Conekta_Plugin::send_webhook_diagnostic($api, 'ord_beacon', 'order_not_found');
+        $api->getOrderById('ord_plain');
+
+        $req = $mock->getLastRequest();
+        $this->assertFalse($req->hasHeader('X-Wc-Error-Code'), 'beacon must not leak into later requests');
+        $this->assertSame('', $req->getUri()->getQuery());
+    }
+
+    public function test_webhook_diagnostic_swallows_api_errors()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(404, [], '{"object":"error"}'),
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_plain","object":"order"}'),
+        ]);
+        $api = $this->beacon_api($mock);
+
+        // Must not throw, and must disarm even on failure.
+        WC_Conekta_Plugin::send_webhook_diagnostic($api, 'ord_missing', 'order_not_found');
+        $api->getOrderById('ord_plain');
+        $this->assertFalse($mock->getLastRequest()->hasHeader('X-Wc-Error-Code'));
+    }
+
     public function test_get_blocks_draft_order_id_null_when_session_key_absent()
     {
         WC()->session->__unset('store_api_draft_order');

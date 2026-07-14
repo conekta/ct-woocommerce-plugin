@@ -22,6 +22,12 @@ require_once(__DIR__ . '/conekta-rest-api.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {
+	/**
+	 * Sent as the `client` query param on getOrderById (conekta-php >= 7.2.0)
+	 * so Conekta can attribute API reads to this integration in its request logs.
+	 */
+	public const API_CLIENT = 'woocommerce';
+
 	public $version  = "6.0.6";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit and debit cards, monthly installments (MSI) for Mexican cards, cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).";
@@ -114,6 +120,13 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 
         $order = self::find_order_for_webhook($conekta_order);
         if (!$order) {
+            // Paid in Conekta but no WooCommerce order to complete — make the
+            // desync visible on the Conekta side (request logs, tagged to the
+            // order id), since this failure never touches the API otherwise.
+            self::send_webhook_diagnostic($ordersApi, $conekta_order['id'], 'order_not_found', array_filter([
+                'event'        => 'order.paid',
+                'reference_id' => isset($conekta_order['metadata']['reference_id']) ? (string) $conekta_order['metadata']['reference_id'] : '',
+            ]));
             http_response_code(404);
             header('Content-Type: application/json');
             echo json_encode([
@@ -172,6 +185,10 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 
         $order = self::find_order_for_webhook($conekta_order);
         if (!$order) {
+            self::send_webhook_diagnostic($ordersApi, $conekta_order['id'], 'order_not_found', array_filter([
+                'event'        => 'order.expired_or_canceled',
+                'reference_id' => isset($conekta_order['metadata']['reference_id']) ? (string) $conekta_order['metadata']['reference_id'] : '',
+            ]));
             http_response_code(404);
             header('Content-Type: application/json');
             echo json_encode([
@@ -217,7 +234,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
      */
     public static function check_order_status(OrdersApi $ordersApi, string $conekta_order_id, array $statuses): bool
     {
-        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id);
+        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
 
         return in_array($conekta_order_api->getPaymentStatus(), $statuses);
     }
@@ -336,21 +353,85 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         );
     }
 
-    private static function build_http_client(string $version): Client
+    /**
+     * @param callable|null $handler test seam — Guzzle handler (e.g. MockHandler)
+     *                               so unit tests can capture the outgoing request.
+     */
+    private static function build_http_client(string $version, ?callable $handler = null): Client
     {
-        $stack = HandlerStack::create();
+        $stack = $handler !== null ? HandlerStack::create($handler) : HandlerStack::create();
         $stack->push(Middleware::mapRequest(function (Request $request) use ($version) {
-            return $request->withHeader(
+            $request = $request->withHeader(
                 'X-Conekta-Client-User-Agent',
                 json_encode([
                     'plugin_name' => 'woocommerce',
                     'plugin_version' => $version,
                 ])
             );
+
+            // Diagnostic beacon (see send_webhook_diagnostic): while a beacon
+            // is armed, stamp the error code as a custom header AND as query
+            // params. Conekta records both (query_string + request_headers)
+            // in its per-request logs, tagged to the order id — so Conekta
+            // staff can see WooCommerce-side failures that otherwise never
+            // leave the merchant's server.
+            if (self::$diagnostic_beacon !== null) {
+                $request = $request->withHeader('X-Wc-Error-Code', self::$diagnostic_beacon['code']);
+                $query = http_build_query(array_merge(
+                    ['wc_error_code' => self::$diagnostic_beacon['code']],
+                    self::$diagnostic_beacon['extra']
+                ));
+                $uri      = $request->getUri();
+                $existing = $uri->getQuery();
+                $request  = $request->withUri($uri->withQuery($existing !== '' ? $existing . '&' . $query : $query));
+            }
+
+            return $request;
         }));
         return new Client([
             'handler' => $stack,
         ]);
+    }
+
+    /**
+     * When non-null, the next API request carries this diagnostic payload
+     * (header + query string). Armed only for the duration of
+     * send_webhook_diagnostic().
+     *
+     * @var array{code: string, extra: array<string, string>}|null
+     */
+    private static $diagnostic_beacon = null;
+
+    /**
+     * Report a WooCommerce-side failure to Conekta WITHOUT mutating anything:
+     * re-GET the order with the error code stamped as a custom header
+     * (X-Wc-Error-Code) and as query params (wc_error_code=...). The request
+     * lands in Conekta's request logs — query string and headers included,
+     * searchable by the order id — which is the only channel Conekta can see
+     * when the failure never touches the API otherwise (e.g. the order.paid
+     * webhook finds no WooCommerce order). Order metadata is NOT an option
+     * here: it's frozen once the order is paid (422
+     * cannot_be_updated_because_has_charge_paid).
+     *
+     * Fire-and-forget: a beacon failure must never break the caller, so every
+     * exception is swallowed (the failed request still gets logged Conekta-side
+     * anyway).
+     *
+     * @param OrdersApi             $ordersApi        client already authenticated with the merchant key.
+     * @param string                $conekta_order_id order to tag the diagnostic onto.
+     * @param string                $code             short machine code, e.g. 'order_not_found', 'mismatch_amount'.
+     * @param array<string, string> $extra            additional query params (e.g. ['reference_id' => '123']).
+     */
+    public static function send_webhook_diagnostic(OrdersApi $ordersApi, string $conekta_order_id, string $code, array $extra = []): void
+    {
+        try {
+            self::$diagnostic_beacon = ['code' => $code, 'extra' => $extra];
+            $ordersApi->getOrderById($conekta_order_id, 'es', null, self::API_CLIENT);
+        } catch (\Throwable $e) {
+            error_log('Conekta - diagnostic beacon (' . $code . ') failed: ' . $e->getMessage());
+        } finally {
+            self::$diagnostic_beacon = null;
+        }
     }
 
 }

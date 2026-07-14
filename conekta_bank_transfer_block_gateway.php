@@ -120,7 +120,7 @@ class WC_Conekta_Bank_Transfer_Gateway extends WC_Conekta_Plugin
         if (empty($conekta_order_id)) {
             return;
         }
-        $conekta_order = $this->get_api_instance($this->settings['api_key'], $this->version)->getorderbyid($conekta_order_id);
+        $conekta_order = $this->get_api_instance($this->settings['api_key'], $this->version)->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
 
         foreach ($conekta_order->getCharges()->getData() as $charge) {
             $payment_method = $charge->getPaymentMethod()->getObject();

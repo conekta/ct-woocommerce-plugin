@@ -312,7 +312,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
 
             $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-            $conekta_order = $api->getOrderById($conekta_order_id);
+            $conekta_order = $api->getOrderById($conekta_order_id, 'es', null, self::API_CLIENT);
 
             // Best-effort reverse trace: stamp the WooCommerce order id onto
             // each card_payment charge (reference_id) so a Conekta charge can be

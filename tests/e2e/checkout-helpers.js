@@ -116,13 +116,26 @@ async function wcApi(method, endpoint, body) {
   const isAdmin = currentUrl.includes('/wp-admin');
   await (isAdmin ? Promise.resolve() : page.goto(`${STORE_URL}/wp-admin/`).then(() => page.waitForLoadState('networkidle')));
 
-  return page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
-    const nonce = await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text();
-    const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
-    return res.json();
-  }, { baseUrl: STORE_URL, method, endpoint, body });
+  // The shared staging store intermittently answers rest_no_route (REST
+  // namespaces briefly unregistered while another run updates plugins on the
+  // store) or rest_cookie_invalid_nonce (stale nonce right after login). Both
+  // are rejected BEFORE the route handler runs, so retrying is side-effect-free
+  // even for POST/PUT/DELETE.
+  const TRANSIENT_CODES = ['rest_no_route', 'rest_cookie_invalid_nonce'];
+  let result;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    result = await page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
+      const nonce = await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text();
+      const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
+      return res.json();
+    }, { baseUrl: STORE_URL, method, endpoint, body });
+    if (!TRANSIENT_CODES.includes(result?.code)) break;
+    console.log(`  [wcApi] ${method} ${endpoint} attempt ${attempt}/3 failed with ${result.code}, retrying...`);
+    await new Promise(r => setTimeout(r, 2000 * attempt));
+  }
+  return result;
 }
 
 // -------------------------------------------------------
@@ -148,7 +161,12 @@ async function setCheckoutType(type) {
   // nonce). setup() invokes this before clearCookies(), so by the time the
   // spec body runs, the page is already in the right layout.
   const settings = await wcApi('GET', 'wc/v3/settings/advanced/woocommerce_checkout_page_id');
-  const pageId = settings.value;
+  const pageId = settings?.value;
+  // Fail here rather than PUT wp/v2/pages/undefined, which can't match any
+  // route (the id regex is \d+) and yields a misleading rest_no_route.
+  if (!pageId) {
+    throw new Error(`setCheckoutType('${type}') failed: could not resolve checkout page id. GET response: ${JSON.stringify(settings).slice(0, 300)}`);
+  }
   const result = await wcApi('PUT', `wp/v2/pages/${pageId}`, { content: CHECKOUT_CONTENT[type] });
   if (!result?.id) {
     console.log(`  [setCheckoutType ${type}] PUT response: ${JSON.stringify(result).slice(0, 400)}`);
@@ -288,8 +306,13 @@ async function setup(options = {}) {
     productPayload.sale_price = DISCOUNT_AMOUNT;
   }
   const product = await wcApi('POST', 'wc/v3/products', productPayload);
-  productId = product.id;
-  console.log(`Setup: Product created (ID: ${productId})${product.id ? '' : ' ERROR: ' + JSON.stringify(product).substring(0, 200)}`);
+  productId = product?.id;
+  // Abort setup on a failed create: continuing with productId undefined only
+  // cascades (coupon create, add-to-cart and teardown all 404 confusingly).
+  if (!productId) {
+    throw new Error(`setup failed: product create returned ${JSON.stringify(product).slice(0, 300)}`);
+  }
+  console.log(`Setup: Product created (ID: ${productId})`);
 
   // The coupon is only needed by the discount specs; the tax-inclusive spec
   // verifies tax classification on a plain full-price line item.
