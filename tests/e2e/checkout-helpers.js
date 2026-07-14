@@ -219,9 +219,23 @@ async function setup(options = {}) {
   }
   console.log(`Setup: plugin version OK (${storeVersion})`);
 
-  // Cleanup orphaned e2e resources from previous crashed runs
-  const staleProducts = await wcApi('GET', 'wc/v3/products?search=E2E+Discount+Test&per_page=50');
-  const staleCoupons = await wcApi('GET', 'wc/v3/coupons?search=e2e_&per_page=50');
+  // Cleanup orphaned e2e resources from previous crashed runs. The wc/v3
+  // list endpoints can intermittently return an error object instead of an
+  // array (404 / rest_cookie_invalid_nonce right after login — same failure
+  // mode the version gate above retries around), so retry and, if it still
+  // isn't an array, skip cleanup instead of crashing setup on .map().
+  const listOrEmpty = async (endpoint, label) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await wcApi('GET', endpoint);
+      if (Array.isArray(res)) return res;
+      console.log(`  [cleanup] ${label} list attempt ${attempt} returned non-array: ${JSON.stringify(res).slice(0, 200)}`);
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
+    console.log(`  [cleanup] skipping ${label} cleanup — list endpoint never returned an array`);
+    return [];
+  };
+  const staleProducts = await listOrEmpty('wc/v3/products?search=E2E+Discount+Test&per_page=50', 'products');
+  const staleCoupons = await listOrEmpty('wc/v3/coupons?search=e2e_&per_page=50', 'coupons');
   await Promise.all([
     ...staleProducts.map(p => wcApi('DELETE', `wc/v3/products/${p.id}?force=true`)),
     ...staleCoupons.map(c => wcApi('DELETE', `wc/v3/coupons/${c.id}?force=true`)),
@@ -374,7 +388,7 @@ async function applyBlocksCoupon(code) {
 async function teardown() {
   console.log('\nTeardown...');
   try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
-  try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
+  try { if (productId) { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } } catch (_) {}
   // Undo the tax-inclusive store config so other specs/store state stay clean.
   try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
   try {
