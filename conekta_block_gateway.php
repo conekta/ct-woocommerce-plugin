@@ -312,7 +312,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
 
             $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
-            $conekta_order = $api->getOrderById($conekta_order_id);
+            $conekta_order = $api->getOrderById($conekta_order_id, 'es', null, self::API_CLIENT);
 
             // Best-effort reverse trace: stamp the WooCommerce order id onto
             // each card_payment charge (reference_id) so a Conekta charge can be
@@ -462,13 +462,39 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
      */
     public function process_payment_api($context, $result) {
         $order = $context->order;
+
+        // Diagnostic: blocks charges the card (Conekta SDK) BEFORE the Store API
+        // /checkout call that reaches this handler, so if we bail here — or never
+        // get called at all — the customer can end up paid with the WC order
+        // stuck as checkout-draft. Log entry + every early return so the failure
+        // reason is visible in debug.log. The ABSENCE of this "entry" line for a
+        // paid Conekta order means the Store API /checkout never reached the
+        // gateway (customer abandoned after the charge / request never completed).
+        $conekta_order_id = isset($context->payment_data['conekta_order_id']) ? sanitize_text_field($context->payment_data['conekta_order_id']) : '';
+        error_log(sprintf(
+            'Conekta - process_payment_api (blocks): ENTRY WC order #%s, payment_method "%s", conekta_order_id "%s"',
+            $order ? $order->get_id() : 'null',
+            $context->payment_method,
+            $conekta_order_id
+        ));
+
         if ($context->payment_method !== $this->id) {
+            error_log(sprintf(
+                'Conekta - process_payment_api (blocks): SKIP — payment_method "%s" is not "%s" (WC order #%s)',
+                $context->payment_method,
+                $this->id,
+                $order ? $order->get_id() : 'null'
+            ));
             return;
         }
 
-        $conekta_order_id = isset($context->payment_data['conekta_order_id']) ? sanitize_text_field($context->payment_data['conekta_order_id']) : '';
-
         if (empty($conekta_order_id)) {
+            // The card may already be charged: the SDK emitted onFinalizePayment
+            // but conekta_order_id never reached payment_data — WC order left unpaid.
+            error_log(sprintf(
+                'Conekta - process_payment_api (blocks): MISSING conekta_order_id on WC order #%s — card may be charged with no linked order',
+                $order ? $order->get_id() : 'null'
+            ));
             $result->set_status('failure');
             $result->set_payment_details(array_merge($result->payment_details, [
                 'error' => __('Falta la orden de Conekta. Vuelve a intentar el pago.', 'woocommerce'),
@@ -490,6 +516,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             $result->set_status('success');
             $result->set_redirect_url($this->get_return_url($outcome['existing_order']));
         } else {
+            error_log(sprintf(
+                'Conekta - process_payment_api (blocks): FAILED for WC order #%s (Conekta order %s): %s',
+                $order ? $order->get_id() : 'null',
+                $conekta_order_id,
+                $outcome['error'] ?? 'unknown'
+            ));
             wc_add_notice(__('Error: ', 'woothemes') . ($outcome['error'] ?? 'unknown'), 'error');
             WC()->session->reload_checkout = true;
 

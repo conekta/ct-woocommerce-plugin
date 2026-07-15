@@ -66,6 +66,17 @@ const TEST_CARD = {
   expYear: '30',
   cvc: '123',
 };
+// Decline-then-retry cards. Used by the "paid in Conekta but not in Woo"
+// regression spec: a first charge is declined, then a second charge on the
+// SAME mounted Conekta order succeeds — the exact shape where a store can end
+// up with a paid Conekta order and an unpaid WooCommerce order.
+//   4000000000000127 -> insufficient funds; Conekta declines it and the SDK
+//                       fires onChargeFailed (see loadConektaScript.js).
+//   4242424242424242 -> generic approved card.
+// Both reuse TEST_CARD's random holder name / expiry / cvc so the only thing
+// that varies is the PAN.
+const DECLINE_CARD = { ...TEST_CARD, number: '4000000000000127' };
+const SUCCESS_CARD = { ...TEST_CARD, number: '4242424242424242' };
 const BILLING = {
   first_name: FIRST_NAME,
   last_name: LAST_NAME,
@@ -105,13 +116,38 @@ async function wcApi(method, endpoint, body) {
   const isAdmin = currentUrl.includes('/wp-admin');
   await (isAdmin ? Promise.resolve() : page.goto(`${STORE_URL}/wp-admin/`).then(() => page.waitForLoadState('networkidle')));
 
-  return page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
-    const nonce = await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text();
-    const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
-    return res.json();
-  }, { baseUrl: STORE_URL, method, endpoint, body });
+  // The shared staging store intermittently answers rest_no_route (REST
+  // namespaces briefly unregistered while another run updates plugins on the
+  // store) or rest_cookie_invalid_nonce (stale nonce right after login). Both
+  // are rejected BEFORE the route handler runs, so retrying is side-effect-free
+  // even for POST/PUT/DELETE. During the same outage the rest-nonce endpoint
+  // can answer an HTML error page instead of a nonce (newlines are an invalid
+  // header value, so fetch itself throws "Invalid value") — everything inside
+  // the evaluate is caught and surfaced as a retryable code too. Outages have
+  // been observed to outlive a ~6s window, so back off up to ~30s total.
+  const TRANSIENT_CODES = ['rest_no_route', 'rest_cookie_invalid_nonce', 'e2e_bad_nonce_response', 'e2e_fetch_failed'];
+  const ATTEMPTS = 5;
+  let result;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    result = await page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
+      try {
+        const nonce = (await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text()).trim();
+        if (!/^[A-Za-z0-9]+$/.test(nonce)) {
+          return { code: 'e2e_bad_nonce_response', message: nonce.slice(0, 200) };
+        }
+        const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
+        return await res.json();
+      } catch (e) {
+        return { code: 'e2e_fetch_failed', message: String(e).slice(0, 200) };
+      }
+    }, { baseUrl: STORE_URL, method, endpoint, body });
+    if (!TRANSIENT_CODES.includes(result?.code)) break;
+    console.log(`  [wcApi] ${method} ${endpoint} attempt ${attempt}/${ATTEMPTS} failed with ${result.code}, retrying...`);
+    await new Promise(r => setTimeout(r, 2500 * attempt));
+  }
+  return result;
 }
 
 // -------------------------------------------------------
@@ -137,7 +173,12 @@ async function setCheckoutType(type) {
   // nonce). setup() invokes this before clearCookies(), so by the time the
   // spec body runs, the page is already in the right layout.
   const settings = await wcApi('GET', 'wc/v3/settings/advanced/woocommerce_checkout_page_id');
-  const pageId = settings.value;
+  const pageId = settings?.value;
+  // Fail here rather than PUT wp/v2/pages/undefined, which can't match any
+  // route (the id regex is \d+) and yields a misleading rest_no_route.
+  if (!pageId) {
+    throw new Error(`setCheckoutType('${type}') failed: could not resolve checkout page id. GET response: ${JSON.stringify(settings).slice(0, 300)}`);
+  }
   const result = await wcApi('PUT', `wp/v2/pages/${pageId}`, { content: CHECKOUT_CONTENT[type] });
   if (!result?.id) {
     console.log(`  [setCheckoutType ${type}] PUT response: ${JSON.stringify(result).slice(0, 400)}`);
@@ -151,6 +192,20 @@ async function setCheckoutType(type) {
 
 async function setup(options = {}) {
   const { checkoutType, taxInclusive, roundingPrice, roundingQty } = options;
+
+  // Health gate: the shared staging store can be down entirely (frontend 500,
+  // WooCommerce fataled/paused so wc/v3 never registers — observed 2026-07-14).
+  // In that state EVERY wc/v3 call rest_no_routes and no amount of per-call
+  // retrying helps, so fail the spec up front with an actionable message.
+  const health = await fetch(`${STORE_URL}/wp-json/`).then(r => r.json()).catch(() => null);
+  if (!health?.namespaces?.includes('wc/v3')) {
+    throw new Error(
+      `staging store unhealthy: wc/v3 REST namespace not registered ` +
+      `(namespaces: ${JSON.stringify(health?.namespaces ?? 'wp-json unreachable')}). ` +
+      `WooCommerce is not loading on ${STORE_URL} — fix the store before re-running e2e.`
+    );
+  }
+
   browser = await chromium.launch({ headless: config.headless });
   const context = await browser.newContext({ recordVideo: config.video });
   page = await context.newPage();
@@ -208,9 +263,23 @@ async function setup(options = {}) {
   }
   console.log(`Setup: plugin version OK (${storeVersion})`);
 
-  // Cleanup orphaned e2e resources from previous crashed runs
-  const staleProducts = await wcApi('GET', 'wc/v3/products?search=E2E+Discount+Test&per_page=50');
-  const staleCoupons = await wcApi('GET', 'wc/v3/coupons?search=e2e_&per_page=50');
+  // Cleanup orphaned e2e resources from previous crashed runs. The wc/v3
+  // list endpoints can intermittently return an error object instead of an
+  // array (404 / rest_cookie_invalid_nonce right after login — same failure
+  // mode the version gate above retries around), so retry and, if it still
+  // isn't an array, skip cleanup instead of crashing setup on .map().
+  const listOrEmpty = async (endpoint, label) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await wcApi('GET', endpoint);
+      if (Array.isArray(res)) return res;
+      console.log(`  [cleanup] ${label} list attempt ${attempt} returned non-array: ${JSON.stringify(res).slice(0, 200)}`);
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
+    console.log(`  [cleanup] skipping ${label} cleanup — list endpoint never returned an array`);
+    return [];
+  };
+  const staleProducts = await listOrEmpty('wc/v3/products?search=E2E+Discount+Test&per_page=50', 'products');
+  const staleCoupons = await listOrEmpty('wc/v3/coupons?search=e2e_&per_page=50', 'coupons');
   await Promise.all([
     ...staleProducts.map(p => wcApi('DELETE', `wc/v3/products/${p.id}?force=true`)),
     ...staleCoupons.map(c => wcApi('DELETE', `wc/v3/coupons/${c.id}?force=true`)),
@@ -263,8 +332,13 @@ async function setup(options = {}) {
     productPayload.sale_price = DISCOUNT_AMOUNT;
   }
   const product = await wcApi('POST', 'wc/v3/products', productPayload);
-  productId = product.id;
-  console.log(`Setup: Product created (ID: ${productId})${product.id ? '' : ' ERROR: ' + JSON.stringify(product).substring(0, 200)}`);
+  productId = product?.id;
+  // Abort setup on a failed create: continuing with productId undefined only
+  // cascades (coupon create, add-to-cart and teardown all 404 confusingly).
+  if (!productId) {
+    throw new Error(`setup failed: product create returned ${JSON.stringify(product).slice(0, 300)}`);
+  }
+  console.log(`Setup: Product created (ID: ${productId})`);
 
   // The coupon is only needed by the discount specs; the tax-inclusive spec
   // verifies tax classification on a plain full-price line item.
@@ -363,7 +437,7 @@ async function applyBlocksCoupon(code) {
 async function teardown() {
   console.log('\nTeardown...');
   try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
-  try { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } catch (_) {}
+  try { if (productId) { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } } catch (_) {}
   // Undo the tax-inclusive store config so other specs/store state stay clean.
   try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
   try {
@@ -415,6 +489,38 @@ function conektaOrdersApi() {
 async function fetchConektaOrder(conektaOrderId) {
   const { data } = await conektaOrdersApi().getOrderById(conektaOrderId);
   return data;
+}
+
+/**
+ * Whether a Conekta order counts as paid. On a decline-then-retry the order
+ * ends up with a declined charge AND a paid charge, and we observed a Conekta
+ * bug where the order-level `payment_status` stays `declined` even though one
+ * of its charges is `paid` (the customer WAS charged and WooCommerce completes
+ * the order). So treat the order as paid when EITHER the aggregate
+ * payment_status is 'paid' OR any individual charge has status 'paid'.
+ */
+function conektaOrderPaid(order) {
+  if (!order) return false;
+  if (order.payment_status === 'paid') return true;
+  const charges = Array.isArray(order.charges) ? order.charges : (order.charges && order.charges.data) || [];
+  return charges.some(c => c && c.status === 'paid');
+}
+
+/**
+ * Poll getOrderById until the order counts as paid (see conektaOrderPaid), or
+ * the timeout elapses. Returns the last-seen OrderResponse either way.
+ *
+ * Why polling: on a decline-then-retry the paid state can lag the read for a
+ * few seconds; a single immediate read is racy.
+ */
+async function waitForConektaPaid(conektaOrderId, { timeoutMs = 30000, intervalMs = 2000 } = {}) {
+  const start = Date.now();
+  let order = await fetchConektaOrder(conektaOrderId);
+  while (!conektaOrderPaid(order) && Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    order = await fetchConektaOrder(conektaOrderId);
+  }
+  return order;
 }
 
 /**
@@ -1092,6 +1198,42 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
 }
 
 /**
+ * Wait for a FAILED payment attempt to surface, without ever reaching
+ * order-received. On a decline the SDK fires onChargeFailed -> the OrderEmitter
+ * rejects the orderPromise -> onPaymentSetup returns an ERROR response, which WC
+ * renders as a store notice (blocks) / woocommerce-error (classic). We poll for
+ * that notice while asserting the page never navigated to order-received.
+ *
+ * Returns { errored, message }:
+ *   errored=true  -> an error notice appeared (the expected decline outcome).
+ *   errored=false -> either we reached order-received (charge unexpectedly
+ *                    succeeded) or timed out; `message` says which.
+ */
+async function waitForPaymentError(timeoutMs = 60000) {
+  const errorSelector = [
+    '.wc-block-components-notice-banner.is-error',
+    '.wc-block-components-validation-error',
+    '.wc-block-store-notice.is-error',
+    '.woocommerce-error',
+    'li.woocommerce-error',
+  ].join(', ');
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (page.url().includes('order-received')) {
+      return { errored: false, message: 'reached order-received (charge unexpectedly succeeded)' };
+    }
+    const notice = page.locator(errorSelector).first();
+    if (await notice.isVisible({ timeout: 200 }).catch(() => false)) {
+      const message = (await notice.innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      if (message) return { errored: true, message };
+    }
+    await page.waitForTimeout(500);
+  }
+  return { errored: false, message: 'timed out waiting for a payment error notice' };
+}
+
+/**
  * Dispatch a synthetic "payment finalized" signal into the page so the
  * frontend writes conekta_order_id and submits to WooCommerce, without
  * depending on the real Integration iframe.
@@ -1149,13 +1291,14 @@ async function run(label, optionsOrFn, maybeFn) {
 
 module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
-  TEST_CARD, BILLING,
+  TEST_CARD, DECLINE_CARD, SUCCESS_CARD, BILLING,
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
-  fetchConektaOrder, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
+  fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
+  waitForPaymentError,
 };

@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.0.6
+Stable tag: 6.0.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.0.7 =
+* Fix: the card checkout no longer fails with a 422 "Invalid format for shipping_contact ... city". An empty city (chosen address block had a street but no city) is now backfilled from the other block, and the card path sends shipping_contact/customer_info with metadata.soft_validations so Conekta warns instead of rejecting odd-but-usable values. Previously both the order update and the recreate failed, so the shopper couldn't pay.
+
 = 6.0.6 =
 * Change: line items are sent to Conekta at the effective price the customer pays; the plugin no longer reports the regular price plus a dynamic_pricing discount for sales (that confused merchants and made the IVA appear as a phantom discount on tax-inclusive stores). Tax is itemized in tax_lines; real coupons and fees stay as discounts. Covers card, cash, bank transfer, BNPL and pay by bank.
 * Feature: each line item carries a tax_included metadata flag (true only when the store is tax-inclusive and the product is taxable).

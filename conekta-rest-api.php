@@ -203,6 +203,13 @@ class WC_Conekta_REST_API {
             }
 
             if ($existing_order_id && $existing_request_id) {
+                // Link the Blocks draft WC order to this Conekta order as early
+                // as possible (every request, before the unchanged short-circuit
+                // below) so the order.paid webhook can always recover it — even
+                // if process_payment_api never runs. Local, idempotent, no-op on
+                // classic. See link_draft_order_to_conekta.
+                self::link_draft_order_to_conekta($existing_order_id);
+
                 // Also key "unchanged" on the email: it's not part of the
                 // shipping_hash, so without this an email correction would
                 // short-circuit here and never reach the setCustomerInfo update.
@@ -255,6 +262,23 @@ class WC_Conekta_REST_API {
                     // a paid order can't be updated).
                     if (!empty($snapshot['customer_info']['email'])) {
                         $update->setCustomerInfo(new OrderUpdateCustomerInfo($snapshot['customer_info']));
+                    }
+
+                    // Backfill reference_id on the Conekta order once the Blocks
+                    // draft exists — it's null on create when the order was
+                    // created before the draft. Pre-payment the metadata is still
+                    // mutable. Resend the COMPLETE metadata (not a partial patch)
+                    // so the plugin/version/checkout_type keys survive. This is
+                    // the webhook's primary lookup; the reverse conekta-order-id
+                    // meta stamped on the draft (link_draft_order_to_conekta) is
+                    // its fallback.
+                    $draft_id = self::get_blocks_draft_order_id();
+                    if ($draft_id) {
+                        $update->setMetadata(self::build_conekta_metadata(
+                            $gateway,
+                            self::resolve_checkout_type($request),
+                            $draft_id
+                        ));
                     }
 
                     $api->updateOrder($existing_order_id, $update, $gateway->get_user_locale());
@@ -327,31 +351,13 @@ class WC_Conekta_REST_API {
             $checkout = new OrderCheckoutRequest($checkout_data);
 
             // Record whether the order was created from the WooCommerce Blocks
-            // or Classic checkout (the frontend sends woocommerce_checkout_type).
-            // Useful for debugging / segmenting orders on the Conekta dashboard.
-            $checkout_type = $request ? sanitize_text_field((string) $request->get_param('woocommerce_checkout_type')) : '';
-            if (!in_array($checkout_type, ['blocks', 'classic'], true)) {
-                $checkout_type = 'unknown';
-            }
-
-            $metadata = [
-                'plugin'                    => 'woocommerce',
-                'plugin_conekta_version'    => $gateway->version,
-                'woocommerce_version'       => WC()->version,
-                'payment_method'            => 'WC_Conekta_Gateway',
-                'woocommerce_checkout_type' => $checkout_type,
-            ];
-
-            // Blocks-only: add the WC order id as reference_id when it already
-            // exists. Blocks creates a `checkout-draft` order during checkout
-            // (and it keeps that id once finalized), so we can write it now —
-            // this is the only window, since the Conekta order is already paid
-            // (its metadata frozen) by the time process_payment runs. Classic
-            // has no order yet here, so reference_id stays absent there.
-            $reference_id = self::get_blocks_draft_order_id();
-            if ($reference_id) {
-                $metadata['reference_id'] = (string) $reference_id;
-            }
+            // or Classic checkout, and (Blocks-only) the WC draft order id as
+            // reference_id when it already exists. Blocks creates a
+            // `checkout-draft` order during checkout and keeps that id once
+            // finalized, so it's the webhook's primary Conekta->Woo link.
+            $checkout_type = self::resolve_checkout_type($request);
+            $reference_id  = self::get_blocks_draft_order_id();
+            $metadata      = self::build_conekta_metadata($gateway, $checkout_type, $reference_id);
 
             $balanced = ckpg_check_balance([
                 'line_items'     => $snapshot['line_items'],
@@ -379,6 +385,13 @@ class WC_Conekta_REST_API {
 
             $conekta_order_id    = $conekta_order->getId();
             $checkout_request_id = $conekta_order->getCheckout() ? $conekta_order->getCheckout()->getId() : null;
+
+            // Link the Blocks draft WC order to the freshly created Conekta
+            // order so the order.paid webhook can recover it even if
+            // process_payment_api never runs. (reference_id in the metadata
+            // above covers the case where the draft already existed at create;
+            // this reverse meta covers the case where it didn't.)
+            self::link_draft_order_to_conekta($conekta_order_id);
 
             self::state_set([
                 'order_id'           => $conekta_order_id,
@@ -516,13 +529,16 @@ class WC_Conekta_REST_API {
                 ];
 
                 // Conekta requires shipping_contact to charge an order.
+                // street1/city are normalized so Conekta's strict address
+                // validation (street1.too_short, city.invalid) can't 422 the
+                // whole checkout — soft_validations does NOT relax those.
                 if (!empty($address1) && !empty($postcode)) {
                     $shipping_contact = [
                         'phone'    => $contact_phone ?: self::DEFAULT_PHONE,
                         'receiver' => $name ?: self::DEFAULT_CUSTOMER_NAME,
                         'address'  => [
-                            'street1'     => $address1,
-                            'city'        => $city,
+                            'street1'     => ckpg_pad_street1($address1),
+                            'city'        => ckpg_default_if_blank($city),
                             'state'       => $state,
                             'country'     => $country ?: 'MX',
                             'postal_code' => $postcode,
@@ -564,6 +580,38 @@ class WC_Conekta_REST_API {
     }
 
     /**
+     * Normalize the checkout type sent by the frontend into 'blocks',
+     * 'classic', or 'unknown' for the Conekta order metadata.
+     */
+    public static function resolve_checkout_type($request): string {
+        $checkout_type = $request ? sanitize_text_field((string) $request->get_param('woocommerce_checkout_type')) : '';
+        return in_array($checkout_type, ['blocks', 'classic'], true) ? $checkout_type : 'unknown';
+    }
+
+    /**
+     * Build the COMPLETE Conekta order metadata. Used at creation AND when
+     * backfilling reference_id on the update path — the update must resend the
+     * full metadata (not a partial patch), so re-linking the WC order never
+     * drops the plugin / version / checkout_type keys set at creation.
+     *
+     * reference_id (the WC draft order id) is included only when present —
+     * Blocks-only, and only once the draft exists.
+     */
+    public static function build_conekta_metadata($gateway, string $checkout_type, ?int $reference_id): array {
+        $metadata = [
+            'plugin'                    => 'woocommerce',
+            'plugin_conekta_version'    => $gateway->version,
+            'woocommerce_version'       => WC()->version,
+            'payment_method'            => 'WC_Conekta_Gateway',
+            'woocommerce_checkout_type' => $checkout_type,
+        ];
+        if ($reference_id) {
+            $metadata['reference_id'] = (string) $reference_id;
+        }
+        return $metadata;
+    }
+
+    /**
      * WooCommerce order id to write into the Conekta order metadata as
      * reference_id — BLOCKS ONLY.
      *
@@ -593,6 +641,37 @@ class WC_Conekta_REST_API {
         $order = wc_get_order($draft_id);
         if (!$order || !$order->has_status('checkout-draft')) {
             return null;
+        }
+        return $draft_id;
+    }
+
+    /**
+     * Stamp the conekta-order-id meta on the current Blocks checkout-draft WC
+     * order, while the order is still unpaid. This is the Conekta->WooCommerce
+     * link the order.paid webhook falls back to (find_order_for_webhook), so a
+     * paid charge whose process_payment_api never runs (tab closed, network
+     * drop) can still be reconciled — instead of "Order not found", i.e. paid
+     * in Conekta but never completed in WooCommerce.
+     *
+     * The Conekta order is often created (on the first email POST) before WC
+     * Blocks has created its draft order, so reference_id can't be set at
+     * creation; stamping the reverse meta here, once the draft exists, closes
+     * that gap. Local write only, idempotent, and BLOCKS-ONLY (classic has no
+     * draft here, so this returns null there).
+     *
+     * @return int|null the linked draft order id, or null when there's no draft.
+     */
+    public static function link_draft_order_to_conekta(string $conekta_order_id): ?int {
+        if ($conekta_order_id === '') {
+            return null;
+        }
+        $draft_id = self::get_blocks_draft_order_id();
+        if (!$draft_id) {
+            return null;
+        }
+        $draft_order = wc_get_order($draft_id);
+        if ($draft_order) {
+            WC_Conekta_Plugin::update_conekta_order_meta($draft_order, $conekta_order_id, 'conekta-order-id');
         }
         return $draft_id;
     }
@@ -655,7 +734,15 @@ class WC_Conekta_REST_API {
             'first_name' => $get($prefix, 'first_name') ?: $get('billing', 'first_name'),
             'last_name'  => $get($prefix, 'last_name')  ?: $get('billing', 'last_name'),
             'address_1'  => $get($prefix, 'address_1'),
-            'city'       => $get($prefix, 'city'),
+            // City falls back to the other block when the chosen block left it
+            // empty. Unlike state/country — which themes pre-fill with stale
+            // store defaults, so a per-field fallback there would pair a real
+            // street with a WRONG state — city is never auto-prefilled: an empty
+            // city means the block genuinely lacks it, and sending '' makes
+            // Conekta reject the WHOLE order with "Invalid format for
+            // shipping_contact ... city". Borrowing the other block's city is
+            // strictly better than shipping an empty string.
+            'city'       => $get($prefix, 'city') ?: $get($other, 'city'),
             'state'      => $get($prefix, 'state'),
             'country'    => $get($prefix, 'country'),
             'postcode'   => $get($prefix, 'postcode'),

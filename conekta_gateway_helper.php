@@ -58,6 +58,27 @@ function ckpg_check_balance($order, $total): array
 
 
 
+/**
+ * Report whether the current checkout submission came through WooCommerce
+ * Blocks or the classic checkout, for the Conekta order metadata.
+ *
+ * Blocks submits via the Store API (a REST request to /wc/store/v1/checkout);
+ * classic posts to wc-ajax=checkout (admin-ajax, not REST). The card gateway
+ * gets this from an explicit frontend param on the checkout-request, but the
+ * cash, bank transfer, BNPL and pay-by-bank gateways run a single
+ * process_payment() for both flows, so we detect it server-side here.
+ */
+function ckpg_detect_checkout_type(): string
+{
+    if (function_exists('WC') && method_exists(WC(), 'is_store_api_request') && WC()->is_store_api_request()) {
+        return 'blocks';
+    }
+    if (defined('REST_REQUEST') && REST_REQUEST) {
+        return 'blocks';
+    }
+    return 'classic';
+}
+
 function ckpg_build_order_metadata($data): array
 {
     $metadata = array(
@@ -66,6 +87,10 @@ function ckpg_build_order_metadata($data): array
         'plugin' => 'woocommerce',
         'woocommerce_version' => $data['woocommerce_version'],
         'payment_method' => $data['payment_method'],
+        // Mirror the card gateway's metadata so every payment method records
+        // whether the order came from Blocks or classic. Callers may override
+        // by passing woocommerce_checkout_type in $data; otherwise detect it.
+        'woocommerce_checkout_type' => $data['woocommerce_checkout_type'] ?? ckpg_detect_checkout_type(),
     );
 
     if (!empty($data['customer_message'])) {
@@ -262,6 +287,31 @@ function ckpg_add_price_level_discount(array &$discount_lines, int $amount): voi
     $discount_lines[] = ['code' => 'dynamic_pricing', 'amount' => $amount, 'type' => 'campaign'];
 }
 
+/**
+ * Conekta rejects a shipping_contact whose address.street1 is too short
+ * (shipping_contact.address.street1.too_short / "contiene menos de 1
+ * caracteres") and hard-fails the checkout with a 422. street1 accepts dashes
+ * (e.g. "----a" is valid), so left-pad it with '-' up to a minimum of 5
+ * characters; a street already >= 5 chars is returned unchanged.
+ */
+function ckpg_pad_street1(string $street): string
+{
+    return str_pad(trim($street), 5, '-', STR_PAD_LEFT);
+}
+
+/**
+ * Conekta rejects a blank city with shipping_contact.address.city.invalid
+ * ("Formato inválido para city") and, unlike street1, its format check does
+ * NOT accept dashes — nor does metadata.soft_validations relax it. Fall back
+ * to a plain "default" token, which clears the format check. A non-blank value
+ * is returned trimmed and unchanged.
+ */
+function ckpg_default_if_blank(string $value): string
+{
+    $value = trim($value);
+    return $value !== '' ? $value : 'default';
+}
+
 function ckpg_build_shipping_contact($data): array
 {
     $shipping_contact = array();
@@ -368,9 +418,9 @@ function ckpg_get_request_data($order)
                 'phone'    => $order->get_billing_phone(),
                 'receiver' => sprintf('%s %s', $name, $last),
                 'address' => array(
-                    'street1'     => $address1,
+                    'street1'     => ckpg_pad_street1($address1),
                     'street2'     => $address2,
-                    'city'        => $city,
+                    'city'        => ckpg_default_if_blank($city),
                     'state'       => $state,
                     'country'     => $country,
                     'postal_code' => $postal
@@ -396,9 +446,9 @@ function ckpg_get_request_data($order)
                 'phone'    => $order->get_billing_phone(),
                 'receiver' => sprintf('%s %s', $name, $last),
                 'address' => array(
-                    'street1'     => $address1,
+                    'street1'     => ckpg_pad_street1($address1),
                     'street2'     => $address2,
-                    'city'        => $city,
+                    'city'        => ckpg_default_if_blank($city),
                     'state'       => $state,
                     'country'     => $country,
                     'postal_code' => $postal

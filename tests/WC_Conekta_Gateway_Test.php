@@ -287,6 +287,40 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     /**
+     * BUG REPRO (paid in Conekta, not in Woo): a Blocks card order whose
+     * Conekta order carries NO reference_id (created before the WC draft
+     * existed) and whose process_payment_api never ran leaves the WC order
+     * sitting in 'checkout-draft' with the conekta-order-id meta as the ONLY
+     * link. The order.paid webhook must still recover it — but the fallback
+     * query in find_order_for_webhook() omits a status, so WooCommerce's
+     * default status set (which excludes 'checkout-draft') hides the order and
+     * the webhook returns "Order not found".
+     */
+    public function test_find_order_for_webhook_recovers_checkout_draft_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $draft = new WC_Order(5000);
+        $draft->set_status('checkout-draft');
+        $draft->update_meta_data('conekta-order-id', 'ord_draftpaid');
+        $test_order_registry[5000] = $draft;
+
+        // order.paid payload as seen in production: no reference_id in metadata.
+        $conekta_order = [
+            'id'       => 'ord_draftpaid',
+            'metadata' => [],
+        ];
+
+        $found = WC_Conekta_Plugin::find_order_for_webhook($conekta_order);
+        $this->assertNotFalse(
+            $found,
+            'Webhook must recover a still-draft order via conekta-order-id meta (else paid in Conekta, not in Woo)'
+        );
+        $this->assertEquals(5000, $found->get_id());
+    }
+
+    /**
      * When reference_id arrives as integer (observed in production),
      * lookup should still work.
      */
@@ -322,6 +356,185 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertSame(4567, WC_Conekta_REST_API::get_blocks_draft_order_id());
 
         WC()->session->__unset('store_api_draft_order');
+    }
+
+    // -------------------------------------------------------
+    // link_draft_order_to_conekta — stamps the reverse conekta-order-id
+    // meta on the Blocks draft order so the order.paid webhook can recover
+    // a paid-but-uncompleted order (paid in Conekta, not in Woo).
+    // -------------------------------------------------------
+
+    public function test_link_draft_order_stamps_conekta_meta_on_draft()
+    {
+        global $test_order_registry;
+        $draft = new WC_Order(6100);
+        $draft->set_status('checkout-draft');
+        $test_order_registry[6100] = $draft;
+        WC()->session->set('store_api_draft_order', 6100);
+
+        $linked = WC_Conekta_REST_API::link_draft_order_to_conekta('ord_link1');
+
+        $this->assertSame(6100, $linked);
+        $this->assertSame('ord_link1', $draft->get_meta('conekta-order-id'),
+            'draft order must carry the conekta-order-id meta so the webhook can recover it');
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_link_draft_order_recoverable_by_webhook_end_to_end()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+        $draft = new WC_Order(6101);
+        $draft->set_status('checkout-draft');
+        $test_order_registry[6101] = $draft;
+        WC()->session->set('store_api_draft_order', 6101);
+
+        // Link happens at checkout-request time (pre-payment)...
+        WC_Conekta_REST_API::link_draft_order_to_conekta('ord_e2e_link');
+
+        // ...so the order.paid webhook (no reference_id in metadata) recovers it.
+        $found = WC_Conekta_Plugin::find_order_for_webhook([
+            'id'       => 'ord_e2e_link',
+            'metadata' => [],
+        ]);
+        $this->assertNotFalse($found);
+        $this->assertSame(6101, $found->get_id());
+
+        WC()->session->__unset('store_api_draft_order');
+    }
+
+    public function test_link_draft_order_returns_null_without_draft()
+    {
+        WC()->session->__unset('store_api_draft_order');
+        $this->assertNull(WC_Conekta_REST_API::link_draft_order_to_conekta('ord_link2'));
+    }
+
+    // -------------------------------------------------------
+    // build_conekta_metadata / resolve_checkout_type — shared by the
+    // create path and the reference_id backfill on the update path.
+    // -------------------------------------------------------
+
+    public function test_build_conekta_metadata_includes_reference_id_when_present()
+    {
+        $gateway = new stdClass();
+        $gateway->version = '6.0.7';
+
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', 6100);
+
+        $this->assertSame('woocommerce', $md['plugin']);
+        $this->assertSame('6.0.7', $md['plugin_conekta_version']);
+        $this->assertSame('WC_Conekta_Gateway', $md['payment_method']);
+        $this->assertSame('blocks', $md['woocommerce_checkout_type']);
+        // reference_id is the webhook's primary Conekta->Woo link.
+        $this->assertSame('6100', $md['reference_id']);
+    }
+
+    public function test_build_conekta_metadata_omits_reference_id_when_absent()
+    {
+        $gateway = new stdClass();
+        $gateway->version = '6.0.7';
+
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'classic', null);
+
+        $this->assertArrayNotHasKey('reference_id', $md);
+        $this->assertSame('classic', $md['woocommerce_checkout_type']);
+    }
+
+    public function test_resolve_checkout_type_normalizes_value()
+    {
+        $mk = fn($v) => new class($v) {
+            private $v;
+            public function __construct($v) { $this->v = $v; }
+            public function get_param($k) { return $this->v; }
+        };
+
+        $this->assertSame('blocks',  WC_Conekta_REST_API::resolve_checkout_type($mk('blocks')));
+        $this->assertSame('classic', WC_Conekta_REST_API::resolve_checkout_type($mk('classic')));
+        $this->assertSame('unknown', WC_Conekta_REST_API::resolve_checkout_type($mk('weird')));
+        $this->assertSame('unknown', WC_Conekta_REST_API::resolve_checkout_type(null));
+    }
+
+    // -------------------------------------------------------
+    // send_webhook_diagnostic — read-only GET beacon that stamps a WC-side
+    // error code as header + query params so it lands in Conekta's request
+    // logs (the only channel Conekta can see when the failure never touches
+    // the API, e.g. order.paid with no recoverable WC order).
+    // -------------------------------------------------------
+
+    /** OrdersApi wired to a Guzzle MockHandler through the real plugin middleware. */
+    private function beacon_api(\GuzzleHttp\Handler\MockHandler $mock): \Conekta\Api\OrdersApi
+    {
+        // Closure::bind instead of ReflectionMethod: reaches the private
+        // static without setAccessible(), which PHP 8.1+ deprecates but
+        // PHP 7.4 (still in the CI matrix) requires.
+        $build = Closure::bind(
+            fn(string $version, callable $handler) => WC_Conekta_Plugin::build_http_client($version, $handler),
+            null,
+            WC_Conekta_Plugin::class
+        );
+        return new \Conekta\Api\OrdersApi(
+            $build('6.0.7', $mock),
+            (new \Conekta\Configuration())->setAccessToken('key_test')
+        );
+    }
+
+    public function test_webhook_diagnostic_stamps_header_and_query()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_beacon","object":"order"}'),
+        ]);
+
+        WC_Conekta_Plugin::send_webhook_diagnostic(
+            $this->beacon_api($mock),
+            'ord_beacon',
+            'mismatch_amount',
+            ['reference_id' => '123', 'event' => 'order.paid']
+        );
+
+        $req = $mock->getLastRequest();
+        $this->assertNotNull($req, 'beacon must actually send the GET');
+        $this->assertSame('GET', $req->getMethod());
+        $this->assertStringContainsString('/orders/ord_beacon', $req->getUri()->getPath());
+        $this->assertSame('mismatch_amount', $req->getHeaderLine('X-Wc-Error-Code'));
+        parse_str($req->getUri()->getQuery(), $query);
+        $this->assertSame('mismatch_amount', $query['wc_error_code'] ?? null);
+        $this->assertSame('123', $query['reference_id'] ?? null);
+        $this->assertSame('order.paid', $query['event'] ?? null);
+        // conekta-php 7.2.0: the SDK's own `client` query param identifies the integration.
+        $this->assertSame('woocommerce', $query['client'] ?? null);
+        // The version header from the base middleware must survive.
+        $this->assertNotEmpty($req->getHeaderLine('X-Conekta-Client-User-Agent'));
+    }
+
+    public function test_webhook_diagnostic_disarms_after_the_beacon_request()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_beacon","object":"order"}'),
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_plain","object":"order"}'),
+        ]);
+        $api = $this->beacon_api($mock);
+
+        WC_Conekta_Plugin::send_webhook_diagnostic($api, 'ord_beacon', 'order_not_found');
+        $api->getOrderById('ord_plain');
+
+        $req = $mock->getLastRequest();
+        $this->assertFalse($req->hasHeader('X-Wc-Error-Code'), 'beacon must not leak into later requests');
+        $this->assertSame('', $req->getUri()->getQuery());
+    }
+
+    public function test_webhook_diagnostic_swallows_api_errors()
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(404, [], '{"object":"error"}'),
+            new \GuzzleHttp\Psr7\Response(200, [], '{"id":"ord_plain","object":"order"}'),
+        ]);
+        $api = $this->beacon_api($mock);
+
+        // Must not throw, and must disarm even on failure.
+        WC_Conekta_Plugin::send_webhook_diagnostic($api, 'ord_missing', 'order_not_found');
+        $api->getOrderById('ord_plain');
+        $this->assertFalse($mock->getLastRequest()->hasHeader('X-Wc-Error-Code'));
     }
 
     public function test_get_blocks_draft_order_id_null_when_session_key_absent()
@@ -1531,6 +1744,44 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertArrayNotHasKey('customer_message', $result);
     }
 
+    public function test_build_order_metadata_includes_checkout_type()
+    {
+        // Every payment method now records blocks-vs-classic. Outside a REST
+        // (Store API) request the detector reports 'classic'.
+        $data = [
+            'order_id'               => 123,
+            'plugin_conekta_version' => '6.0.7',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Cash_Gateway',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertArrayHasKey('woocommerce_checkout_type', $result);
+        $this->assertEquals('classic', $result['woocommerce_checkout_type']);
+    }
+
+    public function test_build_order_metadata_checkout_type_can_be_overridden()
+    {
+        $data = [
+            'order_id'                  => 123,
+            'plugin_conekta_version'    => '6.0.7',
+            'woocommerce_version'       => '9.0.0',
+            'payment_method'            => 'WC_Conekta_Cash_Gateway',
+            'woocommerce_checkout_type' => 'blocks',
+        ];
+
+        $result = ckpg_build_order_metadata($data);
+
+        $this->assertEquals('blocks', $result['woocommerce_checkout_type']);
+    }
+
+    public function test_detect_checkout_type_defaults_to_classic_without_rest()
+    {
+        // No REST_REQUEST in the PHPUnit CLI context -> classic.
+        $this->assertSame('classic', ckpg_detect_checkout_type());
+    }
+
     public function test_build_order_metadata_with_customer_message()
     {
         $data = [
@@ -1885,6 +2136,43 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $this->assertEmpty(ckpg_build_shipping_contact([]));
         $this->assertEmpty(ckpg_build_shipping_contact(['other' => 'data']));
+    }
+
+    // -------------------------------------------------------
+    // ckpg_pad_street1 — guards Conekta's street1.too_short (422)
+    // -------------------------------------------------------
+
+    public function test_pad_street1_left_pads_short_values_to_five()
+    {
+        // Conekta rejects street1 shorter than its minimum; left-pad with '-'.
+        $this->assertSame('-----', ckpg_pad_street1(''));       // empty -> all dashes
+        $this->assertSame('----5', ckpg_pad_street1('5'));      // single char
+        $this->assertSame('--abc', ckpg_pad_street1('abc'));    // 3 chars
+        $this->assertSame('-----', ckpg_pad_street1('   '));    // whitespace-only trims to empty
+    }
+
+    public function test_pad_street1_leaves_long_enough_values_untouched()
+    {
+        $this->assertSame('Calle', ckpg_pad_street1('Calle'));                  // exactly 5
+        $this->assertSame('Av Reforma 100', ckpg_pad_street1('Av Reforma 100')); // longer
+        $this->assertSame('Calle 5', ckpg_pad_street1('  Calle 5  '));          // trimmed, still >= 5
+    }
+
+    // -------------------------------------------------------
+    // ckpg_default_if_blank — guards Conekta's city.invalid (422).
+    // city (unlike street1) rejects dashes, so blanks fall back to "default".
+    // -------------------------------------------------------
+
+    public function test_default_if_blank_falls_back_on_blank()
+    {
+        $this->assertSame('default', ckpg_default_if_blank(''));      // empty
+        $this->assertSame('default', ckpg_default_if_blank('   '));   // whitespace-only
+    }
+
+    public function test_default_if_blank_keeps_real_values_trimmed()
+    {
+        $this->assertSame('CDMX', ckpg_default_if_blank('CDMX'));
+        $this->assertSame('Ciudad de Mexico', ckpg_default_if_blank('  Ciudad de Mexico  '));
     }
 
     // -------------------------------------------------------
@@ -2445,6 +2733,34 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertEquals('carero', $addr['last_name']);
         // phone follows the billing block (the one with data)
         $this->assertEquals('3143159054', $addr['phone']);
+    }
+
+    /**
+     * Regression for the 422 "Invalid format for shipping_contact ... city":
+     * the chosen block (shipping here — it has the street) is missing the city,
+     * so without a fallback we'd send an EMPTY city and Conekta rejects the
+     * whole order. The city must borrow the other block's value instead of
+     * going out blank.
+     */
+    public function test_resolve_address_source_city_falls_back_when_chosen_block_empty()
+    {
+        $customer = $this->makeAddressCustomer(
+            // shipping wins (has the street) but the city slot is empty
+            [
+                'first_name' => 'Ana', 'last_name' => 'Lopez',
+                'address_1' => 'Av Reforma 100', 'city' => '',
+                'state' => 'DF', 'country' => 'MX', 'postcode' => '06600',
+                'phone' => '5512345678',
+            ],
+            // billing carries the real city
+            ['city' => 'Ciudad de Mexico']
+        );
+
+        $addr = WC_Conekta_REST_API::resolve_address_source($customer);
+
+        $this->assertEquals('Av Reforma 100', $addr['address_1']);
+        $this->assertNotSame('', $addr['city'], 'city must never be sent empty');
+        $this->assertEquals('Ciudad de Mexico', $addr['city']);
     }
 
     /**
