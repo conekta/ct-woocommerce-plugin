@@ -112,26 +112,51 @@ const orderEmitter = new OrderEmitter();
 const state = {
   currentScriptEl: null,
   currentCheckoutRequestId: null,
+  // Conekta order id backing the mounted iframe (from checkout-request).
+  // Sent as the hidden conekta_order_id on the checkout POST so the server
+  // can resolve it even when its session state is unreachable — e.g. a guest
+  // creating an account mid-checkout rotates the WC session and orphans the
+  // transient. The server never trusts it blindly (live GET + amount check).
+  currentConektaOrderId: null,
   refreshTimer: null,
   inflight: false,
   payingInProgress: false,
-  // Conekta order id we've already submitted to WooCommerce. The SDK can emit
-  // the finalized-order event more than once (a re-fired 3DS/finalize
-  // callback); we submit the WC checkout only ONCE per Conekta order so a
-  // single payment never creates two WC orders.
+  // Conekta order id we've already submitted/confirmed. The SDK can emit the
+  // finalized-order event more than once (a re-fired 3DS/finalize callback);
+  // we act on each Conekta order only ONCE so a single payment never
+  // completes two WC orders.
   submittedOrderId: null,
-  // FormData snapshot taken at the instant the checkout passed server-side
-  // validation, BEFORE the SDK charge. The final wc-ajax=checkout submit posts
-  // THIS snapshot instead of re-reading the form, so the data WooCommerce
-  // validates pre-charge is byte-for-byte the data it receives post-charge.
-  // Without it, a plugin firing `updated_checkout` during the charge window
-  // (e.g. a postcode->colonia repopulator) could mutate a required field
-  // between validation and submit, making WC reject the order AFTER the card
-  // was already charged (paid, but no order created).
-  validatedFormData: null,
+  // Set when wc-ajax=checkout came back with conekta_pending_payment: the WC
+  // order now exists (pending) and the SDK charge is about to run. onOrder
+  // uses this to confirm THAT order via the confirm endpoint.
+  pendingConfirm: null, // { orderId, orderKey }
+};
+
+const renderCheckoutMessages = (html) => {
+  const form = document.querySelector(FORM_SELECTOR);
+  if (!form) return;
+  const existing = form.querySelector(".woocommerce-notices-wrapper");
+  if (existing) existing.remove();
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "woocommerce-notices-wrapper";
+  wrapper.innerHTML =
+    html || `<div class="woocommerce-error">${utils.getTranslation('form_error')}</div>`;
+
+  form.prepend(wrapper);
+  wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
 const formHandler = {
+  // Order-first flow: this POST creates (or reuses) the WC order BEFORE any
+  // charge. Three outcomes:
+  //  - success + conekta_pending_payment: WC order created and linked; fire
+  //    the SDK charge (3DS included) and let onOrder confirm it.
+  //  - success + redirect (no flag): nothing left to charge — either the
+  //    legacy wallet path or a resubmit whose Conekta order was already paid
+  //    (process_payment completed it server-side). Just navigate.
+  //  - failure: WC validation/stock/etc. rejected the checkout. No charge
+  //    ever happened. Render WC's own messages and let the customer fix it.
   submitForm: async (formData) => {
     try {
       utils.setLoading(true);
@@ -142,35 +167,80 @@ const formHandler = {
       });
       const data = await response.json().catch(() => ({}));
 
+      if (data.result === "success" && data.conekta_pending_payment) {
+        state.pendingConfirm = {
+          orderId: data.order_id,
+          orderKey: data.order_key,
+        };
+        // Keep the loading overlay up: the iframe stays interactive above it
+        // (see setLoading) so the customer can complete a 3DS challenge.
+        orderEmitter.submit();
+        return;
+      }
+
       if (data.result === "success") {
         window.location.href = data.redirect;
-      } else {
-        // The WC submit failed (e.g. transient error). Clear the dedup guard
-        // so the customer can retry with the same already-paid Conekta order.
-        state.submittedOrderId = null;
-        utils.setLoading(false);
-        const form = document.querySelector(FORM_SELECTOR);
-        if (form) {
-          const existing = form.querySelector(".woocommerce-notices-wrapper");
-          if (existing) existing.remove();
-
-          const wrapper = document.createElement("div");
-          wrapper.className = "woocommerce-notices-wrapper";
-          wrapper.innerHTML =
-            data.messages ||
-            `<div class="woocommerce-error">${utils.getTranslation('form_error')}</div>`;
-
-          form.prepend(wrapper);
-          wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+        return;
       }
-    } catch (error) {
-      // Network/parse failure — clear the dedup guard so a retry can resubmit.
+
+      // The WC submit failed. Clear the dedup guard so a wallet retry can
+      // resubmit with the same already-paid Conekta order.
       state.submittedOrderId = null;
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      renderCheckoutMessages(data.messages);
+    } catch (error) {
+      // Network/parse failure — clear guards so a retry can resubmit.
+      state.submittedOrderId = null;
+      state.payingInProgress = false;
       utils.setLoading(false);
       utils.showErrorMessage(utils.getTranslation("form_error"));
     }
-  }
+  },
+
+  // Final step of the order-first flow: the SDK charged the card, ask the
+  // server to verify it against Conekta (paid + amount) and complete the WC
+  // order created before the charge. Server-side it's idempotent, so a
+  // repeated onOrder or a JS retry can call it again safely.
+  confirmOrder: async (conektaOrderId) => {
+    const pending = state.pendingConfirm;
+    try {
+      const response = await fetch(conekta_settings.confirm_url, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nonce: conekta_settings.nonce,
+          order_id: pending ? pending.orderId : 0,
+          order_key: pending ? pending.orderKey : '',
+          conekta_order_id: conektaOrderId,
+        }),
+        credentials: "same-origin",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (data.success && data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
+
+      // The charge went through but the confirm was rejected/failed. The WC
+      // order exists (pending) and the order.paid webhook will complete it —
+      // tell the customer their payment was received so they don't pay twice.
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      utils.showErrorMessage(
+        (data && data.message) || utils.getTranslation('form_error')
+      );
+    } catch (error) {
+      // Network failure after a successful charge: allow a retry — clicking
+      // "Place order" again reuses the same WC order, and process_payment
+      // detects the Conekta order is already paid and completes it.
+      state.submittedOrderId = null;
+      state.payingInProgress = false;
+      utils.setLoading(false);
+      utils.showErrorMessage(utils.getTranslation("form_error"));
+    }
+  },
 };
 
 // Pull a billing/shipping address from the checkout form via FormData (the
@@ -183,7 +253,7 @@ const addressFromForm = (prefix) => {
   if (!form) return {};
   const fd = new FormData(form);
   const out = {};
-  ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'].forEach((field) => {
+  ['first_name', 'last_name', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'phone'].forEach((field) => {
     const value = fd.get(`${prefix}_${field}`);
     if (value) out[field] = String(value).trim();
   });
@@ -227,65 +297,47 @@ const mounter = {
       if (!form) return;
 
       const orderId = (order && order.id) || "";
-      // Ignore a repeated finalize event for an order we already submitted —
-      // the SDK can emit onOrder more than once, and submitting twice would
-      // create a duplicate WC order for the same Conekta payment.
+      // Ignore a repeated finalize event for an order we already handled —
+      // the SDK can emit onOrder more than once, and acting twice could
+      // apply a single Conekta payment to two WC orders.
       if (orderId && orderId === state.submittedOrderId) {
         mounter.wireOrderListeners();
         return;
       }
       state.submittedOrderId = orderId;
 
-      const hidden = form.querySelector('[name="conekta_order_id"]');
-      if (hidden) hidden.value = orderId;
-
-      // Discriminate the source: payingInProgress is set by submitInterceptor
-      // when the user clicked "Realizar el pedido" (card path). If it's still
-      // false here, the charge came from a wallet button inside the iframe
-      // (Apple Pay / Google Pay) that bypassed our submitInterceptor — and
-      // therefore bypassed the server-side validation gate. In that case we
-      // must validate now or wc-ajax=checkout will silently reject the
-      // form behind the SDK's success card.
-      const cameFromWalletButton = !state.payingInProgress;
-      if (cameFromWalletButton) {
-        utils.setLoading(true);
-        try {
-          // Wallet path skips submitInterceptor, so no snapshot was taken
-          // pre-charge. Snapshot now and validate that exact object, then reuse
-          // it for the submit — same consistency guarantee as the card path.
-          const snapshot = new FormData(form);
-          const errors = await submitInterceptor.fetchValidation(snapshot);
-          if (errors && errors.length) {
-            submitInterceptor.renderValidationErrors(errors);
-            utils.setLoading(false);
-            mounter.wireOrderListeners();
-            return;
-          }
-          state.validatedFormData = snapshot;
-        } catch (_) {
-          // Validation endpoint unreachable — fall through and submit anyway.
-          // The customer has already been charged; better to attempt the WC
-          // order than to strand them with a successful Conekta payment.
-        }
+      // Card path (order-first): the WC order was already created by the
+      // wc-ajax=checkout POST before the charge — pendingConfirm holds its
+      // id/key. Just ask the server to verify with Conekta and complete it.
+      if (state.payingInProgress && state.pendingConfirm) {
+        formHandler.confirmOrder(orderId);
+        mounter.wireOrderListeners();
+        return;
       }
 
-      // Submit the snapshot captured at validation time, NOT a fresh read of
-      // the form: a plugin may have mutated a required field during the charge
-      // window. Falls back to the live form only if no snapshot exists (e.g. a
-      // wallet charge whose validation request failed above).
-      const formData = state.validatedFormData || new FormData(form);
+      // Wallet path (Apple Pay / Google Pay): the charge started inside the
+      // iframe without going through "Place order", so no WC order exists
+      // yet. Legacy flow: post the checkout now with the hidden
+      // conekta_order_id; process_payment completes it server-side. If WC
+      // rejects the submit, the order.paid webhook creates the order from
+      // the Conekta payload (last-resort).
+      const hidden = form.querySelector('[name="conekta_order_id"]');
+      if (hidden) hidden.value = orderId;
+      utils.setLoading(true);
+      const formData = new FormData(form);
       formData.set("conekta_order_id", orderId);
       formData.append("wc-ajax", "checkout");
-      formHandler.submitForm(formData).finally(() => {
-        state.payingInProgress = false;
-        state.validatedFormData = null;
-      });
+      formHandler.submitForm(formData);
       // OrderEmitter wipes listeners after each event; rebind for the next round.
       mounter.wireOrderListeners();
     });
 
     orderEmitter.onError((error) => {
+      // Charge declined or SDK error. In the order-first flow the WC order
+      // already exists as pending — a retry click re-posts the checkout and
+      // WooCommerce reuses that same order (order_awaiting_payment).
       state.payingInProgress = false;
+      state.pendingConfirm = null;
       utils.setLoading(false);
       utils.showErrorMessage(
         (error && error.message) || utils.getTranslation("form_error")
@@ -331,12 +383,12 @@ const mounter = {
 };
 
 // Hook into WC classic's `checkout_place_order_<method>` jQuery filter to
-// intercept the place-order click. The filter fires BEFORE WC's server-side
-// validation, so we re-run that validation explicitly via /checkout-request
-// (validate mode) and only trigger the SDK charge when WC would let the
-// order through. Without this gate the iframe could charge against a form
-// WC was about to reject, leaving the customer paid for an order WC never
-// created.
+// intercept the place-order click. Order-first flow: we post the real
+// wc-ajax=checkout FIRST — WooCommerce runs its full validation and CREATES
+// the order (pending) before any money moves. Only when that succeeds does
+// formHandler.submitForm fire the SDK charge (conekta_pending_payment), and
+// onOrder then confirms the already-existing WC order. A card can never be
+// charged for an order WooCommerce refused to create.
 const submitInterceptor = {
   attach: () => {
     if (!window.jQuery || submitInterceptor._attached) return;
@@ -354,88 +406,32 @@ const submitInterceptor = {
       }
 
       // HTML5 native gate: short-circuits empty required / bad pattern fields
-      // without paying for the validation roundtrip.
+      // without paying for the checkout roundtrip.
       const form = document.querySelector(FORM_SELECTOR);
       if (form && typeof form.checkValidity === 'function' && !form.checkValidity()) {
         if (typeof form.reportValidity === 'function') form.reportValidity();
         return false;
       }
 
-      // From here we always halt WC's native submission and drive the rest
-      // ourselves: server-side validation, then SDK charge, then formHandler
-      // posts to wc-ajax=checkout to create the actual WC order.
+      // Halt WC's native submission and drive the flow ourselves: create the
+      // WC order first, then charge, then confirm.
       state.payingInProgress = true;
+      state.pendingConfirm = null;
       utils.setLoading(true);
-      submitInterceptor.runValidationAndCharge(form);
+
+      // Send the Conekta order id along: the server prefers its own session
+      // state but needs this fallback when the WC session rotates mid-request
+      // (guest creating an account). See state.currentConektaOrderId.
+      const hidden = form.querySelector('[name="conekta_order_id"]');
+      if (hidden && state.currentConektaOrderId) {
+        hidden.value = state.currentConektaOrderId;
+      }
+
+      const formData = new FormData(form);
+      formData.append("wc-ajax", "checkout");
+      formHandler.submitForm(formData);
       return false;
     });
-  },
-
-  runValidationAndCharge: async (form) => {
-    try {
-      // Snapshot the form ONCE: validate this exact FormData and later submit
-      // the same object. Capturing it up-front (not after the validation
-      // round-trip) closes even the network-gap window — what WC validates is
-      // byte-for-byte what onOrder will post after the charge.
-      const snapshot = new FormData(form);
-      const errors = await submitInterceptor.fetchValidation(snapshot);
-      if (errors && errors.length) {
-        submitInterceptor.renderValidationErrors(errors);
-        state.payingInProgress = false;
-        utils.setLoading(false);
-        return;
-      }
-      state.validatedFormData = snapshot;
-      orderEmitter.submit();
-    } catch (err) {
-      state.payingInProgress = false;
-      utils.setLoading(false);
-      utils.showErrorMessage(err.message || utils.getTranslation('form_error'));
-    }
-  },
-
-  // Accepts a FormData snapshot so the caller controls exactly what gets
-  // validated (and can reuse the same object for the final submit).
-  fetchValidation: async (fd) => {
-    const formData = {};
-    if (fd) {
-      fd.forEach((value, key) => { formData[key] = value; });
-    }
-    const res = await fetch(conekta_settings.checkout_request_url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nonce: conekta_settings.nonce,
-        validate: 1,
-        form_data: formData,
-      }),
-      credentials: 'same-origin',
-    });
-    const data = await res.json().catch(() => ({}));
-    if (data && Array.isArray(data.errors)) return data.errors;
-    if (!res.ok) throw new Error((data && data.message) || `HTTP ${res.status}`);
-    return [];
-  },
-
-  renderValidationErrors: (errors) => {
-    const form = document.querySelector(FORM_SELECTOR);
-    if (!form) return;
-    const existing = form.querySelector('.woocommerce-notices-wrapper');
-    if (existing) existing.remove();
-
-    const wrapper = document.createElement('div');
-    wrapper.className = 'woocommerce-notices-wrapper';
-    const list = document.createElement('ul');
-    list.className = 'woocommerce-error';
-    list.setAttribute('role', 'alert');
-    errors.forEach((e) => {
-      const li = document.createElement('li');
-      li.textContent = (e && e.message) || '';
-      list.appendChild(li);
-    });
-    wrapper.appendChild(list);
-    form.prepend(wrapper);
-    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
   },
 };
 
@@ -461,6 +457,9 @@ const orchestrator = {
 
     try {
       const data = await requestCheckout();
+      if (data.conekta_order_id) {
+        state.currentConektaOrderId = data.conekta_order_id;
+      }
       if (data.checkout_request_id) {
         // Remount when the amount changed OR when WC has wiped our iframe out
         // of the DOM (which it does on coupon apply, shipping change, etc. —

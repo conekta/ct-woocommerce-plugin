@@ -4,7 +4,7 @@
 Plugin Name: Conekta Payment Gateway
 Plugin URI: https://wordpress.org/plugins/conekta-payment-gateway/
 Description: Payment Gateway through Conekta.io for WooCommerce: credit and debit cards, monthly installments (MSI) for Mexican cards, cash payments, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).
-Version: 6.0.7
+Version: 6.1.0
 Requires at least: 6.1
 Requires PHP: 7.4
 Author: Conekta.io
@@ -95,6 +95,7 @@ function ckpg_enqueue_classic_checkout_script() {
                 'locale'               => $short_locale,
                 'checkout_url'         => \WC_AJAX::get_endpoint('checkout'),
                 'checkout_request_url' => \WC_AJAX::get_endpoint('conekta_checkout_request'),
+                'confirm_url'          => \WC_AJAX::get_endpoint('conekta_confirm_order'),
                 'nonce'                => wp_create_nonce('conekta-checkout-request'),
             ]);
         }

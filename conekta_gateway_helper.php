@@ -574,10 +574,3 @@ function get_expired_at_minutes(int $minutesToAdd): int
  * @param string $message Message to log
  * @param array $context Additional context data
  */
-function info_log($message, $context = [])
-{
-    if (!empty($context)) {
-        $message .= ' | Context: ' . json_encode($context);
-    }
-    error_log('[INFO] ' . $message);
-}

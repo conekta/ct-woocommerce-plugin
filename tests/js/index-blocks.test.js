@@ -213,40 +213,50 @@ describe('index.js (Blocks)', () => {
     });
 
     describe('addrFields', () => {
-        // 8 projected fields → join('|') yields 7 separators.
-        test('returns 7 pipes (8 empty slots) for an empty address', () => {
-            expect(addrFields({})).toBe('|||||||');
+        // 9 projected fields → join('|') yields 8 separators.
+        test('returns 8 pipes (9 empty slots) for an empty address', () => {
+            expect(addrFields({})).toBe('||||||||');
         });
 
         test('handles missing address argument', () => {
-            expect(addrFields()).toBe('|||||||');
+            expect(addrFields()).toBe('||||||||');
         });
 
-        test('joins all 8 fields in fixed order, phone last', () => {
+        test('joins all 9 fields in fixed order, phone last', () => {
             const result = addrFields({
                 first_name: 'Test',
                 last_name:  'User',
                 address_1:  'Calle Test 123',
+                address_2:  'condesa',
                 city:       'CDMX',
                 state:      'DF',
                 postcode:   '11010',
                 country:    'MX',
                 phone:      '3143159054',
             });
-            expect(result).toBe('Test|User|Calle Test 123|CDMX|DF|11010|MX|3143159054');
+            expect(result).toBe('Test|User|Calle Test 123|condesa|CDMX|DF|11010|MX|3143159054');
         });
 
         test('partial address fills missing slots with empty strings', () => {
-            // 8 fields, 7 separators. Slots in order:
-            // first_name | last_name | address_1 | city | state | postcode | country | phone
-            //   "A"      |    ""     |    ""     |  ""  |  ""   |    ""    |  "MX"   |   ""
-            // → "A||||||MX|"
-            expect(addrFields({ first_name: 'A', country: 'MX' })).toBe('A||||||MX|');
+            // 9 fields, 8 separators. Slots in order:
+            // first_name | last_name | address_1 | address_2 | city | state | postcode | country | phone
+            //   "A"      |    ""     |    ""     |    ""     |  ""  |  ""   |    ""    |  "MX"   |   ""
+            // → "A|||||||MX|"
+            expect(addrFields({ first_name: 'A', country: 'MX' })).toBe('A|||||||MX|');
         });
 
         test('different addresses produce different output', () => {
             const a = { address_1: 'Calle 1', city: 'CDMX' };
             const b = { address_1: 'Calle 2', city: 'CDMX' };
+            expect(addrFields(a)).not.toBe(addrFields(b));
+        });
+
+        // address_2 (colonia) is part of the fingerprint: editing only the
+        // colonia must re-fire /checkout-request so the Conekta order gets
+        // the new street2 before a wallet button charges against it.
+        test('different address_2 produces different output', () => {
+            const a = { address_1: 'Calle 1', address_2: 'condesa' };
+            const b = { address_1: 'Calle 1', address_2: 'roma norte' };
             expect(addrFields(a)).not.toBe(addrFields(b));
         });
 

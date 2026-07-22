@@ -22,6 +22,7 @@ export const addrFields = (a = {}) => [
     a.first_name || '',
     a.last_name  || '',
     a.address_1  || '',
+    a.address_2  || '',
     a.city       || '',
     a.state      || '',
     a.postcode   || '',
@@ -144,6 +145,13 @@ const ContentConekta = (props) => {
     const selectedShipping = pickSelectedShipping(props);
     const shippingRateId = selectedShipping?.id ?? '';
     const billingEmail = billingAddress.email || '';
+
+    // Latest customer snapshot for the pre-charge gate inside onPaymentSetup:
+    // that callback is registered ONCE, so reading these props directly there
+    // would capture the first render's (stale) values — same pattern as
+    // checkoutRequestIdRef above.
+    const customerSnapshotRef = useRef({});
+    customerSnapshotRef.current = { billingEmail, billingAddress, shippingAddress };
 
     const hash = buildCheckoutCacheHash({
         cartTotal,
@@ -310,6 +318,60 @@ const ContentConekta = (props) => {
                 return {
                     type: emitResponse.responseTypes.ERROR,
                     message: 'Completa los campos requeridos del formulario antes de pagar.',
+                };
+            }
+
+            // Pre-charge gate: one final checkout-request POST before asking
+            // the SDK to charge. Server-side this stamps the draft WC order id
+            // (reference_id) onto the Conekta order and the conekta-order-id
+            // meta onto the draft — the two-way link the order.paid webhook
+            // relies on. It also confirms the amount is
+            // current: if the server answers with a DIFFERENT
+            // checkout_request_id, the Conekta order was recreated (totals
+            // changed) and the mounted iframe would charge a stale amount —
+            // refuse instead of charging.
+            try {
+                const snapshot = customerSnapshotRef.current;
+                const gateResponse = await fetch(settings.checkout_request_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        nonce: settings.nonce,
+                        email: snapshot.billingEmail,
+                        billing:  snapshot.billingAddress,
+                        shipping: snapshot.shippingAddress,
+                        woocommerce_checkout_type: 'blocks',
+                    }),
+                });
+                const gateData = await gateResponse.json().catch(() => ({}));
+                if (!gateResponse.ok || !gateData?.checkout_request_id) {
+                    return {
+                        type: emitResponse.responseTypes.ERROR,
+                        message: gateData?.message || 'No se pudo preparar el pago. Intenta de nuevo.',
+                    };
+                }
+                // Fail closed on ANY server-side mutation, not just an id
+                // change: mode 'update'/'create' means the Conekta order was
+                // touched between the last sync and this click (amount,
+                // address, recreation) and the mounted iframe may not reflect
+                // it. Remount and ask the customer to retry — never charge
+                // against a state we didn't verify as current.
+                if (
+                    gateData.checkout_request_id !== checkoutRequestIdRef.current
+                    || gateData.mode !== 'unchanged'
+                ) {
+                    setCheckoutRequestId(gateData.checkout_request_id);
+                    setMountToken((t) => t + 1);
+                    return {
+                        type: emitResponse.responseTypes.ERROR,
+                        message: 'El importe se actualizó. Revisa el total e intenta de nuevo.',
+                    };
+                }
+            } catch (gateError) {
+                return {
+                    type: emitResponse.responseTypes.ERROR,
+                    message: gateError?.message || 'Error de red al preparar el pago.',
                 };
             }
 

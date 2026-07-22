@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -41,7 +41,7 @@ jobs:
         run: composer install --no-interaction --no-progress
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -74,34 +74,44 @@ jobs:
 
   e2e-checkout:
     runs-on: ubuntu-latest
-    name: E2E Checkout
+    name: E2E Checkout (${{ matrix.shard }})
+    strategy:
+      # Both shards hit the SAME shared staging store and setup() rewrites the
+      # checkout page content (blocks vs classic shortcode), so they must run
+      # one at a time. The matrix still buys independent reporting and
+      # re-running a single failed shard.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        shard: [blocks, classic]
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run E2E tests
+      - name: Run E2E tests (${{ matrix.shard }})
         env:
           CONEKTA_API_KEY: ${{ secrets.CONEKTA_API_KEY }}
           STORE_URL: https://woocommerce.stg.conekta.io
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
+          E2E_SHARD: ${{ matrix.shard }}
         run: npm run test:e2e
 
       - name: Upload E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-failure-artifacts
+          name: e2e-failure-artifacts-${{ matrix.shard }}
           path: test-results/
           retention-days: 1
 
@@ -109,7 +119,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-success-artifacts
+          name: e2e-success-artifacts-${{ matrix.shard }}
           path: test-results/
           retention-days: 1
           if-no-files-found: ignore

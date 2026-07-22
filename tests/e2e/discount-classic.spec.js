@@ -12,7 +12,15 @@
  *  b) DISCOUNT TRIGGERS UPDATE — first POST asserts mode=create, applying a
  *                         coupon triggers a second POST with mode=update
  *                         that reuses the same conekta_order_id.
- *  c) AMOUNT-MISMATCH GUARD   — backend regression: see test.skip note.
+ *  c) AMOUNT-MISMATCH GUARD   — the order-first flow (6.1.0) checks the
+ *                         Conekta order amount against the WC order total
+ *                         BEFORE firing the charge. We force a real mismatch
+ *                         by applying the coupon via a raw wc-ajax fetch
+ *                         (server cart changes, page JS never sees
+ *                         updated_checkout, iframe keeps the stale amount)
+ *                         — the "coupon applied in another tab" case. The
+ *                         gateway must refuse WITHOUT charging, and a
+ *                         remount must let the customer pay the right total.
  */
 const h = require('./checkout-helpers');
 
@@ -104,12 +112,96 @@ h.run('Classic Checkout — Integration component', { checkoutType: 'classic' },
   await h.verifyConektaTotalMatchesWoo(secondBody.conekta_order_id);
 
   // ---------------------------------------------------------------
-  // (c) AMOUNT-MISMATCH GUARD — TODO: requires forging a Conekta order
-  //     whose amount diverges from the WC total. We cannot mint such an
-  //     order against the real Conekta sandbox from the test, and the
-  //     plugin re-fetches the order server-side so client-side route
-  //     mocking does not exercise the guard. Skip until the staging
-  //     stack exposes a deterministic way to seed a mismatched order.
+  // (c) AMOUNT-MISMATCH GUARD — pre-charge gate refuses a stale amount
   // ---------------------------------------------------------------
-  console.log('--- (c) amount-mismatch guard SKIPPED (TODO) ---');
+  console.log('\n--- (c) amount-mismatch guard: coupon applied out-of-band ---');
+
+  // Fresh cart + checkout (the happy path above consumed the previous one).
+  // IMPORTANT: snapshot the capture counter BEFORE navigating — the session
+  // remembers billing fields and the Conekta selection, so the page-load
+  // refresh fires its checkout-request POST while we're still (re)filling
+  // fields, and the label click below doesn't fire a `change` event on an
+  // already-selected radio. Waiting for "one more POST after the fills"
+  // deadlocks; waiting for "one more POST after page entry" is deterministic
+  // (reset_session_on_checkout_entry guarantees a fresh CREATE on entry).
+  const productId = h.getProductId();
+  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${h.QUANTITY}`);
+  await page.waitForLoadState('networkidle');
+
+  const preEntry = captured.length;
+  await page.goto(`${STORE_URL}/checkout/`);
+  await page.waitForLoadState('networkidle');
+  await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
+
+  await page.fill('#billing_first_name', BILLING.first_name);
+  await page.fill('#billing_last_name', BILLING.last_name);
+  await page.fill('#billing_address_1', BILLING.address_1);
+  await page.fill('#billing_city', BILLING.city);
+  await page.selectOption('#billing_state', BILLING.state);
+  await page.fill('#billing_postcode', BILLING.postcode);
+  await page.fill('#billing_phone', BILLING.phone);
+  await page.fill('#billing_email', BILLING.email);
+  await page.locator('#billing_email').blur().catch(() => {});
+  await page.waitForResponse(r => r.url().includes('wc-ajax=update_order_review'), { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  await page.click('label[for="payment_method_conekta"]');
+
+  await waitForCapture(preEntry + 1);
+  const mismatchOrderId = captured[captured.length - 1].conekta_order_id;
+  assert(typeof mismatchOrderId === 'string' && mismatchOrderId.length > 0,
+    `fresh conekta_order_id mounted at FULL price = ${mismatchOrderId}`);
+  await h.waitForIntegrationIframe();
+
+  // Apply the coupon via a RAW wc-ajax fetch: the server cart total drops,
+  // but no `updated_checkout` fires in the page, so the plugin JS never
+  // re-syncs and the mounted Conekta order keeps the stale (higher) amount —
+  // the same divergence as a coupon applied in another tab.
+  const couponResult = await page.evaluate(async (code) => {
+    const params = window.wc_checkout_params;
+    if (!params) return 'no wc_checkout_params';
+    const body = new URLSearchParams();
+    body.append('coupon_code', code);
+    body.append('security', params.apply_coupon_nonce);
+    const res = await fetch(params.wc_ajax_url.replace('%%endpoint%%', 'apply_coupon'), {
+      method: 'POST',
+      body,
+      credentials: 'same-origin',
+    });
+    return (await res.text()).slice(0, 200);
+  }, couponCode);
+  console.log(`  out-of-band apply_coupon response: ${couponResult}`);
+  assert(!String(couponResult).includes('error'), 'coupon applied server-side (out of band)');
+
+  // Place order: WooCommerce creates the order with the NEW (discounted)
+  // total, the gateway GETs the Conekta order (stale amount) → must refuse
+  // BEFORE any charge.
+  await h.fillIntegrationCard(h.SUCCESS_CARD);
+  await h.clickPlaceOrder();
+
+  const mismatchOutcome = await h.waitForPaymentError();
+  console.log(`  mismatch outcome: errored=${mismatchOutcome.errored} message="${mismatchOutcome.message}"`);
+  assert(mismatchOutcome.errored, `amount mismatch surfaced an error (${mismatchOutcome.message})`);
+  assert(!page.url().includes('order-received'), 'mismatched totals did NOT reach order-received');
+
+  const afterMismatch = await h.fetchConektaOrder(mismatchOrderId);
+  assert(afterMismatch.payment_status !== 'paid',
+    `the card was NEVER charged on the stale amount (payment_status = ${afterMismatch.payment_status})`);
+
+  // Recovery: nudge the checkout to re-sync (what WC itself does after any
+  // cart change) → the plugin refreshes the Conekta order to the discounted
+  // total and remounts → paying now must succeed.
+  console.log('\n--- (c2) recovery: re-sync, remount, pay the right total ---');
+  const preRecovery = captured.length;
+  await page.evaluate(() => window.jQuery && window.jQuery(document.body).trigger('update_checkout'));
+  await waitForCapture(preRecovery + 1, 30000);
+  await h.waitForIntegrationIframe();
+  const recoveredOrderId = captured[captured.length - 1].conekta_order_id;
+  console.log(`  recovered conekta_order_id = ${recoveredOrderId}`);
+
+  await h.fillIntegrationCard(h.SUCCESS_CARD);
+  await h.clickPlaceOrder();
+  await h.waitForOrderReceivedWith3DS();
+  assert(page.url().includes('order-received'), 'recovery payment reached order-received');
+  // The charged amount must equal the discounted WooCommerce total to the cent.
+  await h.verifyConektaTotalMatchesWoo(recoveredOrderId);
 }).then(passed => process.exit(passed ? 0 : 1));

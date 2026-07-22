@@ -1233,30 +1233,6 @@ async function waitForPaymentError(timeoutMs = 60000) {
   return { errored: false, message: 'timed out waiting for a payment error notice' };
 }
 
-/**
- * Dispatch a synthetic "payment finalized" signal into the page so the
- * frontend writes conekta_order_id and submits to WooCommerce, without
- * depending on the real Integration iframe.
- *
- * Classic: writes the hidden field on form.checkout and submits the form.
- * Blocks:  exposes the value on window so the test can pass it through
- *          paymentMethodData by other means (the blocks spec mocks the
- *          create response and triggers the SDK callback directly).
- */
-async function simulateFinalizePaymentClassic(conektaOrderId) {
-  await page.evaluate((id) => {
-    const form = document.querySelector('form.checkout');
-    let hidden = form.querySelector('input[name="conekta_order_id"]');
-    if (!hidden) {
-      hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'conekta_order_id';
-      form.appendChild(hidden);
-    }
-    hidden.value = id;
-  }, conektaOrderId);
-}
-
 // -------------------------------------------------------
 // Runner
 // -------------------------------------------------------
@@ -1298,7 +1274,7 @@ module.exports = {
   fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
-  INTEGRATION_CONTAINER, waitForIntegrationIframe, simulateFinalizePaymentClassic,
+  INTEGRATION_CONTAINER, waitForIntegrationIframe,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
   waitForPaymentError,
 };
