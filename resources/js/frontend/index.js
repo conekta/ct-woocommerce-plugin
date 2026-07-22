@@ -325,7 +325,7 @@ const ContentConekta = (props) => {
             // the SDK to charge. Server-side this stamps the draft WC order id
             // (reference_id) onto the Conekta order and the conekta-order-id
             // meta onto the draft — the two-way link the order.paid webhook
-            // and the reconciler rely on. It also confirms the amount is
+            // relies on. It also confirms the amount is
             // current: if the server answers with a DIFFERENT
             // checkout_request_id, the Conekta order was recreated (totals
             // changed) and the mounted iframe would charge a stale amount —

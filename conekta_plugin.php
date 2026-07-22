@@ -19,8 +19,6 @@ use GuzzleHttp\Client;
 
 // Include REST API endpoints for 3DS
 require_once(__DIR__ . '/conekta-rest-api.php');
-// Reconciler: polls Conekta for pending/draft orders when webhooks don't arrive
-require_once(__DIR__ . '/conekta-reconciler.php');
 
 class WC_Conekta_Plugin extends WC_Payment_Gateway
 {

@@ -224,7 +224,7 @@ const formHandler = {
       }
 
       // The charge went through but the confirm was rejected/failed. The WC
-      // order exists (pending) and the webhook/reconciler will complete it —
+      // order exists (pending) and the order.paid webhook will complete it —
       // tell the customer their payment was received so they don't pay twice.
       state.payingInProgress = false;
       utils.setLoading(false);

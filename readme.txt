@@ -51,7 +51,6 @@ By following these steps, you'll successfully install and configure the Conekta 
 * Change: order-first card checkout (classic). "Place order" now creates the WooCommerce order (pending) BEFORE any charge; the Conekta charge fires only after the order exists and is linked (reference_id + real customer data), and a confirm endpoint completes it. A card can no longer be charged for an order WooCommerce refused or failed to create.
 * Fix: paid Conekta orders no longer keep the "Cliente" / "0000000000" / "Pendiente" placeholders — the real name, phone and address from the placed order are pushed to Conekta right before charging.
 * Fix: order.paid webhooks for Blocks orders stuck in checkout-draft now complete correctly (payment_complete silently ignores drafts; they are promoted to pending first). Previously the paid order stayed invisible in the admin.
-* Feature: reconciler job (Action Scheduler, every 15 min) that polls Conekta for recent pending/draft orders and completes or cancels them — heals stores whose webhook never arrives.
 * Feature: last-resort recovery — an order.paid webhook with no matching WooCommerce order now creates one from the Conekta payload (products resolved via product_id line-item metadata). Mainly covers wallet payments (Apple/Google Pay) that charge without going through "Place order".
 
 = 6.0.7 =

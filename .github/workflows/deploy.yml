@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout código fuente
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Configurar PHP
         uses: shivammathur/setup-php@v2
@@ -26,7 +26,7 @@ jobs:
         run: composer install --no-dev --no-interaction --no-progress
 
       - name: Instalar Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
 
