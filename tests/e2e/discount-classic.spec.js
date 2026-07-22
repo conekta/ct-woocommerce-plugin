@@ -117,9 +117,18 @@ h.run('Classic Checkout — Integration component', { checkoutType: 'classic' },
   console.log('\n--- (c) amount-mismatch guard: coupon applied out-of-band ---');
 
   // Fresh cart + checkout (the happy path above consumed the previous one).
+  // IMPORTANT: snapshot the capture counter BEFORE navigating — the session
+  // remembers billing fields and the Conekta selection, so the page-load
+  // refresh fires its checkout-request POST while we're still (re)filling
+  // fields, and the label click below doesn't fire a `change` event on an
+  // already-selected radio. Waiting for "one more POST after the fills"
+  // deadlocks; waiting for "one more POST after page entry" is deterministic
+  // (reset_session_on_checkout_entry guarantees a fresh CREATE on entry).
   const productId = h.getProductId();
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${h.QUANTITY}`);
   await page.waitForLoadState('networkidle');
+
+  const preEntry = captured.length;
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');
   await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
@@ -137,8 +146,7 @@ h.run('Classic Checkout — Integration component', { checkoutType: 'classic' },
   await page.waitForTimeout(500);
   await page.click('label[for="payment_method_conekta"]');
 
-  const preMismatch = captured.length;
-  await waitForCapture(preMismatch + 1);
+  await waitForCapture(preEntry + 1);
   const mismatchOrderId = captured[captured.length - 1].conekta_order_id;
   assert(typeof mismatchOrderId === 'string' && mismatchOrderId.length > 0,
     `fresh conekta_order_id mounted at FULL price = ${mismatchOrderId}`);
@@ -185,7 +193,7 @@ h.run('Classic Checkout — Integration component', { checkoutType: 'classic' },
   console.log('\n--- (c2) recovery: re-sync, remount, pay the right total ---');
   const preRecovery = captured.length;
   await page.evaluate(() => window.jQuery && window.jQuery(document.body).trigger('update_checkout'));
-  await waitForCapture(preRecovery + 1, 20000);
+  await waitForCapture(preRecovery + 1, 30000);
   await h.waitForIntegrationIframe();
   const recoveredOrderId = captured[captured.length - 1].conekta_order_id;
   console.log(`  recovered conekta_order_id = ${recoveredOrderId}`);

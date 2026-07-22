@@ -414,6 +414,14 @@ class WC_Conekta_REST_API {
                 'type'                    => OrderCheckoutRequest::TYPE_INTEGRATION,
                 'allowed_payment_methods' => self::build_allowed_payment_methods($gateway),
                 'name'                    => 'WooCommerce checkout',
+                // Honor the gateway's "Vencimiento de las órdenes de pago
+                // (Días)" setting — previously only cash/SPEI sent it and the
+                // card checkout silently ignored it. With order-first this is
+                // also the lifecycle of abandoned WC orders: when the Conekta
+                // order expires, the order.expired webhook cancels the linked
+                // pending WooCommerce order (releasing any stock hold), even
+                // on stores without WooCommerce's own hold-stock auto-cancel.
+                'expires_at'              => get_expired_at((int) ($gateway->settings['order_expiration'] ?? 1) ?: 1),
             ];
 
             if (!empty($msi_options)) {
