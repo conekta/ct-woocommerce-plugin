@@ -215,16 +215,6 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
 
     }
 
-    protected function ckpg_mark_as_failed_payment($order)
-    {
-        $order->add_order_note(
-            sprintf(
-                "%s conekta Payment Failed",
-                $this->GATEWAY_NAME,
-            )
-        );
-    }
-
     public function payment_fields() {
         if (!empty($this->description)) {
             echo wpautop(wp_kses_post($this->description));

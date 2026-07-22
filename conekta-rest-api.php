@@ -24,13 +24,6 @@ class WC_Conekta_REST_API {
     // entirely. TTL matches WC's 48h session expiry.
     const STATE_TRANSIENT_PREFIX = 'conekta_checkout_state_';
     const STATE_TRANSIENT_TTL    = 48 * 3600; // 48h in seconds (WC session expiry)
-    // Kept ONLY for backwards compatibility with read sites elsewhere
-    // (e.g. block_gateway) that still reference these constants; nothing
-    // is written under these keys anymore.
-    const SESSION_ORDER_ID            = 'conekta_checkout_order_id';
-    const SESSION_CHECKOUT_REQUEST_ID = 'conekta_checkout_request_id';
-    const SESSION_LAST_AMOUNT         = 'conekta_checkout_last_amount';
-    const SESSION_LAST_SHIPPING_HASH  = 'conekta_checkout_last_shipping_hash';
 
     // Placeholders sent to Conekta when the shopper hasn't provided the data
     // yet (the order is created early to mount the iframe). Centralized so the
@@ -919,15 +912,7 @@ class WC_Conekta_REST_API {
     }
 
     public static function clear_session(): void {
-        // Primary path: drop the transient.
         self::state_delete();
-        // Backward-compat: also clear any keys an older plugin version may
-        // still have in wp_woocommerce_session. Cheap and safe.
-        if (!WC()->session) return;
-        WC()->session->__unset(self::SESSION_ORDER_ID);
-        WC()->session->__unset(self::SESSION_CHECKOUT_REQUEST_ID);
-        WC()->session->__unset(self::SESSION_LAST_AMOUNT);
-        WC()->session->__unset(self::SESSION_LAST_SHIPPING_HASH);
     }
 
 }

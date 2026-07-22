@@ -32,7 +32,7 @@ function setupGlobals(overrides = {}) {
   global.jQuery = undefined;
   global.ConektaCheckoutComponents = undefined;
   global.CONEKTA_TRANSLATIONS = {
-    es: { token_error: 'Error de token', form_error: 'Error', '3ds_error': 'Error 3DS' },
+    es: { form_error: 'Error', email_required: 'Completa tu correo para ver el formulario de pago' },
   };
 }
 

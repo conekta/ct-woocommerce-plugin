@@ -108,14 +108,33 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!self::validate_reference_id($conekta_order)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
+            echo json_encode([
+                'error'  => 'Invalid order id: the event payload carries neither a numeric metadata.reference_id nor a Conekta order id, so the WooCommerce order cannot be resolved.',
+                'source' => 'handleOrderPaid',
+                'event'  => $event['type'] ?? 'order.paid',
+            ]);
             exit;
         }
 
-        if (!self::check_order_status($ordersApi, $conekta_order['id'], array('paid'))) {
+        // Never trust the event payload: re-read the payment status from the
+        // API. A mismatch here usually means the API is lagging the event —
+        // the 400 makes Conekta retry, and a later retry passes.
+        $api_payment_status = self::fetch_conekta_payment_status($ordersApi, $conekta_order['id']);
+        if ($api_payment_status !== 'paid') {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status']);
+            echo json_encode([
+                'error'            => sprintf(
+                    'Invalid order status: %s event received, but the Conekta API reports payment_status "%s" (expected "paid"). Not completing the WooCommerce order; Conekta will retry this webhook.',
+                    $event['type'] ?? 'order.paid',
+                    $api_payment_status
+                ),
+                'source'           => 'handleOrderPaid',
+                'event'            => $event['type'] ?? 'order.paid',
+                'conekta_order_id' => $conekta_order['id'] ?? null,
+                'payment_status'   => $api_payment_status,
+                'expected'         => ['paid'],
+            ]);
             exit;
         }
 
@@ -350,14 +369,35 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!self::validate_reference_id($conekta_order)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
+            echo json_encode([
+                'error'  => 'Invalid order id: the event payload carries neither a numeric metadata.reference_id nor a Conekta order id, so the WooCommerce order cannot be resolved.',
+                'source' => 'handleOrderExpiredOrCanceled',
+                'event'  => $event['type'] ?? 'order.expired_or_canceled',
+            ]);
             exit;
         }
 
-        if (!self::check_order_status($ordersApi, $conekta_order['id'], array('expired', 'canceled'))) {
+        // Never trust the event payload: re-read the payment status from the
+        // API. The common mismatch: the expired/canceled event refers to an
+        // order the API now reports as paid (customer completed the payment
+        // around the expiry) — cancelling the WC order would be destructive,
+        // so refuse and let Conekta's retries settle it.
+        $api_payment_status = self::fetch_conekta_payment_status($ordersApi, $conekta_order['id']);
+        if (!in_array($api_payment_status, ['expired', 'canceled'], true)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status']);
+            echo json_encode([
+                'error'            => sprintf(
+                    'Invalid order status: %s event received, but the Conekta API reports payment_status "%s" (expected "expired" or "canceled"). Not cancelling the WooCommerce order.',
+                    $event['type'] ?? 'order.expired_or_canceled',
+                    $api_payment_status
+                ),
+                'source'           => 'handleOrderExpiredOrCanceled',
+                'event'            => $event['type'] ?? 'order.expired_or_canceled',
+                'conekta_order_id' => $conekta_order['id'] ?? null,
+                'payment_status'   => $api_payment_status,
+                'expected'         => ['expired', 'canceled'],
+            ]);
             exit;
         }
 
@@ -430,13 +470,26 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     }
     
     /**
+     * Live payment_status of a Conekta order, straight from the API. The
+     * webhook handlers never trust the event payload's status — this read is
+     * the source of truth, and its value is echoed back in the webhook
+     * response so a mismatch is diagnosable from the Conekta dashboard.
+     *
+     * @throws ApiException
+     */
+    public static function fetch_conekta_payment_status(OrdersApi $ordersApi, string $conekta_order_id): string
+    {
+        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
+
+        return (string) $conekta_order_api->getPaymentStatus();
+    }
+
+    /**
      * @throws ApiException
      */
     public static function check_order_status(OrdersApi $ordersApi, string $conekta_order_id, array $statuses): bool
     {
-        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
-
-        return in_array($conekta_order_api->getPaymentStatus(), $statuses);
+        return in_array(self::fetch_conekta_payment_status($ordersApi, $conekta_order_id), $statuses);
     }
     
     /**

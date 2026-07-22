@@ -3000,36 +3000,6 @@ class WC_Conekta_Gateway_Test extends TestCase
         );
     }
 
-    // -------------------------------------------------------
-    // clear_session
-    // -------------------------------------------------------
-
-    public function test_clear_session_removes_all_four_session_keys()
-    {
-        WC()->session->set(WC_Conekta_REST_API::SESSION_ORDER_ID, 'ord_123');
-        WC()->session->set(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID, 'cr_123');
-        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_AMOUNT, 12345);
-        WC()->session->set(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH, 'abc123');
-
-        WC_Conekta_REST_API::clear_session();
-
-        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_ORDER_ID));
-        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_CHECKOUT_REQUEST_ID));
-        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_AMOUNT));
-        $this->assertNull(WC()->session->get(WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH));
-    }
-
-    public function test_session_last_shipping_hash_constant_exists()
-    {
-        // Regression: the unchanged short-circuit in handle_checkout_request
-        // reads this constant. Renaming it without also updating the read
-        // sites would silently downgrade the cache to amount-only and let
-        // the 'Pendiente' placeholder survive.
-        $this->assertSame(
-            'conekta_checkout_last_shipping_hash',
-            WC_Conekta_REST_API::SESSION_LAST_SHIPPING_HASH
-        );
-    }
 
     // -------------------------------------------------------
     // OrderUpdate customer_info regression — pin the SDK
