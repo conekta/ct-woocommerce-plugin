@@ -25,6 +25,7 @@ function setupGlobals(overrides = {}) {
     locale: 'es',
     checkout_url: '/test-checkout',
     checkout_request_url: '/wp-json/conekta/v1/checkout-request',
+    confirm_url: '/test-confirm',
   };
 
   global.conekta_settings = { ...defaults, ...overrides };
@@ -161,16 +162,15 @@ describe('classic-checkout.js', () => {
   });
 
   // -------------------------------------------------------
-  // Validated-snapshot guarantee (regression: paid-but-no-order)
+  // Order-first flow (regression: paid-but-no-order)
   //
-  // Reproduces the production bug: a third-party plugin mutates a required
-  // field during the SDK charge window (between validation and the final
-  // wc-ajax=checkout submit). The fix snapshots the form at validation time
-  // and submits THAT, so the wiped field must NOT reach WooCommerce empty.
-  // If someone reverts to re-reading the form in onOrder, this test fails.
+  // The structural guarantee: the wc-ajax=checkout POST (which creates the
+  // WC order) happens BEFORE the SDK charge, and the charge only fires when
+  // the server answered success + conekta_pending_payment. If someone
+  // reorders this back to charge-first, these tests fail.
   // -------------------------------------------------------
 
-  describe('validated form snapshot', () => {
+  describe('order-first flow', () => {
     // jsdom doesn't implement scrollIntoView (used by notice rendering).
     beforeAll(() => {
       window.HTMLElement.prototype.scrollIntoView = function () {};
@@ -246,25 +246,42 @@ describe('classic-checkout.js', () => {
       }
     };
 
-    test('submits the value validated pre-charge, not the field mutated mid-charge', async () => {
+    // jsdom only implements hash navigation, so redirects in these tests use
+    // fragment URLs ('http://localhost/#gracias') — assigning them to
+    // window.location.href works and is observable, while a full navigation
+    // would throw "Not implemented".
+    afterEach(() => {
+      delete global.fetch;
+    });
+
+    /**
+     * Boots the script against a mocked fetch + SDK and returns the wired
+     * pieces. `responses.checkout` / `responses.confirm` control what the
+     * server answers; every request is recorded in `calls`.
+     */
+    async function bootFlow(responses) {
       const $ = makeJQueryShim();
       global.jQuery = $;
 
-      // fetch: requestCheckout -> validation -> final checkout submit.
-      let capturedCheckoutBody = null;
+      const calls = [];
       global.fetch = jest.fn((url, opts) => {
         if (url === conekta_settings.checkout_url) {
-          // Final wc-ajax=checkout submit: capture the posted FormData.
-          capturedCheckoutBody = opts.body;
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: 'failure' }) });
+          calls.push({ url, body: opts.body });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(responses.checkout) });
         }
-        const body = JSON.parse(opts.body);
-        if (body.validate) {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve({ errors: [] }) });
+        if (url === conekta_settings.confirm_url) {
+          calls.push({ url, body: JSON.parse(opts.body) });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(responses.confirm || {}) });
         }
+        calls.push({ url, body: JSON.parse(opts.body) });
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ success: true, checkout_request_id: 'cr_1', mode: 'create' }),
+          json: () => Promise.resolve({
+            success: true,
+            conekta_order_id: 'ord_mounted_1',
+            checkout_request_id: 'cr_1',
+            mode: 'create',
+          }),
         });
       });
 
@@ -278,41 +295,143 @@ describe('classic-checkout.js', () => {
 
       // Wire the SDK: fire the injected <script>'s onload with a mocked
       // ConektaCheckoutComponents so loadConektaScript captures the callbacks.
+      // Stale module instances from earlier tests in this file also mount
+      // their own script tags when DOMContentLoaded re-fires — ours is the
+      // LAST one appended (our instance's listener registers last), so wire
+      // that one to bind the callbacks to the live instance's OrderEmitter.
       let sdkCallbacks = null;
       global.ConektaCheckoutComponents = {
         Integration: ({ callbacks }) => { sdkCallbacks = callbacks; },
       };
-      const sdkScript = document.querySelector('script[src*="conekta-checkout.min.js"]');
-      expect(sdkScript).not.toBeNull();
-      sdkScript.onload();
+      const sdkScripts = document.querySelectorAll('script[src*="conekta-checkout.min.js"]');
+      expect(sdkScripts.length).toBeGreaterThan(0);
+      sdkScripts[sdkScripts.length - 1].onload();
       expect(sdkCallbacks).not.toBeNull();
 
-      // The SDK hands us the submit trigger (fires the charge). Stub it.
       const chargeSpy = jest.fn();
       sdkCallbacks.onUpdateSubmitTrigger(chargeSpy);
 
-      // Customer clicks "Realizar el pedido" → validation runs, snapshot is
-      // taken, charge is triggered.
-      $('form.checkout').trigger('checkout_place_order_conekta');
+      return { $, form, calls, chargeSpy, sdkCallbacks };
+    }
+
+    // NOTE on counting: loadScript() re-evaluates the module per test but the
+    // shared `document` keeps DOMContentLoaded listeners from earlier tests
+    // in this file, so stale instances may also react to a trigger. All
+    // checkout-count assertions are therefore DELTAS against a baseline, and
+    // body assertions read the LAST captured POST (ours).
+    const checkoutCalls = (calls) => calls.filter((c) => c.url === conekta_settings.checkout_url);
+    const confirmCalls  = (calls) => calls.filter((c) => c.url === conekta_settings.confirm_url);
+    const last = (arr) => arr[arr.length - 1];
+
+    test('full happy path: checkout creates the order BEFORE charging → charge → confirm → redirect', async () => {
+      const flow = await bootFlow({
+        checkout: {
+          result: 'success',
+          conekta_pending_payment: true,
+          order_id: 123,
+          order_key: 'wc_order_key_abc',
+        },
+        confirm: { success: true, redirect: 'http://localhost/#gracias' },
+      });
+
+      // Customer clicks "Realizar el pedido" → the wc-ajax=checkout POST
+      // fires FIRST; no charge until the server confirms the order exists.
+      const baseline = checkoutCalls(flow.calls).length;
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
       await flush();
-      expect(chargeSpy).toHaveBeenCalled(); // validation passed, charge started
 
-      // PLUGIN MUTATION during the charge window: wipe the required field.
-      form.querySelector('[name="billing_address_1"]').value = '';
+      const wcPosts = checkoutCalls(flow.calls);
+      expect(wcPosts.length).toBeGreaterThan(baseline);
+      const post = last(wcPosts);
+      expect(post.body).toBeInstanceOf(FormData);
+      expect(post.body.get('wc-ajax')).toBe('checkout');
+      // Card path posts the MOUNTED (unpaid) Conekta order id as a fallback
+      // for the server-side session state (guest-creates-account case). The
+      // server branches on the order's real paid status, so an unpaid id
+      // still routes to the order-first path — no charge has happened yet.
+      expect(post.body.get('conekta_order_id')).toBe('ord_mounted_1');
 
-      // SDK finishes the charge → onOrder posts the WC checkout.
-      sdkCallbacks.onFinalizePayment({ id: 'ord_test_123' });
+      // Server said success + pending payment → NOW the charge fires (exactly
+      // once: only the live instance holds the SDK submit trigger).
+      expect(flow.chargeSpy).toHaveBeenCalledTimes(1);
+
+      flow.sdkCallbacks.onFinalizePayment({ id: 'ord_test_123' });
       await flush();
 
-      // The submit must carry the VALIDATED value, not the wiped field.
-      expect(capturedCheckoutBody).toBeInstanceOf(FormData);
-      expect(capturedCheckoutBody.get('billing_address_1')).toBe('Calle Real 123');
-      expect(capturedCheckoutBody.get('conekta_order_id')).toBe('ord_test_123');
-      expect(capturedCheckoutBody.get('wc-ajax')).toBe('checkout');
+      const confirmed = confirmCalls(flow.calls);
+      expect(confirmed).toHaveLength(1);
+      expect(confirmed[0].body.order_id).toBe(123);
+      expect(confirmed[0].body.order_key).toBe('wc_order_key_abc');
+      expect(confirmed[0].body.conekta_order_id).toBe('ord_test_123');
+      expect(window.location.href).toBe('http://localhost/#gracias');
     });
 
-    afterEach(() => {
-      delete global.fetch;
+    test('WC validation failure means the card is NEVER charged', async () => {
+      const flow = await bootFlow({
+        checkout: {
+          result: 'failure',
+          messages: '<div class="woocommerce-error">Falta la dirección</div>',
+        },
+      });
+
+      const baseline = checkoutCalls(flow.calls).length;
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+
+      const afterFirst = checkoutCalls(flow.calls).length;
+      expect(afterFirst).toBeGreaterThan(baseline);
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
+      expect(document.querySelector('.woocommerce-error')).not.toBeNull();
+
+      // The customer can fix the form and retry — a new checkout POST fires.
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+      expect(checkoutCalls(flow.calls).length).toBeGreaterThan(afterFirst);
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
+    });
+
+    test('wallet charge (no place-order click) still posts the legacy checkout with conekta_order_id', async () => {
+      const flow = await bootFlow({
+        checkout: { result: 'success', redirect: 'http://localhost/#gracias-wallet' },
+      });
+
+      // No place-order click: the wallet button inside the iframe charged
+      // directly, so onFinalizePayment arrives with payingInProgress=false.
+      const baseline = checkoutCalls(flow.calls).length;
+      flow.sdkCallbacks.onFinalizePayment({ id: 'ord_wallet_1' });
+      await flush();
+
+      const wcPosts = checkoutCalls(flow.calls);
+      expect(wcPosts.length).toBeGreaterThan(baseline);
+      const post = last(wcPosts);
+      expect(post.body.get('conekta_order_id')).toBe('ord_wallet_1');
+      expect(post.body.get('wc-ajax')).toBe('checkout');
+      expect(window.location.href).toBe('http://localhost/#gracias-wallet');
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
+    });
+
+    test('confirm failure keeps the customer on the page with an error (order stays pending server-side)', async () => {
+      const flow = await bootFlow({
+        checkout: {
+          result: 'success',
+          conekta_pending_payment: true,
+          order_id: 55,
+          order_key: 'wc_key_55',
+        },
+        confirm: { success: false, message: 'Conekta order is not paid (status: pending_payment)' },
+      });
+
+      const hrefBefore = window.location.href;
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+      flow.sdkCallbacks.onFinalizePayment({ id: 'ord_fail_1' });
+      await flush();
+
+      expect(confirmCalls(flow.calls)).toHaveLength(1);
+      // No navigation happened.
+      expect(window.location.href).toBe(hrefBefore);
+      expect(document.querySelector('.woocommerce-error')).not.toBeNull();
     });
   });
 });

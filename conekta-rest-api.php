@@ -41,7 +41,97 @@ class WC_Conekta_REST_API {
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
         add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
+        add_action('wc_ajax_conekta_confirm_order', [self::class, 'wc_ajax_confirm_order']);
         add_action('template_redirect', [self::class, 'reset_session_on_checkout_entry']);
+    }
+
+    /**
+     * Order-first classic flow, final step: the SDK charged the card (onOrder
+     * fired) and the JS asks us to complete the WC order that was created
+     * BEFORE the charge. Reuses complete_wc_order_from_conekta(), which
+     * verifies the Conekta order is actually paid, matches the amount and
+     * guards against applying one payment to two orders.
+     *
+     * Auth: checkout nonce + the order key (only the customer who placed the
+     * order has it). Even without both, the endpoint could not mark anything
+     * paid that Conekta doesn't report as paid.
+     */
+    public static function wc_ajax_confirm_order() {
+        $json   = file_get_contents('php://input');
+        $params = json_decode($json, true) ?: [];
+
+        if (empty($params['nonce']) || !wp_verify_nonce(sanitize_text_field($params['nonce']), 'conekta-checkout-request')) {
+            wp_send_json(['success' => false, 'message' => 'Invalid nonce'], 403);
+            return;
+        }
+
+        $order_id         = absint($params['order_id'] ?? 0);
+        $order_key        = sanitize_text_field((string) ($params['order_key'] ?? ''));
+        $conekta_order_id = sanitize_text_field((string) ($params['conekta_order_id'] ?? ''));
+
+        $order = $order_id ? wc_get_order($order_id) : false;
+        if (!$order || $order_key === '' || !hash_equals($order->get_order_key(), $order_key)) {
+            wp_send_json(['success' => false, 'message' => 'Order not found'], 404);
+            return;
+        }
+        if ($conekta_order_id === '') {
+            wp_send_json(['success' => false, 'message' => 'conekta_order_id required'], 400);
+            return;
+        }
+
+        // The order was linked to its Conekta order in process_payment,
+        // BEFORE the charge. A confirm for a different Conekta id is not
+        // this order's payment — reject instead of re-linking.
+        $linked = (string) $order->get_meta('conekta-order-id');
+        if ($linked !== '' && $linked !== $conekta_order_id) {
+            wp_send_json(['success' => false, 'message' => 'conekta_order_id does not match this order'], 409);
+            return;
+        }
+
+        $gateway = self::get_gateway();
+        if (!$gateway) {
+            wp_send_json(['success' => false, 'message' => 'Conekta gateway not found'], 404);
+            return;
+        }
+
+        // Idempotent retry (double onOrder, JS retry after timeout): already
+        // paid means there's nothing left to do but hand back the redirect.
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            wp_send_json([
+                'success'  => true,
+                'redirect' => $gateway->get_return_url($order),
+            ]);
+            return;
+        }
+
+        $outcome = $gateway->complete_wc_order_from_conekta($order, $conekta_order_id);
+
+        if (!empty($outcome['success'])) {
+            wp_send_json([
+                'success'  => true,
+                'redirect' => $gateway->get_return_url($order),
+            ]);
+            return;
+        }
+
+        if (!empty($outcome['duplicate']) && !empty($outcome['existing_order'])) {
+            wp_send_json([
+                'success'  => true,
+                'redirect' => $gateway->get_return_url($outcome['existing_order']),
+            ]);
+            return;
+        }
+
+        error_log(sprintf(
+            'Conekta - confirm_order: FAILED for WC order #%d (Conekta order %s): %s',
+            $order_id,
+            $conekta_order_id,
+            $outcome['error'] ?? 'unknown'
+        ));
+        wp_send_json([
+            'success' => false,
+            'message' => $outcome['error'] ?? 'unknown',
+        ], 422);
     }
 
     /**
@@ -113,16 +203,6 @@ class WC_Conekta_REST_API {
             $gateway = self::get_gateway();
             if (!$gateway) {
                 return new WP_REST_Response(['success' => false, 'message' => 'Conekta gateway not found'], 404);
-            }
-
-            // Validate-only mode runs WC's full checkout validation chain
-            // (required fields, format, terms, plugin-added validators) and
-            // returns errors WITHOUT creating/updating the Conekta order or
-            // triggering the iframe charge. The classic JS calls this right
-            // before driving the SDK submit so we never charge a card while
-            // WC would have rejected the order on form errors.
-            if ($request && $request->get_param('validate')) {
-                return self::validate_only_response($request);
             }
 
             // Classic checkout fires the email-change handler before WC's
@@ -452,6 +532,10 @@ class WC_Conekta_REST_API {
                     'quantity'   => (int) $cart_item['quantity'],
                     'metadata'   => [
                         'tax_included' => ckpg_item_tax_included($product),
+                        // Lets the order.paid webhook rebuild a real WC order
+                        // (right product, not just a name) when none exists —
+                        // the wallet-path last resort.
+                        'product_id'   => (string) $product->get_id(),
                     ],
                 ];
             }
@@ -515,6 +599,7 @@ class WC_Conekta_REST_API {
                 $first         = $addr['first_name'];
                 $last          = $addr['last_name'];
                 $address1      = $addr['address_1'];
+                $address2      = $addr['address_2'];
                 $city          = $addr['city'];
                 $state         = $addr['state'];
                 $country       = $addr['country'];
@@ -544,6 +629,12 @@ class WC_Conekta_REST_API {
                             'postal_code' => $postcode,
                         ],
                     ];
+                    // street2 (colonia / interior): the cash/SPEI gateways
+                    // already send it; the card path was silently dropping it.
+                    // ALWAYS a string — Conekta accepts '' but rejects null —
+                    // and sent even when empty so removing the colonia on an
+                    // address edit actually clears it on the Conekta order.
+                    $shipping_contact['address']['street2'] = $address2;
                 }
             }
         }
@@ -718,7 +809,7 @@ class WC_Conekta_REST_API {
      * phone are never blank.
      *
      * @param object $customer object exposing get_{shipping,billing}_* getters
-     * @return array{first_name:string,last_name:string,address_1:string,city:string,state:string,country:string,postcode:string,phone:string}
+     * @return array{first_name:string,last_name:string,address_1:string,address_2:string,city:string,state:string,country:string,postcode:string,phone:string}
      */
     public static function resolve_address_source($customer): array {
         $get = function (string $prefix, string $field) use ($customer): string {
@@ -734,6 +825,10 @@ class WC_Conekta_REST_API {
             'first_name' => $get($prefix, 'first_name') ?: $get('billing', 'first_name'),
             'last_name'  => $get($prefix, 'last_name')  ?: $get('billing', 'last_name'),
             'address_1'  => $get($prefix, 'address_1'),
+            // address_2 (colonia / interior) follows the SAME block as
+            // address_1 — no cross-block fallback, mixing blocks would pair
+            // the wrong colonia with the street.
+            'address_2'  => $get($prefix, 'address_2'),
             // City falls back to the other block when the chosen block left it
             // empty. Unlike state/country — which themes pre-fill with stale
             // store defaults, so a per-field fallback there would pair a real
@@ -769,7 +864,7 @@ class WC_Conekta_REST_API {
         if (!$customer || !in_array($type, ['billing', 'shipping'], true) || !is_array($address)) {
             return [];
         }
-        $fields = ['first_name', 'last_name', 'address_1', 'city', 'state', 'postcode', 'country', 'phone'];
+        $fields = ['first_name', 'last_name', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'phone'];
         $written = [];
         foreach ($fields as $field) {
             if (empty($address[$field])) continue;
@@ -835,83 +930,6 @@ class WC_Conekta_REST_API {
         WC()->session->__unset(self::SESSION_LAST_SHIPPING_HASH);
     }
 
-    /**
-     * Run WC's checkout validation against the submitted form data and return
-     * any errors that would otherwise block process_checkout. We hook into
-     * woocommerce_after_checkout_validation at PHP_INT_MAX (so we observe
-     * errors collected by every other listener) and throw a sentinel exception
-     * to abort process_checkout before order creation / payment.
-     */
-    private static function validate_only_response($request): WP_REST_Response {
-        if (!class_exists('WC_Checkout')) {
-            return new WP_REST_Response([
-                'success' => false,
-                'message' => 'WC checkout unavailable',
-            ], 500);
-        }
-
-        $form_data = $request->get_param('form_data');
-        if (!is_array($form_data) || empty($form_data)) {
-            return new WP_REST_Response([
-                'success' => false,
-                'message' => 'form_data required',
-            ], 400);
-        }
-
-        $original_post = $_POST;
-        // process_checkout reads $_POST exclusively, so feed it the form
-        // values verbatim — including the customer's _wpnonce so WC's own
-        // checkout-process nonce check passes.
-        $_POST = $form_data;
-
-        $captured = new WP_Error();
-        $sentinel = 'CONEKTA_VALIDATE_ONLY';
-        $listener = function ($data, $errors) use ($captured, $sentinel) {
-            foreach ($errors->get_error_codes() as $code) {
-                foreach ($errors->get_error_messages($code) as $msg) {
-                    $captured->add($code, $msg);
-                }
-            }
-            throw new \Exception($sentinel);
-        };
-        add_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX, 2);
-
-        try {
-            WC()->checkout()->process_checkout();
-        } catch (\Exception $e) {
-            if ($e->getMessage() !== $sentinel) {
-                $captured->add('checkout_exception', wp_strip_all_tags($e->getMessage()));
-            }
-        } finally {
-            remove_action('woocommerce_after_checkout_validation', $listener, PHP_INT_MAX);
-            $_POST = $original_post;
-            if (function_exists('wc_clear_notices')) {
-                wc_clear_notices();
-            }
-        }
-
-        if ($captured->has_errors()) {
-            $messages = [];
-            foreach ($captured->get_error_codes() as $code) {
-                foreach ($captured->get_error_messages($code) as $msg) {
-                    $messages[] = [
-                        'code'    => $code,
-                        'message' => wp_strip_all_tags($msg),
-                    ];
-                }
-            }
-            return new WP_REST_Response([
-                'success' => false,
-                'mode'    => 'validate',
-                'errors'  => $messages,
-            ], 422);
-        }
-
-        return new WP_REST_Response([
-            'success' => true,
-            'mode'    => 'validate',
-        ], 200);
-    }
 }
 
 add_action('init', ['WC_Conekta_REST_API', 'init']);

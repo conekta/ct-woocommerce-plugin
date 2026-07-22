@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.0.7
+Stable tag: 6.1.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,13 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.1.0 =
+* Change: order-first card checkout (classic). "Place order" now creates the WooCommerce order (pending) BEFORE any charge; the Conekta charge fires only after the order exists and is linked (reference_id + real customer data), and a confirm endpoint completes it. A card can no longer be charged for an order WooCommerce refused or failed to create.
+* Fix: paid Conekta orders no longer keep the "Cliente" / "0000000000" / "Pendiente" placeholders — the real name, phone and address from the placed order are pushed to Conekta right before charging.
+* Fix: order.paid webhooks for Blocks orders stuck in checkout-draft now complete correctly (payment_complete silently ignores drafts; they are promoted to pending first). Previously the paid order stayed invisible in the admin.
+* Feature: reconciler job (Action Scheduler, every 15 min) that polls Conekta for recent pending/draft orders and completes or cancels them — heals stores whose webhook never arrives.
+* Feature: last-resort recovery — an order.paid webhook with no matching WooCommerce order now creates one from the Conekta payload (products resolved via product_id line-item metadata). Mainly covers wallet payments (Apple/Google Pay) that charge without going through "Place order".
+
 = 6.0.7 =
 * Fix: the card checkout no longer fails with a 422 "Invalid format for shipping_contact ... city". An empty city (chosen address block had a street but no city) is now backfilled from the other block, and the card path sends shipping_contact/customer_info with metadata.soft_validations so Conekta warns instead of rejecting odd-but-usable values. Previously both the order update and the recreate failed, so the shopper couldn't pay.
 

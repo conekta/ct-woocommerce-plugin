@@ -722,8 +722,11 @@ class WC_Conekta_Gateway_Test extends TestCase
     // -------------------------------------------------------
 
     /**
-     * find_existing_order_for_conekta_id returns another WC order that already
-     * holds the same conekta-order-id meta, and excludes the current order.
+     * find_existing_order_for_conekta_id returns another PAID WC order that
+     * already holds the same conekta-order-id meta, excludes the current
+     * order, and — critically under the order-first flow — ignores pending
+     * orders sharing the meta (they're retry leftovers, not double payments:
+     * the meta is stamped BEFORE the charge now).
      */
     public function test_find_existing_order_for_conekta_id_detects_duplicate()
     {
@@ -732,7 +735,14 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $paid = new WC_Order(1308);
         $paid->update_meta_data('conekta-order-id', 'ord_dup123');
+        $paid->update_status('processing');
         $test_order_registry[1308] = $paid;
+
+        // A PENDING order with the same meta (order-first retry leftover)
+        // must NOT count as a duplicate.
+        $pending = new WC_Order(1310);
+        $pending->update_meta_data('conekta-order-id', 'ord_pending_x');
+        $test_order_registry[1310] = $pending;
 
         $gateway = $this->createConfiguredGateway();
         $method = new ReflectionMethod($gateway, 'find_existing_order_for_conekta_id');
@@ -748,6 +758,9 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         // Unknown conekta order id -> no duplicate.
         $this->assertFalse($method->invoke($gateway, 'ord_other', 1309));
+
+        // Pending order sharing the meta -> NOT a duplicate (retry allowed).
+        $this->assertFalse($method->invoke($gateway, 'ord_pending_x', 1309));
     }
 
     /**
@@ -3419,6 +3432,119 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         // Mock returns 500 for this charge id; method must swallow it, not throw.
         $this->invokeMethod($gateway, 'tag_card_charges_with_wc_order', [$order, $conekta_order]);
+    }
+
+    // -------------------------------------------------------
+    // mark_order_paid — draft promotion + idempotency
+    //
+    // WooCommerce's payment_complete() silently ignores orders in
+    // 'checkout-draft' (not a valid status for payment completion), leaving
+    // paid Blocks orders invisible in the admin. mark_order_paid must promote
+    // the draft to pending first, then complete.
+    // -------------------------------------------------------
+
+    public function test_mark_order_paid_promotes_checkout_draft_and_completes()
+    {
+        $order = new WC_Order(2001);
+        $order->set_status('checkout-draft');
+
+        WC_Conekta_Plugin::mark_order_paid($order, 'ord_draft_1', 'nota de prueba');
+
+        $this->assertEquals('completed', $order->get_status());
+        $this->assertEquals('conekta', $order->get_payment_method());
+        $this->assertEquals('ord_draft_1', $order->get_meta('_transaction_id'));
+    }
+
+    public function test_mark_order_paid_completes_pending_order()
+    {
+        $order = new WC_Order(2002);
+        $order->set_status('pending');
+        $order->set_payment_method('conekta');
+
+        WC_Conekta_Plugin::mark_order_paid($order, 'ord_pend_1', 'nota');
+
+        $this->assertEquals('completed', $order->get_status());
+        $this->assertEquals('conekta', $order->get_payment_method());
+    }
+
+    public function test_mark_order_paid_is_idempotent_on_already_paid_order()
+    {
+        $order = new WC_Order(2003);
+        $order->set_status('processing');
+
+        WC_Conekta_Plugin::mark_order_paid($order, 'ord_again_1', 'nota');
+
+        // No re-completion: the stub would flip to 'completed' if
+        // payment_complete had run again.
+        $this->assertEquals('processing', $order->get_status());
+        $this->assertSame('', (string) $order->get_meta('_transaction_id'));
+    }
+
+    public function test_mark_order_paid_does_not_override_existing_payment_method_on_draft()
+    {
+        $order = new WC_Order(2004);
+        $order->set_status('checkout-draft');
+        $order->set_payment_method('conekta_cash');
+
+        WC_Conekta_Plugin::mark_order_paid($order, 'ord_draft_2', 'nota');
+
+        $this->assertEquals('completed', $order->get_status());
+        $this->assertEquals('conekta_cash', $order->get_payment_method());
+    }
+
+    // -------------------------------------------------------
+    // Order-first classic flow: payload builders fed to the pre-charge PUT.
+    // These are what kill the 'Cliente'/'Pendiente' placeholder complaints —
+    // every paid Conekta order must carry the real WC order data.
+    // -------------------------------------------------------
+
+    public function test_customer_info_from_order_uses_real_billing_data()
+    {
+        $gateway = $this->createConfiguredGateway();
+        $order   = new WC_Order(2101);
+
+        $info = $gateway->customer_info_from_order($order);
+
+        $this->assertEquals('John Doe', $info['name']);
+        $this->assertEquals('john@example.com', $info['email']);
+        $this->assertEquals('+5215555555555', $info['phone']);
+    }
+
+    public function test_shipping_contact_from_order_builds_real_address()
+    {
+        $gateway = $this->createConfiguredGateway();
+        $order   = new WC_Order(2102);
+
+        $contact = $gateway->shipping_contact_from_order($order);
+
+        $this->assertEquals('John Doe', $contact['receiver']);
+        $this->assertEquals('+5215555555555', $contact['phone']);
+        $this->assertEquals('Calle Test 123', $contact['address']['street1']);
+        // street2 must ALWAYS be present as a string — Conekta accepts ''
+        // but rejects null, and omitting it would leave a stale colonia on
+        // the update path.
+        $this->assertArrayHasKey('street2', $contact['address']);
+        $this->assertSame('', $contact['address']['street2']);
+        $this->assertEquals('CDMX', $contact['address']['city']);
+        $this->assertEquals('06600', $contact['address']['postal_code']);
+        $this->assertEquals('MX', $contact['address']['country']);
+    }
+
+    /**
+     * Order-first: with no server-side checkout state (no Conekta order was
+     * ever created for this session) process_payment must fail WITHOUT
+     * charging — and without the legacy conekta_order_id POST it must not
+     * try to complete anything.
+     */
+    public function test_process_payment_order_first_fails_without_checkout_state()
+    {
+        $gateway = $this->createConfiguredGateway();
+        $_POST   = [];
+
+        $result = $gateway->process_payment(2103);
+
+        $this->assertEquals('failure', $result['result']);
+        $this->assertArrayNotHasKey('conekta_pending_payment', $result);
     }
 
     // -------------------------------------------------------
