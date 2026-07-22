@@ -101,7 +101,50 @@ describe('useWalletAutoSubmit', () => {
         act(() => emitter.setOrder({ id: 'ord_wallet' }));
 
         expect(h.refs.walletOrderRef.current).toEqual({ id: 'ord_wallet' });
+        // No Place Order button in the DOM → falls back to the store dispatch.
         expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+        h.unmount();
+    });
+
+    test('prefers clicking the real Place Order button over the __internal dispatch', () => {
+        // The __internal* checkout-store actions are an unstable API and were
+        // observed missing on WooCommerce 10.9 — dispatching them there is a
+        // silent no-op (wallet charged, customer never redirected). The
+        // button click is the public, version-proof path; the dispatch is
+        // only a fallback when no button is rendered.
+        const button = document.createElement('button');
+        button.className = 'wc-block-components-checkout-place-order-button';
+        const clickSpy = jest.fn();
+        button.addEventListener('click', clickSpy);
+        document.body.appendChild(button);
+
+        const h = renderHarness({ emitter });
+        h.refs.expectingChargeRef.current = false;
+        act(() => emitter.setOrder({ id: 'ord_wallet_btn' }));
+
+        expect(clickSpy).toHaveBeenCalledTimes(1);
+        expect(mockInternalSetBeforeProcessing).not.toHaveBeenCalled();
+
+        button.remove();
+        h.unmount();
+    });
+
+    test('skips a DISABLED Place Order button and falls back to the dispatch', () => {
+        const button = document.createElement('button');
+        button.className = 'wc-block-components-checkout-place-order-button';
+        button.disabled = true;
+        const clickSpy = jest.fn();
+        button.addEventListener('click', clickSpy);
+        document.body.appendChild(button);
+
+        const h = renderHarness({ emitter });
+        h.refs.expectingChargeRef.current = false;
+        act(() => emitter.setOrder({ id: 'ord_wallet_disabled' }));
+
+        expect(clickSpy).not.toHaveBeenCalled();
+        expect(mockInternalSetBeforeProcessing).toHaveBeenCalledTimes(1);
+
+        button.remove();
         h.unmount();
     });
 

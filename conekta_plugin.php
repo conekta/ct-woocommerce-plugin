@@ -28,7 +28,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	 */
 	public const API_CLIENT = 'woocommerce';
 
-	public $version  = "6.0.7";
+	public $version  = "6.1.0";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit and debit cards, monthly installments (MSI) for Mexican cards, cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -108,22 +108,71 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!self::validate_reference_id($conekta_order)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
+            echo json_encode([
+                'error'  => 'Invalid order id: the event payload carries neither a numeric metadata.reference_id nor a Conekta order id, so the WooCommerce order cannot be resolved.',
+                'source' => 'handleOrderPaid',
+                'event'  => $event['type'] ?? 'order.paid',
+            ]);
             exit;
         }
 
-        if (!self::check_order_status($ordersApi, $conekta_order['id'], array('paid'))) {
+        // Never trust the event payload: re-read the payment status from the
+        // API. A mismatch here usually means the API is lagging the event —
+        // the 400 makes Conekta retry, and a later retry passes.
+        $api_payment_status = self::fetch_conekta_payment_status($ordersApi, $conekta_order['id']);
+        if ($api_payment_status !== 'paid') {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status']);
+            echo json_encode([
+                'error'            => sprintf(
+                    'Invalid order status: %s event received, but the Conekta API reports payment_status "%s" (expected "paid"). Not completing the WooCommerce order; Conekta will retry this webhook.',
+                    $event['type'] ?? 'order.paid',
+                    $api_payment_status
+                ),
+                'source'           => 'handleOrderPaid',
+                'event'            => $event['type'] ?? 'order.paid',
+                'conekta_order_id' => $conekta_order['id'] ?? null,
+                'payment_status'   => $api_payment_status,
+                'expected'         => ['paid'],
+            ]);
             exit;
         }
 
         $order = self::find_order_for_webhook($conekta_order);
         if (!$order) {
-            // Paid in Conekta but no WooCommerce order to complete — make the
-            // desync visible on the Conekta side (request logs, tagged to the
-            // order id), since this failure never touches the API otherwise.
+            // Paid in Conekta but no WooCommerce order anywhere. Last resort:
+            // CREATE the WC order from the Conekta payload so the money and
+            // the store never disagree (main remaining source: wallet buttons
+            // that charge without going through "Place order"). Only if that
+            // fails do we fall back to the diagnostic + 404.
+            //
+            // Short-lived lock: Conekta retries webhooks aggressively, and two
+            // concurrent order.paid deliveries for the same Conekta order must
+            // not create two WC orders. A locked retry gets a 503 so Conekta
+            // redelivers later, when find_order_for_webhook will find the
+            // order created by the first delivery.
+            $lock_key = 'conekta_wh_create_' . md5((string) ($conekta_order['id'] ?? ''));
+            if (get_transient($lock_key)) {
+                http_response_code(503);
+                header('Content-Type: application/json');
+                echo json_encode(['error' => 'Order creation in progress, retry later']);
+                exit;
+            }
+            set_transient($lock_key, 1, MINUTE_IN_SECONDS);
+
+            $order = self::create_order_from_conekta_payload($conekta_order);
+            if ($order) {
+                error_log(sprintf(
+                    'Conekta - handleOrderPaid: WC order #%d CREATED from webhook payload (Conekta order %s had no WC order)',
+                    $order->get_id(),
+                    $conekta_order['id'] ?? ''
+                ));
+            }
+        }
+        if (!$order) {
+            // Make the desync visible on the Conekta side (request logs,
+            // tagged to the order id), since this failure never touches the
+            // API otherwise.
             self::send_webhook_diagnostic($ordersApi, $conekta_order['id'], 'order_not_found', array_filter([
                 'event'        => 'order.paid',
                 'reference_id' => isset($conekta_order['metadata']['reference_id']) ? (string) $conekta_order['metadata']['reference_id'] : '',
@@ -153,15 +202,162 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             exit;
         }
 
-        $charge = $conekta_order['charges']['data'][0];
-        $paid_at = date("Y-m-d", $charge['paid_at']);
-        self::update_conekta_order_meta($order, $paid_at, 'conekta-paid-at');
-        $order->payment_complete();
-        $order->add_order_note("Payment completed in Conekta and notification of payment received");
+        $charge = $conekta_order['charges']['data'][0] ?? null;
+        if ($charge && !empty($charge['paid_at'])) {
+            $paid_at = date("Y-m-d", $charge['paid_at']);
+            self::update_conekta_order_meta($order, $paid_at, 'conekta-paid-at');
+        }
+        self::mark_order_paid($order, $conekta_order['id'] ?? '', "Payment completed in Conekta and notification of payment received");
 
         header('Content-Type: application/json');
         echo json_encode(['message' => 'OK', 'order_id' => $order->get_id()]);
         exit;
+    }
+
+    /**
+     * Last-resort order builder: a paid Conekta order arrived with NO
+     * matching WooCommerce order (typically a wallet charge whose post-charge
+     * checkout submit never landed). Rebuild the WC order from the Conekta
+     * payload so the payment is never orphaned. Products are resolved through
+     * the product_id stamped into each line_item's metadata by
+     * build_snapshot(); items without it fall back to a named fee line.
+     *
+     * The order total is forced to the amount Conekta actually charged, and a
+     * prominent note asks the merchant to review — this is a recovery path,
+     * not the happy path.
+     *
+     * @return WC_Order|null
+     */
+    public static function create_order_from_conekta_payload(array $conekta_order)
+    {
+        if (!function_exists('wc_create_order')) {
+            return null;
+        }
+        try {
+            $order = wc_create_order([
+                'status'      => 'pending',
+                'created_via' => 'conekta_webhook',
+            ]);
+            if (is_wp_error($order)) {
+                error_log('Conekta - create_order_from_conekta_payload: ' . $order->get_error_message());
+                return null;
+            }
+
+            $currency = strtoupper((string) ($conekta_order['currency'] ?? 'MXN'));
+            $order->set_currency($currency);
+
+            foreach (($conekta_order['line_items']['data'] ?? []) as $item) {
+                $quantity   = max(1, (int) ($item['quantity'] ?? 1));
+                $line_total = ((int) ($item['unit_price'] ?? 0)) * $quantity / 100;
+                $product_id = isset($item['metadata']['product_id']) ? absint($item['metadata']['product_id']) : 0;
+                $product    = $product_id ? wc_get_product($product_id) : false;
+
+                if ($product) {
+                    $order->add_product($product, $quantity, [
+                        'subtotal' => $line_total,
+                        'total'    => $line_total,
+                    ]);
+                } else {
+                    $fee = new WC_Order_Item_Fee();
+                    $fee->set_name((string) ($item['name'] ?? 'Producto'));
+                    $fee->set_total((string) $line_total);
+                    $order->add_item($fee);
+                }
+            }
+
+            foreach (($conekta_order['shipping_lines']['data'] ?? []) as $shipping_line) {
+                $shipping = new WC_Order_Item_Shipping();
+                $shipping->set_method_title((string) ($shipping_line['method'] ?? $shipping_line['carrier'] ?? 'Envío'));
+                $shipping->set_total((string) (((int) ($shipping_line['amount'] ?? 0)) / 100));
+                $order->add_item($shipping);
+            }
+
+            foreach (($conekta_order['discount_lines']['data'] ?? []) as $discount_line) {
+                $fee = new WC_Order_Item_Fee();
+                $fee->set_name('Descuento: ' . (string) ($discount_line['code'] ?? 'descuento'));
+                $fee->set_total((string) (-((int) ($discount_line['amount'] ?? 0)) / 100));
+                $order->add_item($fee);
+            }
+
+            $customer = $conekta_order['customer_info'] ?? [];
+            $contact  = $conekta_order['shipping_contact'] ?? [];
+            $address  = $contact['address'] ?? [];
+
+            $full_name  = trim((string) ($customer['name'] ?? ''));
+            $name_parts = $full_name !== '' ? explode(' ', $full_name, 2) : ['', ''];
+            $order->set_billing_first_name($name_parts[0]);
+            $order->set_billing_last_name($name_parts[1] ?? '');
+            if (!empty($customer['email'])) {
+                $order->set_billing_email(sanitize_email((string) $customer['email']));
+            }
+            if (!empty($customer['phone'])) {
+                $order->set_billing_phone((string) $customer['phone']);
+            }
+            if (!empty($address)) {
+                $receiver       = trim((string) ($contact['receiver'] ?? $full_name));
+                $receiver_parts = $receiver !== '' ? explode(' ', $receiver, 2) : ['', ''];
+                $order->set_shipping_first_name($receiver_parts[0]);
+                $order->set_shipping_last_name($receiver_parts[1] ?? '');
+                $order->set_shipping_address_1((string) ($address['street1'] ?? ''));
+                $order->set_shipping_address_2((string) ($address['street2'] ?? ''));
+                $order->set_shipping_city((string) ($address['city'] ?? ''));
+                $order->set_shipping_state((string) ($address['state'] ?? ''));
+                $order->set_shipping_postcode((string) ($address['postal_code'] ?? ''));
+                $order->set_shipping_country((string) ($address['country'] ?? 'MX'));
+                // Billing address doubles as shipping when we only have one.
+                $order->set_billing_address_1((string) ($address['street1'] ?? ''));
+                $order->set_billing_address_2((string) ($address['street2'] ?? ''));
+                $order->set_billing_city((string) ($address['city'] ?? ''));
+                $order->set_billing_state((string) ($address['state'] ?? ''));
+                $order->set_billing_postcode((string) ($address['postal_code'] ?? ''));
+                $order->set_billing_country((string) ($address['country'] ?? 'MX'));
+            }
+
+            $order->set_payment_method('conekta');
+            // Force the total to what Conekta actually charged — item math may
+            // drift (taxes, rounding) and the money already moved.
+            $order->set_total(((int) ($conekta_order['amount'] ?? 0)) / 100);
+            $order->add_order_note(sprintf(
+                'Pedido creado automáticamente desde el webhook order.paid de Conekta (orden %s): el pago existía en Conekta pero no había pedido en WooCommerce. REVISAR datos y stock.',
+                (string) ($conekta_order['id'] ?? '')
+            ));
+            $order->save();
+
+            if (!empty($conekta_order['id'])) {
+                self::update_conekta_order_meta($order, (string) $conekta_order['id'], 'conekta-order-id');
+            }
+
+            return $order;
+        } catch (\Throwable $e) {
+            error_log('Conekta - create_order_from_conekta_payload: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Complete a WC order for a payment confirmed on the Conekta side.
+     *
+     * Handles the Blocks `checkout-draft` case explicitly: that status is NOT
+     * in woocommerce_valid_order_statuses_for_payment_complete, so calling
+     * payment_complete() directly on a draft is a SILENT NO-OP — the order
+     * stays a draft, which WooCommerce hides from the admin order list. That
+     * was exactly the reported symptom: paid in Conekta, "no order" in Woo
+     * (it existed, but invisible). Promote the draft to pending first, then
+     * complete. Idempotent: safe to call again on an already-paid order.
+     */
+    public static function mark_order_paid($order, string $conekta_order_id, string $note): void
+    {
+        if (in_array($order->get_status(), ['processing', 'completed'], true)) {
+            return;
+        }
+        if ($order->has_status('checkout-draft')) {
+            if (!$order->get_payment_method()) {
+                $order->set_payment_method('conekta');
+            }
+            $order->update_status('pending', 'Conekta: draft de checkout promovido a pendiente para registrar el pago.');
+        }
+        $order->payment_complete($conekta_order_id);
+        $order->add_order_note($note);
     }
     
     /**
@@ -173,14 +369,35 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
         if (!self::validate_reference_id($conekta_order)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order id']);
+            echo json_encode([
+                'error'  => 'Invalid order id: the event payload carries neither a numeric metadata.reference_id nor a Conekta order id, so the WooCommerce order cannot be resolved.',
+                'source' => 'handleOrderExpiredOrCanceled',
+                'event'  => $event['type'] ?? 'order.expired_or_canceled',
+            ]);
             exit;
         }
 
-        if (!self::check_order_status($ordersApi, $conekta_order['id'], array('expired', 'canceled'))) {
+        // Never trust the event payload: re-read the payment status from the
+        // API. The common mismatch: the expired/canceled event refers to an
+        // order the API now reports as paid (customer completed the payment
+        // around the expiry) — cancelling the WC order would be destructive,
+        // so refuse and let Conekta's retries settle it.
+        $api_payment_status = self::fetch_conekta_payment_status($ordersApi, $conekta_order['id']);
+        if (!in_array($api_payment_status, ['expired', 'canceled'], true)) {
             http_response_code(400);
             header('Content-Type: application/json');
-            echo json_encode(['error' => 'Invalid order status']);
+            echo json_encode([
+                'error'            => sprintf(
+                    'Invalid order status: %s event received, but the Conekta API reports payment_status "%s" (expected "expired" or "canceled"). Not cancelling the WooCommerce order.',
+                    $event['type'] ?? 'order.expired_or_canceled',
+                    $api_payment_status
+                ),
+                'source'           => 'handleOrderExpiredOrCanceled',
+                'event'            => $event['type'] ?? 'order.expired_or_canceled',
+                'conekta_order_id' => $conekta_order['id'] ?? null,
+                'payment_status'   => $api_payment_status,
+                'expected'         => ['expired', 'canceled'],
+            ]);
             exit;
         }
 
@@ -196,6 +413,28 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 'error'        => 'Order not found',
                 'reference_id' => $conekta_order['metadata']['reference_id'] ?? null,
                 'conekta_id'   => $conekta_order['id'] ?? null,
+            ]);
+            exit;
+        }
+
+        // Stale-order guard: under the order-first flow a WC order can carry
+        // reference_id on an OLD Conekta order (checkout reloaded -> the
+        // session state was cleared -> a NEW Conekta order was mounted, while
+        // WooCommerce reused the same WC order via order_awaiting_payment).
+        // When that old Conekta order expires days later, this webhook finds
+        // the WC order through reference_id — but the order's current
+        // conekta-order-id meta points at the LIVE Conekta order. Cancelling
+        // it would kill a checkout in progress (or a soon-to-be-paid order).
+        // Only cancel when the event's Conekta id matches the order's current
+        // link; orders without the meta (legacy cash/transfer flows) keep the
+        // old behavior.
+        $linked_conekta_id = (string) $order->get_meta('conekta-order-id');
+        if ($linked_conekta_id !== '' && $linked_conekta_id !== (string) ($conekta_order['id'] ?? '')) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'cancelled' => 'NO',
+                'order_id'  => $order->get_id(),
+                'note'      => 'stale conekta order, current link is ' . $linked_conekta_id,
             ]);
             exit;
         }
@@ -231,13 +470,26 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
     }
     
     /**
+     * Live payment_status of a Conekta order, straight from the API. The
+     * webhook handlers never trust the event payload's status — this read is
+     * the source of truth, and its value is echoed back in the webhook
+     * response so a mismatch is diagnosable from the Conekta dashboard.
+     *
+     * @throws ApiException
+     */
+    public static function fetch_conekta_payment_status(OrdersApi $ordersApi, string $conekta_order_id): string
+    {
+        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
+
+        return (string) $conekta_order_api->getPaymentStatus();
+    }
+
+    /**
      * @throws ApiException
      */
     public static function check_order_status(OrdersApi $ordersApi, string $conekta_order_id, array $statuses): bool
     {
-        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
-
-        return in_array($conekta_order_api->getPaymentStatus(), $statuses);
+        return in_array(self::fetch_conekta_payment_status($ordersApi, $conekta_order_id), $statuses);
     }
     
     /**

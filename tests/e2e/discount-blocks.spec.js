@@ -105,11 +105,15 @@ h.run('Blocks Checkout — Integration component', { checkoutType: 'blocks' }, a
   await h.testOrderStatus(secondBody.conekta_order_id);
 
   // ---------------------------------------------------------------
-  // (c) AMOUNT-MISMATCH GUARD — TODO: requires forging a Conekta order
-  //     whose amount diverges from the WC total. The plugin re-fetches
-  //     the order server-side, so a client-side page.route mock does not
-  //     exercise the backend guard. Skip until staging exposes a way to
-  //     seed a mismatched Conekta order deterministically.
+  // (c) AMOUNT-MISMATCH GUARD — TODO (partially covered elsewhere):
+  //     Blocks now has a PRE-CHARGE gate in onPaymentSetup: one final
+  //     checkout-request POST must answer mode=unchanged with the same
+  //     checkout_request_id, otherwise the charge is refused and the
+  //     iframe remounts (fail closed). Forcing a real divergence here
+  //     requires applying a coupon via the Store API out-of-band
+  //     (wc/store/v1/cart/apply-coupon with a cart nonce) so the React
+  //     store doesn't re-render; the classic twin of this scenario IS
+  //     implemented and running in discount-classic.spec.js (c).
   // ---------------------------------------------------------------
-  console.log('--- (c) amount-mismatch guard SKIPPED (TODO) ---');
+  console.log('--- (c) amount-mismatch guard: covered pre-charge by the onPaymentSetup gate; e2e forcing TODO (see discount-classic (c)) ---');
 }).then(passed => process.exit(passed ? 0 : 1));

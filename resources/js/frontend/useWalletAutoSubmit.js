@@ -54,6 +54,22 @@ export const useWalletAutoSubmit = (orderEmitterRef, iframeRebindKey) => {
     // landed in that window was silently lost.
     const triggerRef = useRef(null);
     triggerRef.current = () => {
+        // Primary path: click the real Place Order button. It's the PUBLIC
+        // interface — drives the full checkout pipeline (validation included)
+        // on every WC Blocks version. The __internal* store action below was
+        // observed to be a silent no-op on WooCommerce 10.9 (the __internal
+        // API surface is explicitly unstable): the wallet charged, showed
+        // "¡Pago realizado!", and the customer was never redirected because
+        // the Store API checkout POST never fired. Verified on staging: the
+        // button click restores the redirect.
+        const placeOrderButton = document.querySelector(
+            '.wc-block-components-checkout-place-order-button'
+        );
+        if (placeOrderButton && !placeOrderButton.disabled) {
+            placeOrderButton.click();
+            return;
+        }
+        // Fallback for themes that hide/replace the button.
         checkoutDispatch?.__internalSetBeforeProcessing?.();
     };
 

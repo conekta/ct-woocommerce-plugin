@@ -1,12 +1,10 @@
 window.CONEKTA_TRANSLATIONS = {
     en: {
         form_error: "Please complete the form.",
-        token_error: "Error generating payment token",
-        payment_error: "Error processing payment"
+        email_required: "Enter your email to see the payment form"
     },
     es: {
         form_error: "Por favor completa el formulario",
-        token_error: "Error al generar el token de pago",
-        payment_error: "Error al procesar el pago"
+        email_required: "Completa tu correo para ver el formulario de pago"
     }
-}; 
+};

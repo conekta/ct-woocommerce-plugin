@@ -336,6 +336,12 @@ if (!class_exists('WC_Order')) {
         public function get_shipping_state() { return 'DF'; }
         public function get_shipping_country() { return 'MX'; }
         public function get_shipping_postcode() { return '06600'; }
+        public function get_shipping_phone() { return ''; }
+
+        // Payment method (mark_order_paid promotes checkout-draft orders)
+        private $payment_method = '';
+        public function get_payment_method() { return $this->payment_method; }
+        public function set_payment_method($method) { $this->payment_method = $method; }
 
         // Status
         public function update_status($status, $note = '') {
