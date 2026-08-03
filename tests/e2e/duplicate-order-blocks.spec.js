@@ -49,6 +49,10 @@ h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks' }, a
   const createResponse = page.waitForResponse(r =>
     r.url().includes('conekta_checkout_request') && r.request().method() === 'POST'
   );
+  // Handled at creation so an earlier failure can't leave it unhandled — an
+  // unhandled rejection here kills the node process after teardown (see the
+  // longer note in discount-blocks).
+  createResponse.catch(() => {});
 
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');

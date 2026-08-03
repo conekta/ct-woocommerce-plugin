@@ -417,13 +417,41 @@ async function applyCheckoutCoupon(code) {
  * mismatches across blocks versions.
  */
 async function applyBlocksCoupon(code) {
-  // Modern WC Blocks renders the coupon panel as a collapsed accordion in the
-  // order summary. Open it via its accessible name first.
-  const toggle = page.getByRole('button', { name: /add coupons|agregar cupones/i }).first();
-  await toggle.waitFor({ state: 'visible', timeout: 5000 });
-  await toggle.click();
-
   const input = page.locator('input.wc-block-components-totals-coupon__input, input[id^="wc-block-components-totals-coupon__input"]').first();
+  const inputVisible = () => input.isVisible({ timeout: 500 }).catch(() => false);
+
+  // Modern WC Blocks renders the coupon panel as a collapsed accordion in the
+  // order summary — but not always: depending on the WC version, locale and
+  // theme it can be expanded already, be labelled differently ("Añadir
+  // cupones", "Add a coupon", "¿Tienes un cupón?"), or not be a <button> at
+  // all. Waiting on one accessible name made the whole spec fail on a label
+  // change, so: only open the panel when the field isn't already there, and
+  // accept any clickable element that mentions a coupon.
+  if (!(await inputVisible())) {
+    const toggle = page
+      .locator('button, summary, a, [role="button"]')
+      .filter({ hasText: /cup[oó]n|coupon/i })
+      .first();
+
+    if (await toggle.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await toggle.click().catch(() => {});
+    } else {
+      // Diagnostic dump: the label is what changed, so print the candidates
+      // instead of just timing out on a regex nobody can see.
+      const shotPath = join(config.screenshot.dir, `coupon-panel-fail-${Date.now()}.png`);
+      await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+      const candidates = await page.locator('button, summary, a, [role="button"]')
+        .evaluateAll(els => els
+          .map(e => (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim())
+          .filter(t => t && t.length < 60)
+          .slice(0, 40))
+        .catch(() => []);
+      console.log(`  [diag] coupon panel toggle not found. screenshot: ${shotPath}`);
+      console.log(`  [diag] clickable labels on the page: ${JSON.stringify(candidates)}`);
+      throw new Error('Coupon panel toggle never became visible (no clickable element mentioning "coupon"/"cupón")');
+    }
+  }
+
   await input.waitFor({ state: 'visible', timeout: 5000 });
   await input.fill(code);
 
