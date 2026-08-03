@@ -31,6 +31,20 @@ class WC_Conekta_REST_API {
     const DEFAULT_CUSTOMER_NAME = 'Cliente';
     const DEFAULT_PHONE         = '0000000000';
 
+    // Response mode returned by /checkout-request when the Conekta order backing
+    // this checkout is ALREADY PAID: no new order is created and no new iframe
+    // must be mounted, or the customer would pay twice. See paid_order_recovery.
+    const MODE_ALREADY_PAID = 'already_paid';
+
+    // WC order statuses searched when resolving the WooCommerce order behind a
+    // conekta-order-id. Mirrors WC_Conekta_Plugin::find_order_for_webhook:
+    // 'checkout-draft' is included because a Blocks charge can land while the
+    // order is still a draft, and wc_get_orders() omits drafts by default.
+    const RECOVERY_LOOKUP_STATUSES = ['pending', 'processing', 'on-hold', 'completed', 'failed', 'checkout-draft'];
+
+    // Statuses that mean "this WC order already collected its payment".
+    const PAID_STATUSES = ['processing', 'completed'];
+
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
         add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
@@ -253,13 +267,21 @@ class WC_Conekta_REST_API {
             $current_customer_name = $snapshot['customer_info']['name'] ?? '';
             $current_email         = $snapshot['customer_info']['email'] ?? '';
             $customer_became_real  = self::customer_became_real($state['customer_name'] ?? '', $current_customer_name);
+
+            $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
+
             if ($existing_order_id && $customer_became_real) {
+                // Never drop a PAID order to recreate it with a nicer customer
+                // name — that's a second payable order in front of a customer
+                // who already paid. See paid_order_recovery.
+                $recovered = self::paid_order_recovery($gateway, $api, $existing_order_id);
+                if ($recovered) {
+                    return new WP_REST_Response($recovered, 200);
+                }
                 self::clear_session();
                 $existing_order_id   = null;
                 $existing_request_id = null;
             }
-
-            $api = $gateway->get_api_instance($gateway->settings['cards_api_key'], $gateway->version);
 
             // Force WC to commit the session cookie so our writes below
             // persist. For a brand-new guest with no wp_woocommerce_session
@@ -372,9 +394,32 @@ class WC_Conekta_REST_API {
                         'checkout_request_id' => $existing_request_id,
                     ], 200);
                 } catch (\Exception $e) {
-                    error_log('Conekta - update order failed, recreating: ' . $e->getMessage());
+                    error_log('Conekta - update order failed: ' . $e->getMessage());
+
+                    // The most likely reason an update fails: Conekta rejects
+                    // updates on a PAID order. Recreating here is exactly how
+                    // the customer ends up charged twice, so check first.
+                    $recovered = self::paid_order_recovery($gateway, $api, $existing_order_id);
+                    if ($recovered) {
+                        return new WP_REST_Response($recovered, 200);
+                    }
+
+                    error_log('Conekta - update order failed on an unpaid order, recreating');
                     self::clear_session();
+                    $existing_order_id   = null;
+                    $existing_request_id = null;
                 }
+            }
+
+            // Last line of defence before creating a NEW payable Conekta order:
+            // make sure the purchase in flight wasn't already paid. Either we
+            // still hold an order id we're about to abandon, or our state is
+            // gone and the WC order awaiting payment is the only trace left.
+            $recovered = $existing_order_id
+                ? self::paid_order_recovery($gateway, $api, $existing_order_id)
+                : self::recover_paid_payment_without_state($gateway, $api);
+            if ($recovered) {
+                return new WP_REST_Response($recovered, 200);
             }
 
             // Customer info is only needed on creation; reject early if missing.
@@ -497,6 +542,191 @@ class WC_Conekta_REST_API {
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Resolve the WooCommerce order behind a Conekta order id (the
+     * conekta-order-id meta both the classic and blocks flows stamp before the
+     * charge). An order that already collected the payment wins over a pending
+     * one, so a leftover retry never shadows the real paid order.
+     *
+     * @return WC_Order|null
+     */
+    public static function find_wc_order_by_conekta_id(string $conekta_order_id) {
+        if ($conekta_order_id === '') {
+            return null;
+        }
+
+        $orders = wc_get_orders([
+            'meta_key'   => 'conekta-order-id',
+            'meta_value' => $conekta_order_id,
+            'limit'      => 10,
+            'status'     => self::RECOVERY_LOOKUP_STATUSES,
+        ]);
+
+        $fallback = null;
+        foreach ($orders as $candidate) {
+            if (in_array($candidate->get_status(), self::PAID_STATUSES, true)) {
+                return $candidate;
+            }
+            if ($fallback === null) {
+                $fallback = $candidate;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * THE double-charge guard. Called at every point where we are about to
+     * abandon the Conekta order backing this checkout and create a NEW one.
+     *
+     * Why it exists: the plugin's other duplicate guards all protect against
+     * one Conekta payment completing two WooCommerce orders. The failure we
+     * were actually seeing is the opposite — TWO Conekta orders, each charged
+     * for the same cart. It happens whenever the first charge succeeds but the
+     * WC order never gets completed (the confirm call is lost, a 3DS challenge
+     * navigates the page away, the customer reloads /checkout/): our state is
+     * gone or an updateOrder on the now-paid order fails, we quietly create a
+     * fresh order, the frontend mounts a fresh payable iframe, and the customer
+     * pays again. Nothing downstream can catch that — the money is already
+     * gone, twice.
+     *
+     * So: before creating a replacement, ask Conekta whether the current order
+     * is already paid. If it is, never create a second one. Instead recover —
+     * complete the WooCommerce order that payment belongs to and hand the
+     * frontend a redirect to it, which also fixes the orphaned payment.
+     *
+     * Fails OPEN on an API error (returns null): a Conekta hiccup must not
+     * block checkouts. Fails CLOSED when the payment is real but no WC order
+     * can be completed: the response carries no redirect and the caller must
+     * still refuse to create a new order — the order.paid webhook is the net
+     * that reconciles it, and blocking beats charging twice.
+     *
+     * @param  mixed         $api       OrdersApi instance.
+     * @param  WC_Order|null $wc_order  Known WC order for this payment, if any.
+     * @return array|null Response payload when already paid, null otherwise.
+     */
+    public static function paid_order_recovery($gateway, $api, string $conekta_order_id, $wc_order = null): ?array {
+        if ($conekta_order_id === '' || !$gateway || !$api) {
+            return null;
+        }
+
+        try {
+            $conekta_order = $api->getOrderById(
+                $conekta_order_id,
+                $gateway->get_user_locale(),
+                null,
+                WC_Conekta_Plugin::API_CLIENT
+            );
+        } catch (\Exception $e) {
+            error_log(sprintf(
+                'Conekta - paid_order_recovery: could not read Conekta order %s (%s) — continuing with the normal flow',
+                $conekta_order_id,
+                $e->getMessage()
+            ));
+            return null;
+        }
+
+        if ((string) $conekta_order->getPaymentStatus() !== 'paid') {
+            return null;
+        }
+
+        if (!$wc_order) {
+            $wc_order = self::find_wc_order_by_conekta_id($conekta_order_id);
+        }
+
+        $redirect = null;
+        if ($wc_order) {
+            if (in_array($wc_order->get_status(), self::PAID_STATUSES, true)) {
+                // Already completed (by the confirm endpoint or the webhook):
+                // nothing to do but send the customer to their order, and drop
+                // the state so a genuine NEXT purchase starts a fresh order.
+                $redirect = $gateway->get_return_url($wc_order);
+                self::clear_session();
+            } elseif (!in_array($wc_order->get_status(), ['cancelled', 'refunded'], true)) {
+                // Verifies paid + amount again and clears the state on success.
+                $outcome = $gateway->complete_wc_order_from_conekta($wc_order, $conekta_order_id);
+                if (!empty($outcome['success'])) {
+                    $redirect = $gateway->get_return_url($wc_order);
+                } elseif (!empty($outcome['existing_order'])) {
+                    $redirect = $gateway->get_return_url($outcome['existing_order']);
+                    self::clear_session();
+                }
+            }
+        }
+
+        error_log(sprintf(
+            'Conekta - paid_order_recovery: Conekta order %s is ALREADY PAID — refusing to create a replacement (WC order %s, redirect %s)',
+            $conekta_order_id,
+            $wc_order ? '#' . $wc_order->get_id() : 'none',
+            $redirect ?: 'none'
+        ));
+
+        $response = [
+            'success'          => true,
+            'mode'             => self::MODE_ALREADY_PAID,
+            'conekta_order_id' => $conekta_order_id,
+            'message'          => $redirect
+                ? __('Tu pago ya fue recibido. Te llevamos a la confirmación de tu pedido.', 'woocommerce')
+                : sprintf(
+                    __('Ya recibimos un pago para este pedido (orden %s de Conekta), así que no generamos un segundo cargo. Si tu pedido no aparece como pagado, contacta a la tienda.', 'woocommerce'),
+                    $conekta_order_id
+                ),
+        ];
+        if ($redirect) {
+            $response['redirect'] = $redirect;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Same guard as paid_order_recovery, for the case where our checkout state
+     * is GONE — the most common way the double charge happened. A 3DS challenge
+     * that navigates the top window, or simply reloading /checkout/, drops the
+     * state transient (reset_session_on_checkout_entry), so the next POST would
+     * create a brand new order with no memory of the charge that just went
+     * through.
+     *
+     * The WooCommerce order survives that: WC keeps `order_awaiting_payment` in
+     * its own session (blocks keeps the draft id) and the order carries the
+     * conekta-order-id stamped before the charge. That's enough to ask Conekta
+     * whether it was paid.
+     *
+     * Costs one extra API read only when such an order exists — i.e. only after
+     * a "Place order" click, never on a first-time checkout.
+     */
+    private static function recover_paid_payment_without_state($gateway, $api): ?array {
+        if (!WC()->session) {
+            return null;
+        }
+
+        $order_id = (int) WC()->session->get('order_awaiting_payment');
+        if ($order_id <= 0) {
+            $order_id = (int) self::get_blocks_draft_order_id();
+        }
+        if ($order_id <= 0) {
+            return null;
+        }
+
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return null;
+        }
+
+        // Already collected, or voided: nothing to recover — this is a new
+        // purchase and it must get its own Conekta order.
+        if (in_array($order->get_status(), array_merge(self::PAID_STATUSES, ['cancelled', 'refunded']), true)) {
+            return null;
+        }
+
+        $linked = (string) $order->get_meta('conekta-order-id');
+        if ($linked === '') {
+            return null;
+        }
+
+        return self::paid_order_recovery($gateway, $api, $linked, $order);
     }
 
     /**

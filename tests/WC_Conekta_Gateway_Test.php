@@ -852,6 +852,268 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // Double-charge guard: TWO Conekta orders for the same cart
+    // -------------------------------------------------------
+
+    /**
+     * OrdersApi stand-in for the paid-order guard: records the ids it was asked
+     * about and answers with a fixed payment_status (or throws).
+     */
+    private function fakeOrdersApi(string $payment_status, bool $throws = false)
+    {
+        return new class($payment_status, $throws) {
+            public array $asked = [];
+            private string $status;
+            private bool $throws;
+            public function __construct($status, $throws) {
+                $this->status = $status;
+                $this->throws = $throws;
+            }
+            public function getOrderById($id, $locale = 'es', $x = null, $client = null) {
+                $this->asked[] = $id;
+                if ($this->throws) {
+                    throw new Exception('API unreachable');
+                }
+                return new class($this->status) {
+                    private string $status;
+                    public function __construct($status) { $this->status = $status; }
+                    public function getPaymentStatus() { return $this->status; }
+                };
+            }
+        };
+    }
+
+    /**
+     * Gateway whose complete_wc_order_from_conekta is stubbed, so the guard can
+     * be exercised without hitting the API.
+     */
+    private function createGatewayWithStubbedCompletion(array $outcome)
+    {
+        $gateway = $this->createPartialMock(WC_Conekta_Gateway::class, ['complete_wc_order_from_conekta']);
+        $gateway->method('complete_wc_order_from_conekta')->willReturn($outcome);
+
+        $ref  = new ReflectionClass($gateway);
+        $prop = $ref->getProperty('settings');
+        $prop->setAccessible(true);
+        $prop->setValue($gateway, ['cards_api_key' => 'key_test_123']);
+
+        return $gateway;
+    }
+
+    /**
+     * find_wc_order_by_conekta_id resolves the WC order behind a Conekta order,
+     * preferring the one that already collected the payment over a pending
+     * retry leftover, and finding blocks' checkout-draft orders (which
+     * wc_get_orders() omits by default).
+     */
+    public function test_find_wc_order_by_conekta_id_prefers_the_paid_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $pending = new WC_Order(2001);
+        $pending->update_meta_data('conekta-order-id', 'ord_paid_1');
+        $test_order_registry[2001] = $pending;
+
+        $paid = new WC_Order(2002);
+        $paid->update_meta_data('conekta-order-id', 'ord_paid_1');
+        $paid->update_status('processing');
+        $test_order_registry[2002] = $paid;
+
+        $draft = new WC_Order(2003);
+        $draft->update_meta_data('conekta-order-id', 'ord_draft_1');
+        $draft->update_status('checkout-draft');
+        $test_order_registry[2003] = $draft;
+
+        $this->assertEquals(2002, WC_Conekta_REST_API::find_wc_order_by_conekta_id('ord_paid_1')->get_id());
+        $this->assertEquals(2003, WC_Conekta_REST_API::find_wc_order_by_conekta_id('ord_draft_1')->get_id());
+        $this->assertNull(WC_Conekta_REST_API::find_wc_order_by_conekta_id('ord_unknown'));
+        $this->assertNull(WC_Conekta_REST_API::find_wc_order_by_conekta_id(''));
+    }
+
+    /**
+     * The bug this guards: the charge succeeded but the WC order never got
+     * completed (confirm lost / 3DS navigated away), so /checkout-request went
+     * on to create a REPLACEMENT Conekta order and the customer paid twice.
+     * A paid order must never be replaced — it must be recovered: complete the
+     * WC order it belongs to and hand back a redirect to it.
+     */
+    public function test_paid_order_recovery_refuses_to_replace_a_paid_conekta_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $pending = new WC_Order(279113);
+        $pending->update_meta_data('conekta-order-id', 'ord_first_charge');
+        $test_order_registry[279113] = $pending;
+
+        $api      = $this->fakeOrdersApi('paid');
+        $gateway  = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $response = WC_Conekta_REST_API::paid_order_recovery($gateway, $api, 'ord_first_charge');
+
+        $this->assertIsArray($response);
+        $this->assertSame(WC_Conekta_REST_API::MODE_ALREADY_PAID, $response['mode']);
+        $this->assertSame('ord_first_charge', $response['conekta_order_id']);
+        // A redirect means the orphaned payment was reconciled onto its WC order.
+        $this->assertNotEmpty($response['redirect']);
+        // No checkout_request_id: there is nothing for the frontend to mount.
+        $this->assertArrayNotHasKey('checkout_request_id', $response);
+        $this->assertSame(['ord_first_charge'], $api->asked);
+    }
+
+    /**
+     * An unpaid order is the normal case — the guard must stay out of the way
+     * so the usual recreate/update paths keep working.
+     */
+    public function test_paid_order_recovery_returns_null_for_an_unpaid_order()
+    {
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+
+        $this->assertNull(WC_Conekta_REST_API::paid_order_recovery(
+            $gateway,
+            $this->fakeOrdersApi('pending_payment'),
+            'ord_not_paid'
+        ));
+    }
+
+    /**
+     * Fails OPEN on an API error: a Conekta hiccup must not block checkouts.
+     */
+    public function test_paid_order_recovery_fails_open_when_the_api_errors()
+    {
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+
+        $this->assertNull(WC_Conekta_REST_API::paid_order_recovery(
+            $gateway,
+            $this->fakeOrdersApi('paid', true),
+            'ord_unreachable'
+        ));
+    }
+
+    /**
+     * Fails CLOSED when the payment is real but no WC order can be completed:
+     * still "already paid" (so the caller refuses to create a replacement) and
+     * no redirect. Blocking beats charging the customer a second time; the
+     * order.paid webhook is what reconciles it.
+     */
+    public function test_paid_order_recovery_blocks_even_when_no_wc_order_is_found()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $gateway  = $this->createGatewayWithStubbedCompletion(['success' => false, 'error' => 'x']);
+        $response = WC_Conekta_REST_API::paid_order_recovery($gateway, $this->fakeOrdersApi('paid'), 'ord_orphan');
+
+        $this->assertSame(WC_Conekta_REST_API::MODE_ALREADY_PAID, $response['mode']);
+        $this->assertArrayNotHasKey('redirect', $response);
+        $this->assertNotEmpty($response['message']);
+    }
+
+    /**
+     * The paid-payment recovery can land on a Blocks order still in
+     * 'checkout-draft': the charge went through but the Store API checkout that
+     * would have finalized the draft failed. `payment_complete()` is a SILENT
+     * no-op on a draft, so completing it directly would report success while
+     * leaving the paid order invisible in the admin — the order must be
+     * promoted first (via mark_order_paid).
+     */
+    public function test_complete_wc_order_from_conekta_pays_a_blocks_checkout_draft()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $draft = new WC_Order(2500);
+        $draft->set_status('checkout-draft');
+        $test_order_registry[2500] = $draft;
+
+        // WC_Order stub total is 100.00 → 10000 cents.
+        $conekta_order = $this->createMock(\Conekta\Model\OrderResponse::class);
+        $conekta_order->method('getPaymentStatus')->willReturn('paid');
+        $conekta_order->method('getAmount')->willReturn(10000);
+        $conekta_order->method('getCharges')->willReturn(null);
+
+        $api = $this->createMock(\Conekta\Api\OrdersApi::class);
+        $api->method('getOrderById')->willReturn($conekta_order);
+        Conekta_Gateway_With_Fake_Api::$fake_api = $api;
+
+        $gateway = $this->createPartialMock(Conekta_Gateway_With_Fake_Api::class, []);
+        $ref     = new ReflectionClass(WC_Conekta_Gateway::class);
+        $prop    = $ref->getProperty('settings');
+        $prop->setAccessible(true);
+        $prop->setValue($gateway, ['cards_api_key' => 'key_test_123']);
+
+        $outcome = $gateway->complete_wc_order_from_conekta($draft, 'ord_draft_paid');
+
+        $this->assertTrue($outcome['success'], 'draft order completion reported success');
+        $this->assertEquals('completed', $draft->get_status(), 'the draft was promoted and completed');
+        $this->assertEquals('ord_draft_paid', $draft->get_meta('_transaction_id'));
+
+        Conekta_Gateway_With_Fake_Api::$fake_api = null;
+    }
+
+    /**
+     * The state-less variant — the path that actually produced the duplicate
+     * charges: reloading /checkout/ (or a 3DS challenge navigating the page)
+     * wipes our checkout-state transient. WooCommerce still remembers the order
+     * awaiting payment, and that order carries the conekta-order-id stamped
+     * before the charge, which is enough to detect the payment.
+     */
+    public function test_recovery_without_state_uses_the_wc_order_awaiting_payment()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $pending = new WC_Order(279113);
+        $pending->update_meta_data('conekta-order-id', 'ord_first_charge');
+        $test_order_registry[279113] = $pending;
+
+        WC()->session->set('order_awaiting_payment', 279113);
+        WC()->session->set('store_api_draft_order', 0);
+
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $method  = new ReflectionMethod(WC_Conekta_REST_API::class, 'recover_paid_payment_without_state');
+        $method->setAccessible(true);
+
+        $response = $method->invoke(null, $gateway, $this->fakeOrdersApi('paid'));
+
+        $this->assertIsArray($response);
+        $this->assertSame(WC_Conekta_REST_API::MODE_ALREADY_PAID, $response['mode']);
+        $this->assertNotEmpty($response['redirect']);
+
+        WC()->session->set('order_awaiting_payment', 0);
+    }
+
+    /**
+     * A finished order must not block the next purchase: when the order
+     * awaiting payment already collected its payment there is nothing to
+     * recover, so /checkout-request goes on to create a fresh Conekta order.
+     */
+    public function test_recovery_without_state_allows_a_new_purchase_after_a_completed_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $done = new WC_Order(279113);
+        $done->update_meta_data('conekta-order-id', 'ord_first_charge');
+        $done->update_status('processing');
+        $test_order_registry[279113] = $done;
+
+        WC()->session->set('order_awaiting_payment', 279113);
+        WC()->session->set('store_api_draft_order', 0);
+
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $api     = $this->fakeOrdersApi('paid');
+        $method  = new ReflectionMethod(WC_Conekta_REST_API::class, 'recover_paid_payment_without_state');
+        $method->setAccessible(true);
+
+        $this->assertNull($method->invoke(null, $gateway, $api));
+        // Not even an API read: the WC order status settles it locally.
+        $this->assertSame([], $api->asked);
+
+        WC()->session->set('order_awaiting_payment', 0);
+    }
+
+    // -------------------------------------------------------
     // check_order_status (via Mockoon)
     // -------------------------------------------------------
 
@@ -3540,5 +3802,22 @@ class TaggableConektaGateway extends WC_Conekta_Gateway
     public static function get_charges_api_instance(string $api_key, string $version): \Conekta\Api\ChargesApi
     {
         return self::$stubChargesApi;
+    }
+}
+
+/**
+ * Test seam: overrides get_api_instance() so the completion flow
+ * (complete_wc_order_from_conekta) can be driven end to end with an injected
+ * OrdersApi mock — no HTTP, no mock server. get_api_instance is static, so a
+ * subclass override is the only way to intercept it (PHPUnit cannot stub
+ * static methods).
+ */
+class Conekta_Gateway_With_Fake_Api extends WC_Conekta_Gateway
+{
+    public static $fake_api;
+
+    public static function get_api_instance(string $api_key, string $version): \Conekta\Api\OrdersApi
+    {
+        return self::$fake_api;
     }
 }

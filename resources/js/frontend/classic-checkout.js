@@ -126,6 +126,12 @@ const state = {
   // we act on each Conekta order only ONCE so a single payment never
   // completes two WC orders.
   submittedOrderId: null,
+  // Conekta order the SDK reported as CHARGED. Unlike submittedOrderId this is
+  // never cleared: the money moved, and that fact can't be undone by a retry.
+  // Used to refuse mounting a DIFFERENT Conekta order afterwards — mounting one
+  // would put a fresh payable form in front of a customer who already paid
+  // (that is how the same cart ended up charged on two Conekta orders).
+  chargedOrderId: null,
   // Set when wc-ajax=checkout came back with conekta_pending_payment: the WC
   // order now exists (pending) and the SDK charge is about to run. onOrder
   // uses this to confirm THAT order via the confirm endpoint.
@@ -305,6 +311,7 @@ const mounter = {
         return;
       }
       state.submittedOrderId = orderId;
+      if (orderId) state.chargedOrderId = orderId;
 
       // Card path (order-first): the WC order was already created by the
       // wc-ajax=checkout POST before the charge — pendingConfirm holds its
@@ -457,6 +464,29 @@ const orchestrator = {
 
     try {
       const data = await requestCheckout();
+
+      // The server found the Conekta order backing this checkout already PAID
+      // and refused to create a replacement. Tear the iframe down instead of
+      // mounting anything: the customer must not be able to pay a second time.
+      if (data.mode === 'already_paid') {
+        mounter.unmount();
+        utils.showErrorMessage(data.message || utils.getTranslation('already_paid'));
+        if (data.redirect) window.location.href = data.redirect;
+        return;
+      }
+
+      // Client-side twin of the same guard: a charge already succeeded on this
+      // page and the server is handing us a different order to mount.
+      if (
+        state.chargedOrderId &&
+        data.conekta_order_id &&
+        data.conekta_order_id !== state.chargedOrderId
+      ) {
+        mounter.unmount();
+        utils.showErrorMessage(utils.getTranslation('already_paid'));
+        return;
+      }
+
       if (data.conekta_order_id) {
         state.currentConektaOrderId = data.conekta_order_id;
       }
