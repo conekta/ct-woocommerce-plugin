@@ -204,37 +204,55 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
     // ---------------------------------------------------------------
     console.log('\n--- (2) reload /checkout/ (clears the checkout-state transient) ---');
     // Come back the way a customer would: with items in the cart. Re-adding the
-    // product first makes this independent of whether the failed attempt left
-    // the cart intact — an EMPTY cart renders no form.checkout at all (the page
-    // becomes "your cart is empty"), so the checkout JS never fires and the
-    // recovery could not be observed. It also matters for the plugin: with an
-    // empty cart /checkout-request returns 400 'Cart is empty' BEFORE reaching
-    // the paid-payment guard. Re-adding the same product/quantity keeps the WC
-    // order (#8529 style) and the Conekta amount comparison untouched — the
-    // recovery is driven by order_awaiting_payment + the conekta-order-id meta,
-    // not by the cart.
+    // product keeps this independent of whether the failed attempt left the cart
+    // intact — an empty cart renders no checkout form at all, and the plugin
+    // answers 400 'Cart is empty' before the paid-payment guard is reached. Same
+    // product and quantity, so the WC order total and the Conekta amount
+    // comparison are untouched: the recovery is driven by order_awaiting_payment
+    // plus the conekta-order-id meta, never by the cart.
     await page.goto(`${STORE_URL}/?add-to-cart=${h.getProductId()}&quantity=${h.QUANTITY}`);
     await page.waitForLoadState('networkidle');
 
     await page.goto(`${STORE_URL}/checkout/`);
-    await page.waitForLoadState('networkidle');
-    const checkoutForm = page.locator('form.checkout');
-    if (!(await checkoutForm.isVisible({ timeout: config.timeouts.selector }).catch(() => false))) {
+
+    // Do NOT wait for form.checkout here. The recovery legitimately wins that
+    // race: the checkout JS fires /checkout-request while the page is still
+    // settling, the server answers already_paid with a redirect, and the browser
+    // leaves for the paid order before the form is ever asserted (observed in
+    // CI — the wait timed out on a page that had already recovered). So accept
+    // EITHER outcome: already redirected, or a checkout form we nudge into
+    // firing the request.
+    const RECOVERED_URL = /order-received/;
+    const settleReload = async () => {
+      const deadline = Date.now() + config.timeouts.navigation;
+      while (Date.now() < deadline) {
+        if (RECOVERED_URL.test(page.url())) return 'redirected';
+        if (await page.locator('form.checkout').isVisible({ timeout: 500 }).catch(() => false)) return 'form';
+        await page.waitForTimeout(250);
+      }
+      return null;
+    };
+
+    const reloadOutcome = await settleReload();
+    if (!reloadOutcome) {
       const bodyText = await page.locator('body').innerText().catch(() => '');
       throw new Error([
-        'The classic checkout did not render after the reload, so the recovery cannot be observed.',
+        'After the reload the page neither rendered the checkout nor recovered the payment.',
         `url=${page.url()}`,
         `page text: ${bodyText.replace(/\s+/g, ' ').slice(0, 400)}`,
       ].join('\n  '));
     }
-    // The cart survives (nothing was completed), so the checkout renders again.
-    // Re-fill in case the reload came back with empty fields, then select the
-    // gateway — this is the point where the plugin used to create a NEW payable
-    // Conekta order and the customer paid a second time.
-    if (!(await page.inputValue('#billing_email').catch(() => ''))) {
-      await fillBilling();
+    console.log(`  reload outcome: ${reloadOutcome === 'redirected' ? 'recovery already redirected to the paid order' : 'checkout form rendered'}`);
+
+    if (reloadOutcome === 'form') {
+      // Nudge the checkout so the debounced refresh fires: re-fill the email if
+      // the reload came back blank, then select the gateway. This is the point
+      // where the plugin used to create a NEW payable Conekta order.
+      if (!(await page.inputValue('#billing_email').catch(() => ''))) {
+        await fillBilling();
+      }
+      await page.click('label[for="payment_method_conekta"]').catch(() => {});
     }
-    await page.click('label[for="payment_method_conekta"]').catch(() => {});
 
     await waitFor(checkoutRequests, requestsBeforeCharge + 1, 'post-reload checkout-request POSTs', 45000);
     const afterReload = checkoutRequests.slice(requestsBeforeCharge);
@@ -252,6 +270,14 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
     const recovered = afterReload.find(r => r && r.mode === 'already_paid');
     console.log(`  post-reload modes: ${afterReload.map(r => r && r.mode).join(', ')}`);
     assert(!!recovered, 'checkout-request answered mode="already_paid"');
+    // assert() does not throw — stop here rather than TypeError on the fields.
+    if (!recovered) {
+      throw new Error([
+        'No checkout-request answered already_paid after the reload.',
+        `post-reload responses=${JSON.stringify(afterReload)}`,
+        `url=${page.url()}`,
+      ].join('\n  '));
+    }
     assert(recovered.conekta_order_id === paidOrderId,
       `already_paid points at the order that was actually paid (${recovered.conekta_order_id})`);
     assert(typeof recovered.redirect === 'string' && recovered.redirect.includes('order-received'),
