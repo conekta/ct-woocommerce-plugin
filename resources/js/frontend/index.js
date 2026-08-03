@@ -210,6 +210,13 @@ const ContentConekta = (props) => {
                 if (!response.ok) {
                     if (data?.code === 'missing_customer_email') {
                         setErrorMessage('');  // expected while the user is still filling the form
+                    } else if (data?.code === 'payment_verification_unavailable') {
+                        // Checked before the generic 5xx branch: this 503 means a
+                        // previous payment could not be verified, so the server
+                        // refused to hand us anything payable. Its message says
+                        // no second charge was made — much better than "server
+                        // error, try again".
+                        setErrorMessage(data.message);
                     } else if (response.status >= 500) {
                         setErrorMessage('Error del servidor al preparar el pago. Intenta de nuevo.');
                     } else {
@@ -406,6 +413,9 @@ const ContentConekta = (props) => {
                 if (!gateResponse.ok || !gateData?.checkout_request_id) {
                     return {
                         type: emitResponse.responseTypes.ERROR,
+                        // gateData.message carries the server's reason when it has
+                        // one — including the "we could not verify your previous
+                        // payment, no second charge was made" refusal.
                         message: gateData?.message || 'No se pudo preparar el pago. Intenta de nuevo.',
                     };
                 }

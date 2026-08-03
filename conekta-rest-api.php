@@ -45,6 +45,21 @@ class WC_Conekta_REST_API {
     // Statuses that mean "this WC order already collected its payment".
     const PAID_STATUSES = ['processing', 'completed'];
 
+    // WC order statuses that can still be holding an in-flight (possibly
+    // already charged) payment.
+    const UNPAID_STATUSES = ['pending', 'failed', 'on-hold', 'checkout-draft'];
+
+    // How far back to look for a WooCommerce order that may be holding an
+    // orphaned payment. Long enough for a customer to come back after a 3DS
+    // mishap or a lost confirm, short enough that a stale orphan doesn't shadow
+    // a genuinely new purchase days later.
+    const ORPHAN_LOOKBACK = 6 * 3600;
+
+    // Returned when a payment attempt exists but Conekta cannot be reached to
+    // tell whether it was charged. We refuse to create a payable order in that
+    // state — a blocked checkout is recoverable, a double charge is not.
+    const CODE_VERIFICATION_UNAVAILABLE = 'payment_verification_unavailable';
+
     public static function init() {
         add_action('rest_api_init', [self::class, 'register_routes']);
         add_action('wc_ajax_conekta_checkout_request', [self::class, 'wc_ajax_checkout_request']);
@@ -417,9 +432,13 @@ class WC_Conekta_REST_API {
             // gone and the WC order awaiting payment is the only trace left.
             $recovered = $existing_order_id
                 ? self::paid_order_recovery($gateway, $api, $existing_order_id)
-                : self::recover_paid_payment_without_state($gateway, $api);
+                : self::recover_paid_payment_without_state($gateway, $api, (string) $current_email);
             if ($recovered) {
-                return new WP_REST_Response($recovered, 200);
+                // A refusal (Conekta unreachable while a payment may be in
+                // flight) is a 503: nothing payable is returned, and the
+                // frontends surface `message` without mounting an iframe.
+                $status = empty($recovered['success']) ? 503 : 200;
+                return new WP_REST_Response($recovered, $status);
             }
 
             // Customer info is only needed on creation; reject early if missing.
@@ -607,11 +626,15 @@ class WC_Conekta_REST_API {
      * @param  WC_Order|null $wc_order  Known WC order for this payment, if any.
      * @return array|null Response payload when already paid, null otherwise.
      */
-    public static function paid_order_recovery($gateway, $api, string $conekta_order_id, $wc_order = null): ?array {
-        if ($conekta_order_id === '' || !$gateway || !$api) {
-            return null;
-        }
-
+    /**
+     * Payment status of a Conekta order, as a guard decision:
+     *   'paid'    — charged; never create a replacement.
+     *   'unpaid'  — safe to continue with the normal create/update flow.
+     *   'unknown' — Conekta could not be reached, so we CANNOT tell. Callers
+     *               decide: fail open before any charge is possible, fail
+     *               closed once a charge may already have happened.
+     */
+    private static function read_payment_status($gateway, $api, string $conekta_order_id): string {
         try {
             $conekta_order = $api->getOrderById(
                 $conekta_order_id,
@@ -621,14 +644,25 @@ class WC_Conekta_REST_API {
             );
         } catch (\Exception $e) {
             error_log(sprintf(
-                'Conekta - paid_order_recovery: could not read Conekta order %s (%s) — continuing with the normal flow',
+                'Conekta - read_payment_status: could not read Conekta order %s (%s)',
                 $conekta_order_id,
                 $e->getMessage()
             ));
+            return 'unknown';
+        }
+
+        return (string) $conekta_order->getPaymentStatus() === 'paid' ? 'paid' : 'unpaid';
+    }
+
+    public static function paid_order_recovery($gateway, $api, string $conekta_order_id, $wc_order = null): ?array {
+        if ($conekta_order_id === '' || !$gateway || !$api) {
             return null;
         }
 
-        if ((string) $conekta_order->getPaymentStatus() !== 'paid') {
+        // 'unknown' fails OPEN here: both callers of this method run BEFORE any
+        // charge is possible (the customer's name became real; an update was
+        // rejected), so a Conekta hiccup must not block the checkout.
+        if (self::read_payment_status($gateway, $api, $conekta_order_id) !== 'paid') {
             return null;
         }
 
@@ -697,68 +731,123 @@ class WC_Conekta_REST_API {
      * Costs one extra API read only when such an order exists — i.e. only after
      * a "Place order" click, never on a first-time checkout.
      */
-    private static function recover_paid_payment_without_state($gateway, $api): ?array {
-        // Every bail-out is logged. This guard is the last thing standing
-        // between an orphaned payment and a SECOND payable Conekta order, and
-        // when it declines silently the only visible symptom is a fresh
-        // `mode: create` — indistinguishable from a normal first checkout. The
-        // log below names which link was missing.
-        if (!WC()->session) {
-            error_log('Conekta - orphan-payment guard: no WC session, cannot look for an in-flight payment');
+    private static function recover_paid_payment_without_state($gateway, $api, string $email = ''): ?array {
+        $candidates = self::orphan_payment_candidates($email);
+        if (empty($candidates)) {
+            error_log('Conekta - orphan-payment guard: no in-flight WooCommerce order carries a conekta-order-id — creating a new Conekta order');
             return null;
         }
 
-        $awaiting = (int) WC()->session->get('order_awaiting_payment');
-        $draft    = (int) self::get_blocks_draft_order_id();
-        $order_id = $awaiting > 0 ? $awaiting : $draft;
-        if ($order_id <= 0) {
-            error_log('Conekta - orphan-payment guard: NO ANCHOR (order_awaiting_payment=0, blocks draft=0) — creating a new Conekta order');
-            return null;
-        }
+        foreach ($candidates as $candidate) {
+            list($order, $linked) = $candidate;
 
-        $order = wc_get_order($order_id);
-        if (!$order) {
+            $status = self::read_payment_status($gateway, $api, $linked);
             error_log(sprintf(
-                'Conekta - orphan-payment guard: anchor WC order #%d not found (awaiting=%d, draft=%d) — creating a new Conekta order',
-                $order_id,
-                $awaiting,
-                $draft
-            ));
-            return null;
-        }
-
-        // Already collected, or voided: nothing to recover — this is a new
-        // purchase and it must get its own Conekta order.
-        $status = $order->get_status();
-        if (in_array($status, array_merge(self::PAID_STATUSES, ['cancelled', 'refunded']), true)) {
-            error_log(sprintf(
-                'Conekta - orphan-payment guard: anchor WC order #%d is "%s" — nothing to recover, this is a new purchase',
-                $order_id,
+                'Conekta - orphan-payment guard: WC order #%d (status "%s") is linked to Conekta order %s, payment status "%s"',
+                $order->get_id(),
+                $order->get_status(),
+                $linked,
                 $status
             ));
-            return null;
+
+            if ($status === 'paid') {
+                return self::paid_order_recovery($gateway, $api, $linked, $order);
+            }
+
+            // Fail CLOSED: unlike the pre-charge callers of paid_order_recovery,
+            // here a charge may ALREADY have happened — that is the whole point
+            // of this guard. Creating a payable order while we cannot tell is
+            // exactly how the customer ends up charged twice, so refuse instead.
+            // A blocked checkout is recoverable; a double charge is not.
+            if ($status === 'unknown') {
+                error_log(sprintf(
+                    'Conekta - orphan-payment guard: REFUSING to create a replacement — cannot verify Conekta order %s of WC order #%d',
+                    $linked,
+                    $order->get_id()
+                ));
+                return [
+                    'success' => false,
+                    'code'    => self::CODE_VERIFICATION_UNAVAILABLE,
+                    'message' => __('No pudimos verificar el estado de tu pago anterior. Espera un momento e intenta de nuevo; no generamos un segundo cargo.', 'woocommerce'),
+                ];
+            }
         }
 
-        $linked = (string) $order->get_meta('conekta-order-id');
-        if ($linked === '') {
-            error_log(sprintf(
-                'Conekta - orphan-payment guard: anchor WC order #%d (status "%s") carries NO conekta-order-id meta — creating a new Conekta order',
-                $order_id,
-                $status
-            ));
-            return null;
+        return null;
+    }
+
+    /**
+     * WooCommerce orders that could be holding an orphaned payment, best
+     * candidate first, as [WC_Order, conekta_order_id] pairs.
+     *
+     * Why not just the session: `order_awaiting_payment` (and the Blocks draft
+     * id) is the cheap anchor, but it is NOT dependable — WC_Cart::empty_cart()
+     * nulls it, and any session rotation loses it. Relying on it alone let a
+     * paid-but-unreconciled order slip through and a REPLACEMENT Conekta order
+     * be created (reproduced in e2e: a reload answered `mode: create` while
+     * ord_…iKQ was already paid). So the session anchor is only tried first, and
+     * the authoritative lookup is a query for the customer's own recent unpaid
+     * orders that carry a conekta-order-id — the same link the webhook uses.
+     *
+     * @return array<int, array{0: WC_Order, 1: string}>
+     */
+    private static function orphan_payment_candidates(string $email = ''): array {
+        $ids = [];
+
+        if (WC()->session) {
+            $awaiting = (int) WC()->session->get('order_awaiting_payment');
+            if ($awaiting > 0) {
+                $ids[] = $awaiting;
+            }
+        }
+        $draft = (int) self::get_blocks_draft_order_id();
+        if ($draft > 0) {
+            $ids[] = $draft;
         }
 
-        error_log(sprintf(
-            'Conekta - orphan-payment guard: checking anchor WC order #%d (status "%s", awaiting=%d, draft=%d) linked to Conekta order %s',
-            $order_id,
-            $status,
-            $awaiting,
-            $draft,
-            $linked
-        ));
+        $query = [
+            'limit'        => 5,
+            'orderby'      => 'date',
+            'order'        => 'DESC',
+            'status'       => self::UNPAID_STATUSES,
+            'date_created' => '>' . (time() - self::ORPHAN_LOOKBACK),
+        ];
+        // Scope to this shopper so we never look at someone else's order.
+        $user_id = get_current_user_id();
+        if ($user_id) {
+            $query['customer_id'] = $user_id;
+        } elseif ($email !== '') {
+            $query['customer'] = $email;
+        } else {
+            // A guest with no email yet cannot own an in-flight payment.
+            $query = null;
+        }
 
-        return self::paid_order_recovery($gateway, $api, $linked, $order);
+        if ($query) {
+            foreach (wc_get_orders($query) as $recent) {
+                $ids[] = $recent->get_id();
+            }
+        }
+
+        $candidates = [];
+        foreach (array_unique($ids) as $id) {
+            $order = wc_get_order($id);
+            if (!$order) {
+                continue;
+            }
+            // Paid or voided orders hold nothing to recover: a paid one is a
+            // finished purchase, a cancelled one was deliberately dropped.
+            if (!in_array($order->get_status(), self::UNPAID_STATUSES, true)) {
+                continue;
+            }
+            $linked = (string) $order->get_meta('conekta-order-id');
+            if ($linked === '') {
+                continue;
+            }
+            $candidates[] = [$order, $linked];
+        }
+
+        return $candidates;
     }
 
     /**

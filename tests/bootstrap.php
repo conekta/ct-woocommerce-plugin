@@ -95,7 +95,11 @@ if (!function_exists('wc_get_orders')) {
             if (!$allow_any && !in_array($order->get_status(), $allowed, true)) {
                 continue;
             }
-            if ($meta_key && $meta_value && $order->get_meta($meta_key) === $meta_value) {
+            // No meta filter => the query is by status/customer/date only, and
+            // real wc_get_orders() returns every order that matches those. The
+            // stub used to return NOTHING in that case, which silently made
+            // meta-less lookups untestable.
+            if (!$meta_key || ($meta_value !== null && $order->get_meta($meta_key) === $meta_value)) {
                 $results[] = $order;
             }
             if ($limit > 0 && count($results) >= $limit) {

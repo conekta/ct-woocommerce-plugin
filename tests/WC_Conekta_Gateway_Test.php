@@ -1084,6 +1084,99 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     /**
+     * The failure reproduced in staging: the session anchor is GONE (no
+     * order_awaiting_payment, no Blocks draft) and the guard used to give up
+     * there — answering `mode: create` and handing the customer a second
+     * payable Conekta order on top of a payment that was already charged. The
+     * customer's own recent unpaid order carrying a conekta-order-id must be
+     * found without any session state.
+     */
+    public function test_recovery_without_state_finds_the_payment_when_the_session_anchor_is_gone()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $pending = new WC_Order(279114);
+        $pending->update_meta_data('conekta-order-id', 'ord_orphaned');
+        $test_order_registry[279114] = $pending;
+
+        WC()->session->set('order_awaiting_payment', 0);
+        WC()->session->set('store_api_draft_order', 0);
+
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $method  = new ReflectionMethod(WC_Conekta_REST_API::class, 'recover_paid_payment_without_state');
+        $method->setAccessible(true);
+
+        $response = $method->invoke(null, $gateway, $this->fakeOrdersApi('paid'), 'cliente@example.com');
+
+        $this->assertIsArray($response, 'the orphaned payment was found without the session anchor');
+        $this->assertSame(WC_Conekta_REST_API::MODE_ALREADY_PAID, $response['mode']);
+        $this->assertNotEmpty($response['redirect']);
+    }
+
+    /**
+     * Fails CLOSED once a charge may already exist: if Conekta cannot be reached
+     * to tell whether the in-flight order was charged, refuse to create a
+     * replacement instead of quietly handing over a second payable order. A
+     * blocked checkout is recoverable; a double charge is not.
+     */
+    public function test_recovery_without_state_refuses_to_create_when_conekta_is_unreachable()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $pending = new WC_Order(279115);
+        $pending->update_meta_data('conekta-order-id', 'ord_unverifiable');
+        $test_order_registry[279115] = $pending;
+
+        WC()->session->set('order_awaiting_payment', 0);
+        WC()->session->set('store_api_draft_order', 0);
+
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $method  = new ReflectionMethod(WC_Conekta_REST_API::class, 'recover_paid_payment_without_state');
+        $method->setAccessible(true);
+
+        $response = $method->invoke(null, $gateway, $this->fakeOrdersApi('paid', true), 'cliente@example.com');
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success']);
+        $this->assertSame(WC_Conekta_REST_API::CODE_VERIFICATION_UNAVAILABLE, $response['code']);
+        $this->assertArrayNotHasKey('checkout_request_id', $response);
+    }
+
+    /**
+     * A normal first checkout must not pay the cost of the guard: an in-flight
+     * order with no Conekta link (or no shopper to scope the lookup to) means
+     * there is nothing to recover, and no API call is made.
+     */
+    public function test_recovery_without_state_stays_out_of_the_way_on_a_normal_checkout()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $unlinked = new WC_Order(279116);
+        $test_order_registry[279116] = $unlinked;
+
+        WC()->session->set('order_awaiting_payment', 0);
+        WC()->session->set('store_api_draft_order', 0);
+
+        $gateway = $this->createGatewayWithStubbedCompletion(['success' => true]);
+        $api     = $this->fakeOrdersApi('paid');
+        $method  = new ReflectionMethod(WC_Conekta_REST_API::class, 'recover_paid_payment_without_state');
+        $method->setAccessible(true);
+
+        $this->assertNull($method->invoke(null, $gateway, $api, 'cliente@example.com'));
+        $this->assertSame([], $api->asked, 'no Conekta read for an order with no conekta-order-id');
+
+        // Guest with no email yet: nothing to scope the lookup to.
+        $linked = new WC_Order(279117);
+        $linked->update_meta_data('conekta-order-id', 'ord_someone_else');
+        $test_order_registry[279117] = $linked;
+        $this->assertNull($method->invoke(null, $gateway, $api, ''));
+        $this->assertSame([], $api->asked, 'no Conekta read without a shopper to scope to');
+    }
+
+    /**
      * A finished order must not block the next purchase: when the order
      * awaiting payment already collected its payment there is nothing to
      * recover, so /checkout-request goes on to create a fresh Conekta order.
