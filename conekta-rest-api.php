@@ -698,33 +698,65 @@ class WC_Conekta_REST_API {
      * a "Place order" click, never on a first-time checkout.
      */
     private static function recover_paid_payment_without_state($gateway, $api): ?array {
+        // Every bail-out is logged. This guard is the last thing standing
+        // between an orphaned payment and a SECOND payable Conekta order, and
+        // when it declines silently the only visible symptom is a fresh
+        // `mode: create` — indistinguishable from a normal first checkout. The
+        // log below names which link was missing.
         if (!WC()->session) {
+            error_log('Conekta - orphan-payment guard: no WC session, cannot look for an in-flight payment');
             return null;
         }
 
-        $order_id = (int) WC()->session->get('order_awaiting_payment');
+        $awaiting = (int) WC()->session->get('order_awaiting_payment');
+        $draft    = (int) self::get_blocks_draft_order_id();
+        $order_id = $awaiting > 0 ? $awaiting : $draft;
         if ($order_id <= 0) {
-            $order_id = (int) self::get_blocks_draft_order_id();
-        }
-        if ($order_id <= 0) {
+            error_log('Conekta - orphan-payment guard: NO ANCHOR (order_awaiting_payment=0, blocks draft=0) — creating a new Conekta order');
             return null;
         }
 
         $order = wc_get_order($order_id);
         if (!$order) {
+            error_log(sprintf(
+                'Conekta - orphan-payment guard: anchor WC order #%d not found (awaiting=%d, draft=%d) — creating a new Conekta order',
+                $order_id,
+                $awaiting,
+                $draft
+            ));
             return null;
         }
 
         // Already collected, or voided: nothing to recover — this is a new
         // purchase and it must get its own Conekta order.
-        if (in_array($order->get_status(), array_merge(self::PAID_STATUSES, ['cancelled', 'refunded']), true)) {
+        $status = $order->get_status();
+        if (in_array($status, array_merge(self::PAID_STATUSES, ['cancelled', 'refunded']), true)) {
+            error_log(sprintf(
+                'Conekta - orphan-payment guard: anchor WC order #%d is "%s" — nothing to recover, this is a new purchase',
+                $order_id,
+                $status
+            ));
             return null;
         }
 
         $linked = (string) $order->get_meta('conekta-order-id');
         if ($linked === '') {
+            error_log(sprintf(
+                'Conekta - orphan-payment guard: anchor WC order #%d (status "%s") carries NO conekta-order-id meta — creating a new Conekta order',
+                $order_id,
+                $status
+            ));
             return null;
         }
+
+        error_log(sprintf(
+            'Conekta - orphan-payment guard: checking anchor WC order #%d (status "%s", awaiting=%d, draft=%d) linked to Conekta order %s',
+            $order_id,
+            $status,
+            $awaiting,
+            $draft,
+            $linked
+        ));
 
         return self::paid_order_recovery($gateway, $api, $linked, $order);
     }
