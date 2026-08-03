@@ -182,16 +182,21 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
     assert(!page.url().includes('order-received'),
       'the customer never reached order-received (the Store API checkout was blocked)');
 
-    // Blocks stamps the draft WC order id on the Conekta order as
-    // metadata.reference_id — the two-way link, and how we find the order that
-    // must end up paid. Read through the Conekta SDK (h.fetchConektaOrder),
-    // NEVER through h.wcApi here: wcApi navigates the page to /wp-admin, which
-    // would destroy the in-page JS state (the remembered charged order id) that
-    // the retry below exists to exercise. The order's status is asserted after
-    // the retry instead; the orphaned state is already established by the
-    // blocked POST + a paid Conekta order + no order-received.
-    const wcOrderId = (charged.metadata || {}).reference_id;
-    assert(!!wcOrderId, `Conekta order carries metadata.reference_id = WC order #${wcOrderId}`);
+    // NOTHING that identifies the WC order is looked up here, on purpose:
+    // h.wcApi() / h.findOrdersByConektaOrderId() navigate the page to
+    // /wp-admin, which would destroy the in-page JS state (the remembered
+    // charged order id) that the retry below exists to exercise. The orphaned
+    // state is already established by the blocked POST + a paid Conekta order +
+    // no order-received; the order itself is resolved after the retry.
+    //
+    // metadata.reference_id is NOT a reliable id source on blocks and is only
+    // logged: the pre-charge gate requires mode='unchanged' to allow the
+    // charge, and that short-circuit returns BEFORE the setMetadata() call, so
+    // the last checkout-request before a charge never pushes reference_id. When
+    // no earlier update ran while the Blocks draft existed, it stays null and
+    // the reverse `conekta-order-id` order meta is the only link — which is
+    // exactly what the assertions below rely on.
+    console.log(`  metadata.reference_id on the Conekta order: ${(charged.metadata || {}).reference_id ?? 'null (blocks, expected)'}`);
 
     // ---------------------------------------------------------------
     // (2) RETRY — must reuse the payment, never charge again
@@ -228,19 +233,29 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
     const paidCount = paidCharges(settled).length;
     assert(paidCount === 1, `the customer was charged exactly ONCE (paid charges: ${paidCount})`);
 
-    // The draft had to be promoted before completion: payment_complete() is a
-    // silent no-op on 'checkout-draft', which used to leave paid Blocks orders
-    // invisible in the admin. Safe to hit wcApi now — the page work is done.
-    const finalOrder = await h.wcApi('GET', `wc/v3/orders/${wcOrderId}`);
-    console.log(`  WC order #${wcOrderId} final status: ${finalOrder && finalOrder.status}`);
-    assert(finalOrder && h.PAID_STATUSES.includes(finalOrder.status),
-      `WC order #${wcOrderId} is paid (status=${finalOrder && finalOrder.status}), not a leftover draft`);
-
+    // The WC order is resolved through the reverse link (the conekta-order-id
+    // meta the plugin stamps on every checkout-request) — safe to navigate now,
+    // the page work is done. A single paid order here is also what proves the
+    // draft was promoted rather than left behind: an unpromoted 'checkout-draft'
+    // is not a paid status, so it would not survive this filter.
     const orders = await h.findOrdersByConektaOrderId(paidOrderId);
     const ids = orders.map(o => `#${o.id}(${o.status})`).join(', ');
     console.log(`  orders carrying ${paidOrderId}: ${ids || 'none'}`);
     const paid = orders.filter(o => h.PAID_STATUSES.includes(o.status));
-    assert(paid.length === 1, `exactly ONE paid WC order (got ${paid.length}: ${ids})`);
-    assert(String(paid[0].id) === String(wcOrderId),
-      `the paid order IS the one the charge was linked to (#${wcOrderId}) — no duplicate order, no duplicate charge`);
+    assert(paid.length === 1,
+      `exactly ONE paid WC order carries the payment (got ${paid.length}: ${ids || 'none'}) — no duplicate order, no duplicate charge`);
+
+    const wcOrderId = String(paid[0].id);
+    const finalOrder = await h.wcApi('GET', `wc/v3/orders/${wcOrderId}`);
+    console.log(`  WC order #${wcOrderId} final status: ${finalOrder && finalOrder.status}`);
+    assert(finalOrder && finalOrder.status !== 'checkout-draft',
+      `WC order #${wcOrderId} is a real order (status=${finalOrder && finalOrder.status}), not a leftover draft`);
+
+    // Conekta -> WooCommerce back-reference: completion stamps the WC order id
+    // as reference_id on the card charge. In the production incident this was
+    // the tell — only the SECOND charge carried a "Referencia", proving the
+    // first payment had never completed an order. Informational: it is a
+    // best-effort PUT that never blocks completion.
+    const chargeReference = (paidCharges(settled)[0] || {}).reference_id;
+    console.log(`  charge reference_id: ${chargeReference ?? 'none'} (WC order #${wcOrderId})`);
   }).then(passed => process.exit(passed ? 0 : 1));

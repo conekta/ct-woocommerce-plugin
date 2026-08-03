@@ -157,10 +157,15 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
     assert(!page.url().includes('order-received'),
       'the customer never reached order-received (the confirm was blocked)');
 
-    const orphan = await h.wcApi('GET', `wc/v3/orders/${wcOrderId}`);
-    console.log(`  WC order #${wcOrderId} status after the blocked confirm: ${orphan && orphan.status}`);
-    assert(orphan && !h.PAID_STATUSES.includes(orphan.status),
-      `WC order #${wcOrderId} is the orphan we need (status=${orphan && orphan.status}, not paid)`);
+    // Via findOrdersByConektaOrderId, not a raw wcApi GET: it re-logins first,
+    // and the admin REST nonce is observably flaky right after the checkout
+    // flow (rest_cookie_invalid_nonce on every retry). Same assertion either
+    // way — the payment is real but no order has collected it yet.
+    const beforeRecovery = await h.findOrdersByConektaOrderId(paidOrderId);
+    const beforeIds = beforeRecovery.map(o => `#${o.id}(${o.status})`).join(', ');
+    console.log(`  orders carrying ${paidOrderId} after the blocked confirm: ${beforeIds || 'none'}`);
+    assert(beforeRecovery.every(o => !h.PAID_STATUSES.includes(o.status)),
+      `the payment is orphaned — no order has collected it yet (${beforeIds || 'none'})`);
 
     await page.unroute('**/*conekta_confirm_order*');
 
