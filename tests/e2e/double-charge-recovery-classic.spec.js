@@ -203,16 +203,12 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
     // (2) RELOAD — wipes the checkout state, the double-charge trigger
     // ---------------------------------------------------------------
     console.log('\n--- (2) reload /checkout/ (clears the checkout-state transient) ---');
-    // Come back the way a customer would: with items in the cart. Re-adding the
-    // product keeps this independent of whether the failed attempt left the cart
-    // intact — an empty cart renders no checkout form at all, and the plugin
-    // answers 400 'Cart is empty' before the paid-payment guard is reached. Same
-    // product and quantity, so the WC order total and the Conekta amount
-    // comparison are untouched: the recovery is driven by order_awaiting_payment
-    // plus the conekta-order-id meta, never by the cart.
-    await page.goto(`${STORE_URL}/?add-to-cart=${h.getProductId()}&quantity=${h.QUANTITY}`);
-    await page.waitForLoadState('networkidle');
-
+    // The cart is left ALONE. Nothing was completed, so it still holds the
+    // items — and re-adding the product to "be safe" actively breaks this step:
+    // it doubles the quantity, woocommerce_check_cart_items then queues an error
+    // notice, and WooCommerce renders checkout/cart-errors.php INSTEAD of the
+    // form (observed in CI: "5 × E2E Discount Test han sido añadidos a tu
+    // carrito" and no form.checkout anywhere).
     await page.goto(`${STORE_URL}/checkout/`);
 
     // Do NOT wait for form.checkout here. The recovery legitimately wins that
@@ -235,11 +231,18 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
 
     const reloadOutcome = await settleReload();
     if (!reloadOutcome) {
+      // WooCommerce swallows the checkout form in two silent ways — an empty
+      // cart, and a cart-items error notice (cart-errors.php) — so surface the
+      // notices explicitly instead of leaving it to be guessed from body text.
       const bodyText = await page.locator('body').innerText().catch(() => '');
+      const notices = await page.locator('.woocommerce-error, .woocommerce-info, .wc-block-components-notice-banner')
+        .allInnerTexts().catch(() => []);
       throw new Error([
         'After the reload the page neither rendered the checkout nor recovered the payment.',
         `url=${page.url()}`,
-        `page text: ${bodyText.replace(/\s+/g, ' ').slice(0, 400)}`,
+        `notices=${JSON.stringify(notices)}`,
+        `post-reload checkout-requests=${JSON.stringify(checkoutRequests.slice(requestsBeforeCharge))}`,
+        `page text: ${bodyText.replace(/\s+/g, ' ').slice(0, 800)}`,
       ].join('\n  '));
     }
     console.log(`  reload outcome: ${reloadOutcome === 'redirected' ? 'recovery already redirected to the paid order' : 'checkout form rendered'}`);
