@@ -35,31 +35,40 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
   { checkoutType: 'blocks' },
   async ({ page, assert, config, STORE_URL, BILLING }) => {
     const checkoutRequests = [];   // conekta_checkout_request responses
-    const storeApiPosts = [];      // Store API /checkout POSTs (blocked or not)
-    let blockStoreApiCheckout = true;
+    const storeApiPosts = [];      // Store API /checkout POST payloads
 
-    // checkout-request bodies are captured through a ROUTE, not page.on
-    // ('response'): the responses that matter here land while the page may be
-    // navigating, and reading a body after its page navigated away
-    // intermittently fails. Fetching inside the route stores it first.
-    await page.route('**/*conekta_checkout_request*', async (route) => {
-      const response = await route.fetch();
-      const body = await response.text();
-      try { checkoutRequests.push(JSON.parse(body)); } catch (_) { /* not JSON */ }
-      await route.fulfill({ response, body });
+    // Network INSTRUMENTATION here is deliberately passive — listeners only, no
+    // interception. Two sibling specs (decline-then-retry, duplicate-order)
+    // charge successfully with the same helpers, so the interception this spec
+    // adds is the one variable that can break a charge; the only route ever
+    // installed is the Store API block below, and only for the single click
+    // that must fail. Request bodies are readable from page.on('request')
+    // without touching the request at all.
+    const STORE_API_CHECKOUT = /\/wc\/store\/v1\/checkout(\?|$)/;
+
+    page.on('response', async (response) => {
+      if (response.request().method() !== 'POST') return;
+      if (!response.url().includes('conekta_checkout_request')) return;
+      try { checkoutRequests.push(await response.json()); } catch (_) { /* body unavailable */ }
     });
 
-    // The Store API checkout POST is what completes the order AFTER the charge.
-    // Blocking it is how we orphan a real payment; unblocking it lets the retry
-    // through. Every POST is recorded with its payment_data so we can prove the
-    // retry reused the already-charged Conekta order.
-    await page.route('**/wc/store/v1/checkout*', async (route) => {
-      const request = route.request();
-      if (request.method() !== 'POST') return route.continue();
+    page.on('request', (request) => {
+      if (request.method() !== 'POST' || !STORE_API_CHECKOUT.test(request.url())) return;
       let payload = null;
       try { payload = JSON.parse(request.postData() || 'null'); } catch (_) { /* not JSON */ }
-      storeApiPosts.push({ blocked: blockStoreApiCheckout, payload });
-      return blockStoreApiCheckout ? route.abort() : route.continue();
+      storeApiPosts.push({ payload });
+    });
+
+    // Every 4xx/5xx of the run, with a body preview. When the charge fails to
+    // land, the answer is almost always in here (a checkout-request 400 such as
+    // 'Cart is empty', or a Conekta API rejection) — and without it the spec
+    // reports "not paid" with no way to tell why.
+    const httpFailures = [];
+    page.on('response', async (response) => {
+      if (response.status() < 400) return;
+      let preview = '';
+      try { preview = (await response.text()).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { /* body gone */ }
+      httpFailures.push(`${response.status()} ${response.request().method()} ${response.url().slice(0, 160)} → ${preview}`);
     });
 
     /** conekta_order_id sent on a Store API checkout POST (payment_data is a key/value list). */
@@ -172,13 +181,42 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
     console.log('\n--- (1) charge with the Store API checkout blocked ---');
     const requestsBeforeCharge = checkoutRequests.length;
     await h.fillIntegrationCard(h.SUCCESS_CARD);
+
+    // Installed as late as possible and removed as soon as the charge lands, so
+    // no interception is in place while the iframe mounts, while the pre-charge
+    // gate runs, or during the retry. Only the POST is aborted; anything else on
+    // that URL passes through untouched.
+    await page.route(STORE_API_CHECKOUT, async (route) => (
+      route.request().method() === 'POST' ? route.abort() : route.continue()
+    ));
+
     await h.clickPlaceOrder();
 
     const charged = await driveThreeDsUntilPaid(paidOrderId);
     assert(h.conektaOrderPaid(charged),
-      `Conekta order ${paidOrderId} is PAID (payment_status=${charged && charged.payment_status})`);
-    assert(storeApiPosts.some(p => p.blocked),
-      `the Store API checkout POST was blocked (${storeApiPosts.length} POST(s) seen)`);
+      `Conekta order ${paidOrderId} is PAID (payment_status=${(charged && charged.payment_status) ?? 'unreachable'})`);
+
+    // Everything below needs a real charge to exist. assert() only counts,
+    // it does not throw, so stop here explicitly — with the evidence — instead
+    // of cascading into meaningless failures (or a TypeError on a null order).
+    if (!h.conektaOrderPaid(charged)) {
+      const notice = await h.waitForPaymentError(5000);
+      throw new Error([
+        'The charge never landed, so the orphaned-payment scenario could not be set up.',
+        `Conekta payment_status=${(charged && charged.payment_status) ?? 'unreachable'}`,
+        `checkout notice="${notice.message}"`,
+        `Store API checkout POSTs seen=${storeApiPosts.length}`,
+        `last checkout-request=${JSON.stringify(checkoutRequests[checkoutRequests.length - 1] || null)}`,
+        httpFailures.length
+          ? `HTTP failures:\n    - ${httpFailures.join('\n    - ')}`
+          : 'no HTTP failures observed',
+      ].join('\n  '));
+    }
+
+    await page.unroute(STORE_API_CHECKOUT);
+
+    assert(storeApiPosts.length >= 1,
+      `the Store API checkout POST fired and was blocked (${storeApiPosts.length} POST(s) seen)`);
     assert(!page.url().includes('order-received'),
       'the customer never reached order-received (the Store API checkout was blocked)');
 
@@ -202,7 +240,6 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
     // (2) RETRY — must reuse the payment, never charge again
     // ---------------------------------------------------------------
     console.log('\n--- (2) retry Place Order with the Store API unblocked ---');
-    blockStoreApiCheckout = false;
     const postsBeforeRetry = storeApiPosts.length;
 
     await h.clickPlaceOrder();

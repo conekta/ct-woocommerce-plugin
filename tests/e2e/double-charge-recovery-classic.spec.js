@@ -58,6 +58,18 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
       if (!response.url().includes('wc-ajax=checkout')) return;
       try { checkoutResponses.push(await response.json()); } catch (_) { /* body unavailable */ }
     });
+    // Every 4xx/5xx of the run, with a body preview. When the charge fails to
+    // land, the answer is almost always in here (a checkout-request 400 such as
+    // 'Cart is empty', or a Conekta API rejection) — and without it the spec
+    // reports "not paid" with no way to tell why.
+    const httpFailures = [];
+    page.on('response', async (response) => {
+      if (response.status() < 400) return;
+      let preview = '';
+      try { preview = (await response.text()).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { /* body gone */ }
+      httpFailures.push(`${response.status()} ${response.request().method()} ${response.url().slice(0, 160)} → ${preview}`);
+    });
+
     const waitFor = async (arr, n, label, timeoutMs = 30000) => {
       const start = Date.now();
       while (arr.length < n && Date.now() - start < timeoutMs) {
@@ -153,7 +165,25 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
 
     const charged = await driveThreeDsUntilPaid(paidOrderId);
     assert(h.conektaOrderPaid(charged),
-      `Conekta order ${paidOrderId} is PAID (payment_status=${charged && charged.payment_status})`);
+      `Conekta order ${paidOrderId} is PAID (payment_status=${(charged && charged.payment_status) ?? 'unreachable'})`);
+
+    // Everything below needs a real charge to exist. assert() only counts, it
+    // does not throw, so stop here explicitly — with the evidence — instead of
+    // cascading into meaningless failures.
+    if (!h.conektaOrderPaid(charged)) {
+      const notice = await h.waitForPaymentError(5000);
+      throw new Error([
+        'The charge never landed, so the orphaned-payment scenario could not be set up.',
+        `Conekta payment_status=${(charged && charged.payment_status) ?? 'unreachable'}`,
+        `checkout notice="${notice.message}"`,
+        `wc-ajax=checkout responses=${JSON.stringify(checkoutResponses)}`,
+        `last checkout-request=${JSON.stringify(checkoutRequests[checkoutRequests.length - 1] || null)}`,
+        httpFailures.length
+          ? `HTTP failures:\n    - ${httpFailures.join('\n    - ')}`
+          : 'no HTTP failures observed',
+      ].join('\n  '));
+    }
+
     assert(!page.url().includes('order-received'),
       'the customer never reached order-received (the confirm was blocked)');
 
