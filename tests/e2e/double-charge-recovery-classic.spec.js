@@ -203,9 +203,30 @@ h.run('Classic Checkout — an orphaned payment is recovered, never charged agai
     // (2) RELOAD — wipes the checkout state, the double-charge trigger
     // ---------------------------------------------------------------
     console.log('\n--- (2) reload /checkout/ (clears the checkout-state transient) ---');
+    // Come back the way a customer would: with items in the cart. Re-adding the
+    // product first makes this independent of whether the failed attempt left
+    // the cart intact — an EMPTY cart renders no form.checkout at all (the page
+    // becomes "your cart is empty"), so the checkout JS never fires and the
+    // recovery could not be observed. It also matters for the plugin: with an
+    // empty cart /checkout-request returns 400 'Cart is empty' BEFORE reaching
+    // the paid-payment guard. Re-adding the same product/quantity keeps the WC
+    // order (#8529 style) and the Conekta amount comparison untouched — the
+    // recovery is driven by order_awaiting_payment + the conekta-order-id meta,
+    // not by the cart.
+    await page.goto(`${STORE_URL}/?add-to-cart=${h.getProductId()}&quantity=${h.QUANTITY}`);
+    await page.waitForLoadState('networkidle');
+
     await page.goto(`${STORE_URL}/checkout/`);
     await page.waitForLoadState('networkidle');
-    await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
+    const checkoutForm = page.locator('form.checkout');
+    if (!(await checkoutForm.isVisible({ timeout: config.timeouts.selector }).catch(() => false))) {
+      const bodyText = await page.locator('body').innerText().catch(() => '');
+      throw new Error([
+        'The classic checkout did not render after the reload, so the recovery cannot be observed.',
+        `url=${page.url()}`,
+        `page text: ${bodyText.replace(/\s+/g, ' ').slice(0, 400)}`,
+      ].join('\n  '));
+    }
     // The cart survives (nothing was completed), so the checkout renders again.
     // Re-fill in case the reload came back with empty fields, then select the
     // gateway — this is the point where the plugin used to create a NEW payable
