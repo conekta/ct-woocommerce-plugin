@@ -263,6 +263,15 @@ describe('classic-checkout.js', () => {
       const $ = makeJQueryShim();
       global.jQuery = $;
 
+      // Mutable so a test can change what /checkout-request answers midway
+      // (e.g. "this order is already paid") via setCheckoutRequestResponse.
+      let checkoutRequestResponse = responses.checkoutRequest || {
+        success: true,
+        conekta_order_id: 'ord_mounted_1',
+        checkout_request_id: 'cr_1',
+        mode: 'create',
+      };
+
       const calls = [];
       global.fetch = jest.fn((url, opts) => {
         if (url === conekta_settings.checkout_url) {
@@ -276,12 +285,7 @@ describe('classic-checkout.js', () => {
         calls.push({ url, body: JSON.parse(opts.body) });
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({
-            success: true,
-            conekta_order_id: 'ord_mounted_1',
-            checkout_request_id: 'cr_1',
-            mode: 'create',
-          }),
+          json: () => Promise.resolve(checkoutRequestResponse),
         });
       });
 
@@ -311,7 +315,14 @@ describe('classic-checkout.js', () => {
       const chargeSpy = jest.fn();
       sdkCallbacks.onUpdateSubmitTrigger(chargeSpy);
 
-      return { $, form, calls, chargeSpy, sdkCallbacks };
+      return {
+        $,
+        form,
+        calls,
+        chargeSpy,
+        sdkCallbacks,
+        setCheckoutRequestResponse: (response) => { checkoutRequestResponse = response; },
+      };
     }
 
     // NOTE on counting: loadScript() re-evaluates the module per test but the
@@ -432,6 +443,88 @@ describe('classic-checkout.js', () => {
       // No navigation happened.
       expect(window.location.href).toBe(hrefBefore);
       expect(document.querySelector('.woocommerce-error')).not.toBeNull();
+    });
+
+    // -------------------------------------------------------
+    // Double-charge guard: never mount a second payable iframe
+    //
+    // The failure being prevented: the first charge succeeds but the WC order
+    // is never completed (confirm lost, 3DS navigated the page away). A later
+    // checkout refresh hands the frontend a DIFFERENT Conekta order, the iframe
+    // remounts, and the customer pays a second time — two paid Conekta orders
+    // for one cart.
+    // -------------------------------------------------------
+
+    test('server answering already_paid tears the iframe down and redirects to the paid order', async () => {
+      global.CONEKTA_TRANSLATIONS.es.already_paid = 'Ya recibimos un pago de este pedido';
+
+      const flow = await bootFlow({
+        checkout: { result: 'success', conekta_pending_payment: true, order_id: 77, order_key: 'k77' },
+      });
+
+      flow.setCheckoutRequestResponse({
+        success: true,
+        mode: 'already_paid',
+        conekta_order_id: 'ord_first_charge',
+        message: 'Ya recibimos un pago de este pedido',
+        redirect: 'http://localhost/#pagado',
+      });
+
+      triggerNativeUpdatedCheckout();
+      await jest.advanceTimersByTimeAsync(600);
+      await flush();
+
+      expect(document.querySelector('.woocommerce-error').textContent)
+        .toContain('Ya recibimos un pago');
+      expect(window.location.href).toBe('http://localhost/#pagado');
+
+      // The iframe is gone, so a place-order click can no longer charge.
+      const baseline = checkoutCalls(flow.calls).length;
+      flow.chargeSpy.mockClear();
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+      expect(checkoutCalls(flow.calls).length).toBe(baseline);
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
+    });
+
+    test('after a successful charge, a refresh returning a DIFFERENT Conekta order never remounts', async () => {
+      global.CONEKTA_TRANSLATIONS.es.already_paid = 'Ya recibimos un pago de este pedido';
+
+      const flow = await bootFlow({
+        checkout: { result: 'success', conekta_pending_payment: true, order_id: 88, order_key: 'k88' },
+        confirm: { success: false, message: 'no se pudo confirmar' },
+      });
+
+      // Charge succeeds; the confirm fails, so the customer stays on the page.
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+      flow.sdkCallbacks.onFinalizePayment({ id: 'ord_charged_1' });
+      await flush();
+      expect(confirmCalls(flow.calls)).toHaveLength(1);
+
+      // A later refresh hands us a brand-new Conekta order (as the server used
+      // to do when the update on the paid order failed).
+      flow.setCheckoutRequestResponse({
+        success: true,
+        conekta_order_id: 'ord_second_order',
+        checkout_request_id: 'cr_2',
+        mode: 'create',
+      });
+
+      triggerNativeUpdatedCheckout();
+      await jest.advanceTimersByTimeAsync(600);
+      await flush();
+
+      expect(document.querySelector('.woocommerce-error').textContent)
+        .toContain('Ya recibimos un pago');
+
+      // No payable form left: place-order neither posts nor charges again.
+      const baseline = checkoutCalls(flow.calls).length;
+      flow.chargeSpy.mockClear();
+      flow.$('form.checkout').trigger('checkout_place_order_conekta');
+      await flush();
+      expect(checkoutCalls(flow.calls).length).toBe(baseline);
+      expect(flow.chargeSpy).not.toHaveBeenCalled();
     });
   });
 });

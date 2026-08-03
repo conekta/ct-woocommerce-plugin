@@ -95,7 +95,11 @@ if (!function_exists('wc_get_orders')) {
             if (!$allow_any && !in_array($order->get_status(), $allowed, true)) {
                 continue;
             }
-            if ($meta_key && $meta_value && $order->get_meta($meta_key) === $meta_value) {
+            // No meta filter => the query is by status/customer/date only, and
+            // real wc_get_orders() returns every order that matches those. The
+            // stub used to return NOTHING in that case, which silently made
+            // meta-less lookups untestable.
+            if (!$meta_key || ($meta_value !== null && $order->get_meta($meta_key) === $meta_value)) {
                 $results[] = $order;
             }
             if ($limit > 0 && count($results) >= $limit) {
@@ -350,11 +354,22 @@ if (!class_exists('WC_Order')) {
         // Mirrors WC_Order::payment_complete( $transaction_id = '' ) — the
         // optional transaction id is what classic/blocks pass (the Conekta
         // order id); the webhook path calls it with no argument.
+        //
+        // Faithful to the status gate: WooCommerce only completes orders whose
+        // status is in woocommerce_valid_order_statuses_for_payment_complete,
+        // so calling this on a 'checkout-draft' order is a SILENT no-op —
+        // exactly the trap that left paid Blocks orders invisible in the admin.
+        // Callers must promote the draft first (mark_order_paid). Without this
+        // gate the stub happily "completes" drafts and hides the bug.
         public function payment_complete($transaction_id = '') {
+            if (!in_array($this->status, ['on-hold', 'pending', 'failed', 'cancelled'], true)) {
+                return false;
+            }
             $this->status = 'completed';
             if ($transaction_id !== '') {
                 $this->meta['_transaction_id'] = $transaction_id;
             }
+            return true;
         }
         public function add_order_note($note) {}
 

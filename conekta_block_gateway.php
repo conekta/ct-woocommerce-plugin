@@ -308,8 +308,17 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 ];
             }
 
-            $order->payment_complete($conekta_order_id);
-            $order->add_order_note(sprintf(__('Pago confirmado con Conekta (orden %s)', 'woocommerce'), $conekta_order_id));
+            // Via mark_order_paid, never payment_complete() directly: that is a
+            // SILENT no-op on a 'checkout-draft' order (not a valid status for
+            // payment completion), which would report success while leaving the
+            // paid order an invisible draft. Reachable here through the
+            // paid-payment recovery, where the blocks draft was never finalized
+            // because the Store API checkout that follows the charge failed.
+            self::mark_order_paid(
+                $order,
+                $conekta_order_id,
+                sprintf(__('Pago confirmado con Conekta (orden %s)', 'woocommerce'), $conekta_order_id)
+            );
 
             WC_Conekta_REST_API::clear_session();
 

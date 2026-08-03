@@ -12,6 +12,8 @@ const labelConekta = decodeEntities(settings.title);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEBOUNCE_MS = 500;
+const ALREADY_PAID_MESSAGE =
+    'Ya recibimos un pago de este pedido, así que no generamos un segundo cargo. Si tu pedido no aparece como pagado, contacta a la tienda.';
 
 /**
  * Project an address object into a stable, pipe-joined string of the fields
@@ -112,6 +114,12 @@ const ContentConekta = (props) => {
     // Mirrors `refreshing` so onPaymentSetup (registered once) sees the latest value.
     const refreshingRef = useRef(false);
     const checkoutRequestIdRef = useRef(null);
+    // Conekta order the SDK reported as CHARGED. Never cleared: once the money
+    // moved we must not mount — or charge — a different Conekta order, which is
+    // how the same cart ended up paid twice (charge succeeds, the Store API
+    // checkout fails, the customer edits the form, the Conekta order gets
+    // recreated, and the new payable iframe takes a second payment).
+    const chargedOrderIdRef = useRef(null);
     refreshingRef.current = refreshing;
     checkoutRequestIdRef.current = checkoutRequestId;
 
@@ -202,11 +210,39 @@ const ContentConekta = (props) => {
                 if (!response.ok) {
                     if (data?.code === 'missing_customer_email') {
                         setErrorMessage('');  // expected while the user is still filling the form
+                    } else if (data?.code === 'payment_verification_unavailable') {
+                        // Checked before the generic 5xx branch: this 503 means a
+                        // previous payment could not be verified, so the server
+                        // refused to hand us anything payable. Its message says
+                        // no second charge was made — much better than "server
+                        // error, try again".
+                        setErrorMessage(data.message);
                     } else if (response.status >= 500) {
                         setErrorMessage('Error del servidor al preparar el pago. Intenta de nuevo.');
                     } else {
                         setErrorMessage(data?.message || 'No se pudo preparar el pago.');
                     }
+                    return;
+                }
+
+                // The Conekta order backing this checkout is already PAID and the
+                // server refused to create a replacement. Unmount instead of
+                // showing a payable form to a customer who already paid.
+                if (data?.mode === 'already_paid') {
+                    setCheckoutRequestId(null);
+                    setErrorMessage(data.message || ALREADY_PAID_MESSAGE);
+                    if (data.redirect) window.location.href = data.redirect;
+                    return;
+                }
+
+                // Client-side twin of the same guard.
+                if (
+                    chargedOrderIdRef.current &&
+                    data?.conekta_order_id &&
+                    data.conekta_order_id !== chargedOrderIdRef.current
+                ) {
+                    setCheckoutRequestId(null);
+                    setErrorMessage(ALREADY_PAID_MESSAGE);
                     return;
                 }
 
@@ -298,6 +334,9 @@ const ContentConekta = (props) => {
             if (walletOrderRef.current) {
                 const order = walletOrderRef.current;
                 walletOrderRef.current = null;
+                // A wallet order is charged by definition — remember it so a
+                // failed checkout afterwards can never charge a second time.
+                if (order?.id) chargedOrderIdRef.current = String(order.id);
                 return {
                     type: emitResponse.responseTypes.SUCCESS,
                     meta: {
@@ -318,6 +357,22 @@ const ContentConekta = (props) => {
                 return {
                     type: emitResponse.responseTypes.ERROR,
                     message: 'Completa los campos requeridos del formulario antes de pagar.',
+                };
+            }
+
+            // A charge already succeeded on this page but the checkout that
+            // followed it failed (validation, network, stock). Never charge
+            // again: hand WC the SAME Conekta order id so process_payment_api
+            // completes the order from the existing payment — it re-verifies
+            // paid + amount server-side before doing so.
+            if (chargedOrderIdRef.current) {
+                return {
+                    type: emitResponse.responseTypes.SUCCESS,
+                    meta: {
+                        paymentMethodData: {
+                            conekta_order_id: chargedOrderIdRef.current,
+                        },
+                    },
                 };
             }
 
@@ -345,9 +400,22 @@ const ContentConekta = (props) => {
                     }),
                 });
                 const gateData = await gateResponse.json().catch(() => ({}));
+                // Already paid: refuse to charge again and hand the customer
+                // their paid order when the server could recover it.
+                if (gateData?.mode === 'already_paid') {
+                    setCheckoutRequestId(null);
+                    if (gateData.redirect) window.location.href = gateData.redirect;
+                    return {
+                        type: emitResponse.responseTypes.ERROR,
+                        message: gateData.message || ALREADY_PAID_MESSAGE,
+                    };
+                }
                 if (!gateResponse.ok || !gateData?.checkout_request_id) {
                     return {
                         type: emitResponse.responseTypes.ERROR,
+                        // gateData.message carries the server's reason when it has
+                        // one — including the "we could not verify your previous
+                        // payment, no second charge was made" refusal.
                         message: gateData?.message || 'No se pudo preparar el pago. Intenta de nuevo.',
                     };
                 }
@@ -383,6 +451,7 @@ const ContentConekta = (props) => {
                 });
                 orderEmitterRef.current.submit();
                 const order = await orderPromise;
+                if (order?.id) chargedOrderIdRef.current = String(order.id);
 
                 return {
                     type: emitResponse.responseTypes.SUCCESS,

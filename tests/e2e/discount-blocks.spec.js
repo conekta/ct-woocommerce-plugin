@@ -28,6 +28,10 @@ h.run('Blocks Checkout — Integration component', { checkoutType: 'blocks' }, a
   const createResponse = page.waitForResponse(r =>
     r.url().includes('conekta_checkout_request') && r.request().method() === 'POST'
   );
+  // Handled at creation so an earlier failure can't leave it unhandled — an
+  // unhandled rejection here kills the node process after teardown (see the
+  // longer note in discount-blocks).
+  createResponse.catch(() => {});
 
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');
@@ -81,6 +85,14 @@ h.run('Blocks Checkout — Integration component', { checkoutType: 'blocks' }, a
   const updateResponse = page.waitForResponse(r =>
     r.url().includes('conekta_checkout_request') && r.request().method() === 'POST'
   );
+  // Mark the promise as handled the moment it is created. It is awaited several
+  // lines below, so when something in between throws (e.g. the coupon panel
+  // never opens) the pending waitForResponse rejects 30s later with NO handler
+  // attached — Node then raises an uncaughtException that kills the process
+  // AFTER teardown, truncating the run and burying the real error. Awaiting it
+  // below still surfaces the timeout normally.
+  updateResponse.catch(() => {});
+
   await h.applyBlocksCoupon(couponCode);
   const secondResp = await updateResponse;
   const secondBody = await secondResp.json();
