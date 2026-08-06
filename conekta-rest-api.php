@@ -1040,7 +1040,7 @@ class WC_Conekta_REST_API {
      * reference_id (the WC draft order id) is included only when present —
      * Blocks-only, and only once the draft exists.
      */
-    public static function build_conekta_metadata($gateway, string $checkout_type, ?int $reference_id): array {
+    public static function build_conekta_metadata($gateway, string $checkout_type, ?int $reference_id, ?int $customer_id = null): array {
         $metadata = [
             'plugin'                    => 'woocommerce',
             'plugin_conekta_version'    => $gateway->version,
@@ -1050,6 +1050,10 @@ class WC_Conekta_REST_API {
         ];
         if ($reference_id) {
             $metadata['reference_id'] = (string) $reference_id;
+        }
+        $customer_id = $customer_id ?? (function_exists('get_current_user_id') ? (int) get_current_user_id() : 0);
+        if ($customer_id > 0) {
+            $metadata['woocommerce_customer_id'] = (string) $customer_id;
         }
         return $metadata;
     }

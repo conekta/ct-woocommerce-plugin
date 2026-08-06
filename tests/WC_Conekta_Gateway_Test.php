@@ -37,11 +37,12 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     protected function tearDown(): void
     {
-        global $test_product_registry, $test_order_registry, $test_prices_include_tax;
+        global $test_product_registry, $test_order_registry, $test_prices_include_tax, $test_current_user_id;
         WC()->cart = null;
         $test_product_registry = [];
         $test_order_registry = null;
         $test_prices_include_tax = false;
+        $test_current_user_id = 0;
         parent::tearDown();
     }
 
@@ -428,6 +429,38 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertSame('blocks', $md['woocommerce_checkout_type']);
         // reference_id is the webhook's primary Conekta->Woo link.
         $this->assertSame('6100', $md['reference_id']);
+    }
+
+    /**
+     * woocommerce_customer_id: only sent when a real WooCommerce user exists.
+     * Guests (id 0) get no key at all — the merchant should never see a
+     * meaningless "0" on the Conekta panel.
+     */
+    public function test_build_conekta_metadata_includes_customer_id_only_when_a_user_exists()
+    {
+        global $test_current_user_id;
+        $gateway = new stdClass();
+        $gateway->version = '6.2.0';
+
+        // Guest session, no explicit id: key absent.
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', null);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $md);
+
+        // Logged-in shopper (checkout-request has no order yet, falls back to
+        // the current user).
+        $test_current_user_id = 13385;
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', null);
+        $this->assertSame('13385', $md['woocommerce_customer_id']);
+
+        // Explicit id from the placed order wins over the session user —
+        // covers the account created mid-checkout.
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', 6100, 777);
+        $this->assertSame('777', $md['woocommerce_customer_id']);
+
+        // Explicit 0 (guest order) while logged out: key absent.
+        $test_current_user_id = 0;
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'classic', null, 0);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $md);
     }
 
     public function test_build_conekta_metadata_omits_reference_id_when_absent()
@@ -849,6 +882,215 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertNotEquals('processing', $dup->get_status());
         // ...and it's cancelled so it doesn't linger as pending.
         $this->assertEquals('cancelled', $dup->get_status());
+    }
+
+    // -------------------------------------------------------
+    // Order-first blocks flow (6.2.0): the WC order is created, validated
+    // and LINKED before any money moves. process_payment_api no longer
+    // expects a paid Conekta order — it prepares an unpaid one and hands the
+    // JS a conekta_pending_payment flag; the charge fires afterwards.
+    // -------------------------------------------------------
+
+    /**
+     * Minimal stand-ins for the Store API PaymentContext / PaymentResult.
+     */
+    private function blocksPaymentContext(WC_Order $order, string $conekta_order_id, string $payment_method = 'conekta')
+    {
+        return new class($order, $conekta_order_id, $payment_method) {
+            public $order;
+            public $payment_method;
+            public $payment_data;
+            public function __construct($order, $conekta_order_id, $payment_method) {
+                $this->order          = $order;
+                $this->payment_method = $payment_method;
+                $this->payment_data   = $conekta_order_id !== '' ? ['conekta_order_id' => $conekta_order_id] : [];
+            }
+        };
+    }
+
+    private function blocksPaymentResult()
+    {
+        return new class {
+            public $status;
+            public $redirect_url;
+            public $payment_details = [];
+            public function set_status($s) { $this->status = $s; }
+            public function set_redirect_url($u) { $this->redirect_url = $u; }
+            public function set_payment_details($d) { $this->payment_details = $d; }
+        };
+    }
+
+    /**
+     * Gateway wired to a fake OrdersApi that answers getOrderById with the
+     * given payment status/amount and records updateOrder calls.
+     */
+    private function blocksGatewayWithApi(string $payment_status, int $amount_cents, &$api_spy = null)
+    {
+        $conekta_order = $this->createMock(\Conekta\Model\OrderResponse::class);
+        $conekta_order->method('getPaymentStatus')->willReturn($payment_status);
+        $conekta_order->method('getAmount')->willReturn($amount_cents);
+        $conekta_order->method('getCharges')->willReturn(null);
+
+        $api = $this->getMockBuilder(\Conekta\Api\OrdersApi::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getOrderById', 'updateOrder'])
+            ->getMock();
+        $api->method('getOrderById')->willReturn($conekta_order);
+        $api_spy = $api;
+
+        Conekta_Gateway_With_Fake_Api::$fake_api = $api;
+
+        $gateway = $this->createPartialMock(Conekta_Gateway_With_Fake_Api::class, []);
+        // createPartialMock skips the constructor: restore the two fields the
+        // handler reads (the payment_method match and the API key).
+        $gateway->id = 'conekta';
+        $ref  = new ReflectionClass(WC_Conekta_Gateway::class);
+        $prop = $ref->getProperty('settings');
+        $prop->setAccessible(true);
+        $prop->setValue($gateway, ['cards_api_key' => 'key_test_123']);
+
+        return $gateway;
+    }
+
+    /**
+     * The heart of order-first: an UNPAID Conekta order is prepared — amount
+     * verified, reference_id + real customer PUT onto it, reverse meta stamped
+     * on the (validated, pre-existing) WC order — and NOTHING is completed:
+     * the charge hasn't happened yet. The JS reads conekta_pending_payment
+     * from payment_details and fires it.
+     */
+    public function test_process_payment_api_order_first_prepares_an_unpaid_order_without_completing()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $order = new WC_Order(3401);
+        $order->set_status('pending'); // Store API already promoted the draft
+        $order->set_customer_id(13385); // logged-in shopper
+        $test_order_registry[3401] = $order;
+
+        $gateway = $this->blocksGatewayWithApi('pending_payment', 10000, $api);
+        // The pre-charge PUT is the moment reference_id + the real customer
+        // reach Conekta — the link the 2026-08-04 double charge never had.
+        $captured_update = null;
+        $api->expects($this->once())->method('updateOrder')
+            ->willReturnCallback(function ($id, $update) use (&$captured_update) {
+                $captured_update = $update;
+                return null;
+            });
+
+        $context = $this->blocksPaymentContext($order, 'ord_unpaid_1');
+        $result  = $this->blocksPaymentResult();
+
+        $gateway->process_payment_api($context, $result);
+
+        $this->assertEquals('success', $result->status, 'success means "placed and ready to charge", not "paid"');
+        $this->assertSame('true', $result->payment_details['conekta_pending_payment'] ?? null);
+        $this->assertSame('ord_unpaid_1', $result->payment_details['conekta_order_id'] ?? null);
+        $this->assertSame('3401', $result->payment_details['wc_order_id'] ?? null);
+        $this->assertSame($order->get_order_key(), $result->payment_details['wc_order_key'] ?? null);
+        $this->assertNotEmpty($result->redirect_url, 'fallback redirect for Blocks without the observer');
+
+        // The two-way link exists BEFORE any charge...
+        $this->assertSame('ord_unpaid_1', $order->get_meta('conekta-order-id'),
+            'the WC order must carry the Conekta id pre-charge so a lost confirm is webhook-recoverable');
+        // ...and the order was NOT completed (no money has moved).
+        $this->assertSame('pending', $order->get_status());
+
+        // The pre-charge PUT carries reference_id AND the WooCommerce user
+        // behind the order — traceable from the Conekta panel.
+        $this->assertNotNull($captured_update, 'the pre-charge PUT ran');
+        $put_metadata = $captured_update->getMetadata();
+        $this->assertSame('3401', $put_metadata['reference_id'] ?? null);
+        $this->assertSame('13385', $put_metadata['woocommerce_customer_id'] ?? null);
+
+        Conekta_Gateway_With_Fake_Api::$fake_api = null;
+    }
+
+    /**
+     * The pre-charge amount gate: a Conekta order holding a different total
+     * than the WC order the customer just placed is refused — cleanly, since
+     * under order-first nothing has been charged yet. No PUT, no link, no
+     * completion.
+     */
+    public function test_process_payment_api_amount_mismatch_fails_before_any_charge()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $order = new WC_Order(3402); // stub total: 100.00 => 10000 cents
+        $order->set_status('pending');
+        $test_order_registry[3402] = $order;
+
+        $gateway = $this->blocksGatewayWithApi('pending_payment', 87550, $api);
+        $api->expects($this->never())->method('updateOrder');
+
+        $context = $this->blocksPaymentContext($order, 'ord_stale_amount');
+        $result  = $this->blocksPaymentResult();
+
+        $gateway->process_payment_api($context, $result);
+
+        $this->assertEquals('failure', $result->status);
+        $this->assertNotEmpty($result->payment_details['error'] ?? '');
+        $this->assertArrayNotHasKey('conekta_pending_payment', $result->payment_details);
+        $this->assertSame('', (string) $order->get_meta('conekta-order-id'), 'a refused order must not be linked');
+
+        Conekta_Gateway_With_Fake_Api::$fake_api = null;
+    }
+
+    /**
+     * The post-charge exception stays: a Conekta order that is ALREADY paid
+     * (wallet buttons charge inside the iframe without Place Order; a retry
+     * resubmits the id of a successful charge) is completed here — never
+     * prepared, never charged again.
+     */
+    public function test_process_payment_api_completes_an_already_paid_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $order = new WC_Order(3403);
+        $order->set_status('checkout-draft'); // wallet: charge landed while still a draft
+        $test_order_registry[3403] = $order;
+
+        $gateway = $this->blocksGatewayWithApi('paid', 10000, $api);
+        $api->expects($this->never())->method('updateOrder'); // paid orders reject updates
+
+        $context = $this->blocksPaymentContext($order, 'ord_wallet_paid');
+        $result  = $this->blocksPaymentResult();
+
+        $gateway->process_payment_api($context, $result);
+
+        $this->assertEquals('success', $result->status);
+        $this->assertArrayNotHasKey('conekta_pending_payment', $result->payment_details,
+            'a completed payment must not ask the JS to charge');
+        $this->assertEquals('completed', $order->get_status(), 'the draft was promoted and paid');
+
+        Conekta_Gateway_With_Fake_Api::$fake_api = null;
+    }
+
+    /**
+     * No conekta_order_id in payment_data: refuse cleanly. Under order-first
+     * this is guaranteed pre-charge (the JS only charges AFTER this handler
+     * answers), so failing here costs the customer nothing.
+     */
+    public function test_process_payment_api_fails_without_conekta_order_id()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $order = new WC_Order(3404);
+        $test_order_registry[3404] = $order;
+
+        $gateway = $this->createConfiguredGateway();
+        $context = $this->blocksPaymentContext($order, '');
+        $result  = $this->blocksPaymentResult();
+
+        $gateway->process_payment_api($context, $result);
+
+        $this->assertEquals('failure', $result->status);
+        $this->assertNotEmpty($result->payment_details['error'] ?? '');
+        $this->assertNotEquals('completed', $order->get_status());
     }
 
     // -------------------------------------------------------
@@ -2148,6 +2390,31 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         // No REST_REQUEST in the PHPUnit CLI context -> classic.
         $this->assertSame('classic', ckpg_detect_checkout_type());
+    }
+
+    /**
+     * Cash/SPEI/BNPL/pay-by-bank mirror the card gateway: the WooCommerce user
+     * behind the order travels as woocommerce_customer_id, and guests (id 0)
+     * get no key at all.
+     */
+    public function test_build_order_metadata_includes_customer_id_only_when_a_user_exists()
+    {
+        $base = [
+            'order_id'               => 123,
+            'plugin_conekta_version' => '6.2.0',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Cash_Gateway',
+        ];
+
+        $result = ckpg_build_order_metadata($base + ['customer_id' => 13385]);
+        $this->assertSame('13385', $result['woocommerce_customer_id']);
+
+        $result = ckpg_build_order_metadata($base + ['customer_id' => 0]);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $result);
+
+        // Callers that never learned the new key keep working unchanged.
+        $result = ckpg_build_order_metadata($base);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $result);
     }
 
     public function test_build_order_metadata_with_customer_message()

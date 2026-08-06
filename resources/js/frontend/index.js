@@ -96,6 +96,75 @@ export const pickSelectedShipping = (props) => {
     };
 };
 
+/**
+ * The order-first post-checkout charge: the server answered "order placed and
+ * linked, ready to charge" (payment_details.conekta_pending_payment). Fire the
+ * SDK charge on the mounted iframe and complete the WC order through the
+ * shared confirm endpoint (wc_ajax_conekta_confirm_order — the same one
+ * classic uses). Exported for unit tests. Returns:
+ *   { ok: true, redirect }                  — paid and confirmed
+ *   { ok: false, declined: true,  message } — charge failed, $0 moved
+ *   { ok: false, declined: false, message } — CHARGED but confirm failed: the
+ *     order is already linked, so the order.paid webhook completes it;
+ *     retrying only re-runs the (idempotent) confirm, never the charge.
+ */
+export const chargeAndConfirm = async (
+    { orderEmitter, chargedOrderIdRef, expectingChargeRef, confirmUrl, nonce },
+    { conektaOrderId, wcOrderId, wcOrderKey }
+) => {
+    // Only charge if this page hasn't charged yet — a retry after a confirm
+    // failure must re-confirm, never re-charge.
+    if (!chargedOrderIdRef.current) {
+        // Tell the wallet bridge this charge is ours: it treats unsolicited
+        // onOrder events as wallet payments and would re-click Place Order.
+        expectingChargeRef.current = true;
+        try {
+            const orderPromise = new Promise((resolve, reject) => {
+                orderEmitter.onOrder((o) => resolve(o));
+                orderEmitter.onError((e) => reject(e));
+            });
+            orderEmitter.submit();
+            const order = await orderPromise;
+            // The money moved: remember it so nothing on this page can charge
+            // again for this purchase.
+            if (order?.id) chargedOrderIdRef.current = String(order.id);
+        } catch (error) {
+            // Declined / SDK error — nothing was charged. The WC order stays
+            // pending and the iframe stays mounted for the retry.
+            return {
+                ok: false,
+                declined: true,
+                message: error?.message || 'El cargo fue rechazado. Revisa los datos e intenta de nuevo.',
+            };
+        } finally {
+            expectingChargeRef.current = false;
+        }
+    }
+
+    const CONFIRM_PENDING_MESSAGE =
+        'Tu pago fue recibido pero la confirmación falló. No se generará un segundo cargo; tu pedido se actualizará automáticamente.';
+    try {
+        const response = await fetch(confirmUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                nonce,
+                order_id: wcOrderId,
+                order_key: wcOrderKey,
+                conekta_order_id: chargedOrderIdRef.current || conektaOrderId,
+            }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data?.success) {
+            return { ok: true, redirect: data.redirect };
+        }
+        return { ok: false, declined: false, message: data?.message || CONFIRM_PENDING_MESSAGE };
+    } catch (err) {
+        return { ok: false, declined: false, message: CONFIRM_PENDING_MESSAGE };
+    }
+};
+
 const ContentConekta = (props) => {
     const locale = settings.locale ?? 'es';
     const { eventRegistration, emitResponse } = props;
@@ -105,6 +174,12 @@ const ContentConekta = (props) => {
     const [mountToken, setMountToken] = useState(0);
     const [refreshing, setRefreshing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    // Set after the checkout POST succeeded but the charge failed (decline,
+    // SDK error, confirm lost): the WC order exists as pending and the retry
+    // must NOT go through the Store API again (the cart may already be empty)
+    // — the "Reintentar pago" button re-runs charge+confirm directly.
+    const [pendingPayment, setPendingPayment] = useState(null);
+    const [retrying, setRetrying] = useState(false);
 
     const scriptRef = useRef(null);
     const orderEmitterRef = useRef(null);
@@ -114,12 +189,22 @@ const ContentConekta = (props) => {
     // Mirrors `refreshing` so onPaymentSetup (registered once) sees the latest value.
     const refreshingRef = useRef(false);
     const checkoutRequestIdRef = useRef(null);
+    // Conekta order backing the MOUNTED iframe — what onPaymentSetup hands to
+    // the server so process_payment_api prepares (and amount-checks) exactly
+    // the order the customer is looking at.
+    const conektaOrderIdRef = useRef(null);
     // Conekta order the SDK reported as CHARGED. Never cleared: once the money
     // moved we must not mount — or charge — a different Conekta order, which is
     // how the same cart ended up paid twice (charge succeeds, the Store API
     // checkout fails, the customer edits the form, the Conekta order gets
     // recreated, and the new payable iframe takes a second payment).
     const chargedOrderIdRef = useRef(null);
+    // Frozen from "Place order" until the payment settles: a late cart update
+    // (Blocks clears the cart after a successful checkout) must not re-fire
+    // /checkout-request and tear down the iframe we are about to charge.
+    // Unfrozen by onCheckoutFail (checkout rejected — pre-charge, nothing
+    // paid); on success the page navigates away.
+    const payingRef = useRef(false);
     refreshingRef.current = refreshing;
     checkoutRequestIdRef.current = checkoutRequestId;
 
@@ -154,13 +239,6 @@ const ContentConekta = (props) => {
     const shippingRateId = selectedShipping?.id ?? '';
     const billingEmail = billingAddress.email || '';
 
-    // Latest customer snapshot for the pre-charge gate inside onPaymentSetup:
-    // that callback is registered ONCE, so reading these props directly there
-    // would capture the first render's (stale) values — same pattern as
-    // checkoutRequestIdRef above.
-    const customerSnapshotRef = useRef({});
-    customerSnapshotRef.current = { billingEmail, billingAddress, shippingAddress };
-
     const hash = buildCheckoutCacheHash({
         cartTotal,
         currencyCode,
@@ -180,6 +258,9 @@ const ContentConekta = (props) => {
 
         let cancelled = false;
         const timer = setTimeout(async () => {
+            // Never refresh/remount while a payment is in flight: the iframe
+            // must stay bound to the Conekta order the server just prepared.
+            if (payingRef.current) return;
             setRefreshing(true);
             try {
                 // Send billing + shipping in the body so the server doesn't
@@ -247,6 +328,11 @@ const ContentConekta = (props) => {
                 }
 
                 if (data?.checkout_request_id) {
+                    // Track the Conekta order the iframe will be bound to —
+                    // onPaymentSetup hands this to process_payment_api.
+                    if (data.conekta_order_id) {
+                        conektaOrderIdRef.current = String(data.conekta_order_id);
+                    }
                     setCheckoutRequestId(data.checkout_request_id);
                     // Only remount when the Conekta order actually changed.
                     // mode === 'unchanged' means the amount is the same as the
@@ -376,103 +462,131 @@ const ContentConekta = (props) => {
                 };
             }
 
-            // Pre-charge gate: one final checkout-request POST before asking
-            // the SDK to charge. Server-side this stamps the draft WC order id
-            // (reference_id) onto the Conekta order and the conekta-order-id
-            // meta onto the draft — the two-way link the order.paid webhook
-            // relies on. It also confirms the amount is
-            // current: if the server answers with a DIFFERENT
-            // checkout_request_id, the Conekta order was recreated (totals
-            // changed) and the mounted iframe would charge a stale amount —
-            // refuse instead of charging.
-            try {
-                const snapshot = customerSnapshotRef.current;
-                const gateResponse = await fetch(settings.checkout_request_url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        nonce: settings.nonce,
-                        email: snapshot.billingEmail,
-                        billing:  snapshot.billingAddress,
-                        shipping: snapshot.shippingAddress,
-                        woocommerce_checkout_type: 'blocks',
-                    }),
-                });
-                const gateData = await gateResponse.json().catch(() => ({}));
-                // Already paid: refuse to charge again and hand the customer
-                // their paid order when the server could recover it.
-                if (gateData?.mode === 'already_paid') {
-                    setCheckoutRequestId(null);
-                    if (gateData.redirect) window.location.href = gateData.redirect;
-                    return {
-                        type: emitResponse.responseTypes.ERROR,
-                        message: gateData.message || ALREADY_PAID_MESSAGE,
-                    };
-                }
-                if (!gateResponse.ok || !gateData?.checkout_request_id) {
-                    return {
-                        type: emitResponse.responseTypes.ERROR,
-                        // gateData.message carries the server's reason when it has
-                        // one — including the "we could not verify your previous
-                        // payment, no second charge was made" refusal.
-                        message: gateData?.message || 'No se pudo preparar el pago. Intenta de nuevo.',
-                    };
-                }
-                // Fail closed on ANY server-side mutation, not just an id
-                // change: mode 'update'/'create' means the Conekta order was
-                // touched between the last sync and this click (amount,
-                // address, recreation) and the mounted iframe may not reflect
-                // it. Remount and ask the customer to retry — never charge
-                // against a state we didn't verify as current.
-                if (
-                    gateData.checkout_request_id !== checkoutRequestIdRef.current
-                    || gateData.mode !== 'unchanged'
-                ) {
-                    setCheckoutRequestId(gateData.checkout_request_id);
-                    setMountToken((t) => t + 1);
-                    return {
-                        type: emitResponse.responseTypes.ERROR,
-                        message: 'El importe se actualizó. Revisa el total e intenta de nuevo.',
-                    };
-                }
-            } catch (gateError) {
+            // ORDER-FIRST: no charge here. Hand WC the id of the (unpaid)
+            // Conekta order backing the mounted iframe; the Store API creates
+            // and validates the WooCommerce order, and process_payment_api
+            // amount-checks + links the two BEFORE any money moves. The actual
+            // charge fires in the onCheckoutSuccess observer below — so a
+            // checkout WooCommerce rejects can never cost the customer money.
+            if (!conektaOrderIdRef.current) {
                 return {
                     type: emitResponse.responseTypes.ERROR,
-                    message: gateError?.message || 'Error de red al preparar el pago.',
+                    message: 'No se pudo preparar el pago. Intenta de nuevo.',
                 };
             }
-
-            expectingChargeRef.current = true;
-            try {
-                const orderPromise = new Promise((resolve, reject) => {
-                    orderEmitterRef.current.onOrder((o) => resolve(o));
-                    orderEmitterRef.current.onError((e) => reject(e));
-                });
-                orderEmitterRef.current.submit();
-                const order = await orderPromise;
-                if (order?.id) chargedOrderIdRef.current = String(order.id);
-
-                return {
-                    type: emitResponse.responseTypes.SUCCESS,
-                    meta: {
-                        paymentMethodData: {
-                            conekta_order_id: String(order.id),
-                        },
+            payingRef.current = true;
+            return {
+                type: emitResponse.responseTypes.SUCCESS,
+                meta: {
+                    paymentMethodData: {
+                        conekta_order_id: conektaOrderIdRef.current,
                     },
-                };
-            } catch (error) {
-                return {
-                    type: emitResponse.responseTypes.ERROR,
-                    message: error?.message || 'Error procesando el pago',
-                };
-            } finally {
-                expectingChargeRef.current = false;
-            }
+                },
+            };
         });
 
         return () => unsubscribe();
     }, [onPaymentSetup, emitResponse.responseTypes.SUCCESS, emitResponse.responseTypes.ERROR]);
+
+    // Post-checkout charge driver (see the exported chargeAndConfirm above).
+    // Kept in a ref because the checkout observers are registered once.
+    const chargeAndConfirmRef = useRef(null);
+    chargeAndConfirmRef.current = (attempt) =>
+        chargeAndConfirm(
+            {
+                orderEmitter: orderEmitterRef.current,
+                chargedOrderIdRef,
+                expectingChargeRef,
+                confirmUrl: settings.confirm_url,
+                nonce: settings.nonce,
+            },
+            attempt
+        );
+
+    // Order-first observers. onCheckoutSuccess fires AFTER the Store API
+    // created/validated the order and process_payment_api prepared the Conekta
+    // order — this is where the money moves now. onCheckoutFail means WC
+    // rejected the checkout pre-charge: unfreeze the refresh loop, nothing
+    // was paid. The legacy aliases cover WooCommerce Blocks < 9.7.
+    useEffect(() => {
+        const onSuccess =
+            eventRegistration.onCheckoutSuccess ||
+            eventRegistration.onCheckoutAfterProcessingWithSuccess;
+        const onFail =
+            eventRegistration.onCheckoutFail ||
+            eventRegistration.onCheckoutAfterProcessingWithError;
+
+        const unsubFail = onFail
+            ? onFail(() => {
+                  payingRef.current = false;
+                  return true;
+              })
+            : undefined;
+
+        if (!onSuccess) {
+            // Very old Blocks without the observer: process_payment_api's
+            // redirect fallback lands the customer on order-received with the
+            // order pending — nothing charged, recoverable by hand.
+            return () => {
+                if (unsubFail) unsubFail();
+            };
+        }
+
+        const unsubSuccess = onSuccess(async (payload = {}) => {
+            const details = payload.processingResponse?.paymentDetails || {};
+            if (!details.conekta_pending_payment) {
+                // Post-charge path (wallet / resubmit-after-charge): the
+                // server already completed the order — follow its redirect.
+                return true;
+            }
+
+            const attempt = {
+                conektaOrderId: details.conekta_order_id,
+                wcOrderId: details.wc_order_id,
+                wcOrderKey: details.wc_order_key,
+            };
+            const outcome = await chargeAndConfirmRef.current(attempt);
+
+            if (outcome.ok) {
+                if (outcome.redirect) window.location.href = outcome.redirect;
+                return true;
+            }
+
+            // Both failure kinds keep the retry available: a decline re-runs
+            // charge+confirm; a confirm failure re-runs only the confirm
+            // (chargedOrderIdRef short-circuits the charge).
+            setPendingPayment(attempt);
+            setErrorMessage(outcome.message);
+            return {
+                type: emitResponse.responseTypes.ERROR,
+                message: outcome.message,
+                retry: true,
+            };
+        });
+
+        return () => {
+            if (unsubSuccess) unsubSuccess();
+            if (unsubFail) unsubFail();
+        };
+    }, [eventRegistration, emitResponse.responseTypes.ERROR]);
+
+    // In-page retry after a failed charge/confirm. Deliberately does NOT go
+    // through the Store API again: the WC order already exists (pending) and
+    // the cart may already be empty — re-posting the checkout would fail or,
+    // worse, create a second order. The iframe is still mounted on the same
+    // (unpaid) Conekta order, so retrying is just charge+confirm again.
+    const handleRetryPayment = async () => {
+        if (!pendingPayment || retrying) return;
+        setRetrying(true);
+        setErrorMessage('');
+        const outcome = await chargeAndConfirmRef.current(pendingPayment);
+        if (outcome.ok) {
+            if (outcome.redirect) window.location.href = outcome.redirect;
+            return;
+        }
+        setErrorMessage(outcome.message);
+        setRetrying(false);
+    };
 
     const showEmailPlaceholder = !billingEmail || !EMAIL_REGEX.test(billingEmail);
 
@@ -483,6 +597,16 @@ const ContentConekta = (props) => {
                 <p>Completa tu correo para ver el formulario de pago.</p>
             )}
             {errorMessage && <p style={{ color: 'red' }}>{errorMessage}</p>}
+            {pendingPayment && (
+                <button
+                    type="button"
+                    className="components-button wc-block-components-button conekta-retry-payment"
+                    onClick={handleRetryPayment}
+                    disabled={retrying}
+                >
+                    {retrying ? 'Procesando…' : 'Reintentar pago'}
+                </button>
+            )}
             <div id="conektaITokenizerframeContainer" style={{ height: 600 }}></div>
         </div>
     );

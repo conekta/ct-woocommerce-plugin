@@ -5,17 +5,23 @@
  * Regression for the recurring "paid in Conekta but not in Woo" desync (seen
  * again in 6.0.5). The dangerous shape is a retry after a decline: the shopper
  * enters a bad card, the charge is declined, then they retry with a good card
- * on the same mounted Conekta order. The good charge must drive WC's
- * process_payment_api and mark the WooCommerce order paid — never leave Conekta
- * paid while Woo stays pending/failed.
+ * on the same mounted Conekta order. The good charge must complete the SAME
+ * WooCommerce order — never leave Conekta paid while Woo stays pending/failed.
+ *
+ * ORDER-FIRST (6.2.0): "Realizar el pedido" now creates the WC order FIRST
+ * (Store API checkout succeeds), and the charge fires afterwards in
+ * onCheckoutSuccess. A decline therefore leaves a real pending WC order behind
+ * and the retry is the in-page "Reintentar pago" button — it re-runs
+ * charge+confirm directly, WITHOUT re-posting the Store API checkout (the cart
+ * may already be empty and the order already exists).
  *
  * This spec:
  *   1) Mounts the Blocks checkout and captures the Conekta order id.
  *   2) DECLINE: pays with 4000000000000127 (insufficient funds). Asserts the
- *      checkout shows an error, never reaches order-received, and the Conekta
- *      order is NOT paid.
- *   3) RETRY: pays with 4242424242424242 on the same iframe. Asserts we reach
- *      order-received.
+ *      checkout shows an error, never reaches order-received, the Conekta
+ *      order is NOT paid, and the "Reintentar pago" button is offered.
+ *   3) RETRY: refills 4242424242424242 on the same iframe and clicks
+ *      "Reintentar pago". Asserts we reach order-received.
  *   4) INVARIANT: the Conekta order is `paid` AND exactly one WooCommerce order
  *      carrying that conekta-order-id is in a paid status.
  */
@@ -90,15 +96,21 @@ h.run('Blocks Checkout — decline then successful retry stays paid in Conekta A
     assert(afterDecline.payment_status !== 'paid',
       `Conekta order NOT paid after decline (payment_status = ${afterDecline.payment_status})`);
 
+    // Order-first: the WC order already exists (pending), so the retry is the
+    // in-page button — not a second Place Order through the Store API.
+    const retryButton = page.locator('.conekta-retry-payment');
+    const retryVisible = await retryButton.isVisible({ timeout: 15000 }).catch(() => false);
+    assert(retryVisible, 'the "Reintentar pago" button is offered after the decline');
+
     // ---------------------------------------------------------------
     // (2) RETRY — good card on the SAME iframe must succeed
     // ---------------------------------------------------------------
-    console.log('\n--- (2) retry: pay with 4242424242424242 (approved) ---');
+    console.log('\n--- (2) retry: pay with 4242424242424242 (approved) via "Reintentar pago" ---');
     // Give Conekta a beat to settle the declined charge before the retry, so
     // the second attempt charges cleanly instead of racing the first.
     await page.waitForTimeout(5000);
     await h.fillIntegrationCard(h.SUCCESS_CARD);
-    await h.clickPlaceOrder();
+    await retryButton.click();
     await h.waitForOrderReceivedWith3DS();
     assert(page.url().includes('order-received'), 'retry reached order-received');
 

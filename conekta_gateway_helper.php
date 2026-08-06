@@ -93,6 +93,10 @@ function ckpg_build_order_metadata($data): array
         'woocommerce_checkout_type' => $data['woocommerce_checkout_type'] ?? ckpg_detect_checkout_type(),
     );
 
+    if (!empty($data['customer_id']) && (int) $data['customer_id'] > 0) {
+        $metadata['woocommerce_customer_id'] = (string) (int) $data['customer_id'];
+    }
+
     if (!empty($data['customer_message'])) {
         $metadata = array_merge(
             $metadata, array(
@@ -473,6 +477,7 @@ function ckpg_get_request_data($order)
 
         $data = array(
             'order_id'             => $order->get_id(),
+            'customer_id'          => (int) $order->get_customer_id(),
             'amount'               => $amount,
             'currency'             => $currency,
             'description'          => sprintf('Charge for %s', $order->get_billing_email()),

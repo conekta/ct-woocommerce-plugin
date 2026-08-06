@@ -84,6 +84,10 @@ final class WC_Gateway_Conekta_Blocks_Support extends AbstractPaymentMethodType 
             'locale' 						 => $this->gateway->get_user_locale(),
             'rest_url'                       => esc_url_raw(rest_url('conekta/v1/')),
             'checkout_request_url'           => \WC_AJAX::get_endpoint('conekta_checkout_request'),
+            // Order-first: the charge fires AFTER the Store API checkout, and
+            // this endpoint (shared with classic) completes the pending WC
+            // order once the SDK reports the payment.
+            'confirm_url'                    => \WC_AJAX::get_endpoint('conekta_confirm_order'),
             'nonce'                          => wp_create_nonce('conekta-checkout-request'),
         ];
     }
