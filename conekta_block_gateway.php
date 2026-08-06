@@ -430,18 +430,39 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
     }
 
     /**
+     * Blocks payment handler — ORDER-FIRST since 6.2.0.
+     *
+     * The JS no longer charges in onPaymentSetup: by the time this runs, the
+     * WooCommerce order was created and validated by the Store API, NOTHING
+     * has been charged, and payment_data carries the id of the (unpaid)
+     * Conekta order backing the mounted iframe. This handler mirrors classic's
+     * process_payment: verify the amount, PUT reference_id + the real customer
+     * onto the Conekta order, stamp the reverse conekta-order-id meta, leave
+     * the order pending, and hand the JS a `conekta_pending_payment` flag in
+     * payment_details — the onCheckoutSuccess observer then fires the SDK
+     * charge and completes through the shared confirm endpoint.
+     *
+     * Structural guarantee this buys (the 2026-08-04 double charge): a card
+     * can never be charged for an order WooCommerce refused or failed to
+     * create, and every charge is preceded by a two-way Conekta<->Woo link —
+     * a lost confirm leaves a pending order the order.paid webhook completes
+     * CORRECTLY instead of fabricating a degraded guest order.
+     *
+     * The pre-charge exception is kept: a Conekta order that is ALREADY paid
+     * (wallet buttons charge inside the iframe without Place Order; a retry
+     * resubmits the id of a previous successful charge) is completed here,
+     * post-charge style, never charged again.
+     *
      * @throws Exception
      */
     public function process_payment_api($context, $result) {
         $order = $context->order;
 
-        // Diagnostic: blocks charges the card (Conekta SDK) BEFORE the Store API
-        // /checkout call that reaches this handler, so if we bail here — or never
-        // get called at all — the customer can end up paid with the WC order
-        // stuck as checkout-draft. Log entry + every early return so the failure
-        // reason is visible in debug.log. The ABSENCE of this "entry" line for a
-        // paid Conekta order means the Store API /checkout never reached the
-        // gateway (customer abandoned after the charge / request never completed).
+        // Diagnostic: log entry + every early return so a failure between the
+        // Store API /checkout call and the payment step is visible in
+        // debug.log. The ABSENCE of this "entry" line means /checkout never
+        // reached the gateway (it died in WC's own processing — which, under
+        // order-first, costs nothing: no charge has happened yet).
         $conekta_order_id = isset($context->payment_data['conekta_order_id']) ? sanitize_text_field($context->payment_data['conekta_order_id']) : '';
         error_log(sprintf(
             'Conekta - process_payment_api (blocks): ENTRY WC order #%s, payment_method "%s", conekta_order_id "%s"',
@@ -460,21 +481,90 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             return;
         }
 
-        if (empty($conekta_order_id)) {
-            // The card may already be charged: the SDK emitted onFinalizePayment
-            // but conekta_order_id never reached payment_data — WC order left unpaid.
+        if (!$order || empty($conekta_order_id)) {
             error_log(sprintf(
-                'Conekta - process_payment_api (blocks): MISSING conekta_order_id on WC order #%s — card may be charged with no linked order',
-                $order ? $order->get_id() : 'null'
+                'Conekta - process_payment_api (blocks): MISSING %s — refusing (nothing has been charged)',
+                !$order ? 'WC order in context' : 'conekta_order_id on WC order #' . $order->get_id()
             ));
             $result->set_status('failure');
             $result->set_payment_details(array_merge($result->payment_details, [
-                'error' => __('Falta la orden de Conekta. Vuelve a intentar el pago.', 'woocommerce'),
+                'error' => __('Falta la orden de Conekta. Recarga la página e intenta de nuevo.', 'woocommerce'),
             ]));
             wc_add_notice(__('Error: Falta la orden de Conekta.', 'woocommerce'), 'error');
             return;
         }
 
+        // One paid Conekta order must never complete two WC orders. Checked
+        // BEFORE any API call so the guard also protects resubmissions when
+        // the API is unreachable.
+        $duplicate = $this->find_existing_order_for_conekta_id($conekta_order_id, (int) $order->get_id());
+        if ($duplicate) {
+            $this->cancel_duplicate_order($order, $duplicate);
+            $result->set_status('success');
+            $result->set_redirect_url($this->get_return_url($duplicate));
+            return;
+        }
+
+        try {
+            $api           = $this->get_api_instance($this->settings['cards_api_key'], $this->version);
+            $conekta_order = $api->getOrderById($conekta_order_id, 'es', null, self::API_CLIENT);
+
+            // Branch on the REAL payment status, not on how the id arrived
+            // (same contract as classic's process_payment):
+            //  - paid  -> wallet charge or resubmit-after-charge: complete
+            //             now, never charge again.
+            //  - unpaid -> order-first: prepare and let the JS fire the charge.
+            if ($conekta_order->getPaymentStatus() === 'paid') {
+                $this->finish_post_charge_payment_api($order, $conekta_order_id, $result);
+                return;
+            }
+
+            $prepared = $this->prepare_order_for_charge($order, $api, $conekta_order, $conekta_order_id, 'blocks');
+            if (empty($prepared['success'])) {
+                wc_add_notice(__('Error: ', 'woothemes') . $prepared['error'], 'error');
+                $result->set_status('failure');
+                $result->set_payment_details(array_merge($result->payment_details, [
+                    'error' => $prepared['error'],
+                ]));
+                return;
+            }
+
+            // 'success' here means "the order is placed and ready to charge",
+            // NOT "paid": the onCheckoutSuccess observer reads these
+            // payment_details, fires the SDK charge and calls the shared
+            // confirm endpoint (wc_ajax_conekta_confirm_order). The redirect
+            // is the fallback if the observer never runs (old Blocks, JS
+            // error): order-received shows the order as pending — safe,
+            // nothing was charged.
+            $result->set_status('success');
+            $result->set_payment_details(array_merge($result->payment_details, [
+                'conekta_pending_payment' => 'true',
+                'conekta_order_id'        => $conekta_order_id,
+                'wc_order_id'             => (string) $order->get_id(),
+                'wc_order_key'            => (string) $order->get_order_key(),
+            ]));
+            $result->set_redirect_url($this->get_return_url($order));
+        } catch (\Exception $e) {
+            error_log(sprintf(
+                'Conekta - process_payment_api (blocks, order-first): FAILED preparing WC order #%d (Conekta order %s): %s',
+                $order->get_id(),
+                $conekta_order_id,
+                $e->getMessage()
+            ));
+            wc_add_notice(__('Error al preparar el pago con Conekta: ', 'woocommerce') . $e->getMessage(), 'error');
+            $result->set_status('failure');
+            $result->set_payment_details(array_merge($result->payment_details, [
+                'error' => $e->getMessage(),
+            ]));
+        }
+    }
+
+    /**
+     * Post-charge completion for the blocks flow: the Conekta order is already
+     * paid (wallet, or a resubmit after a successful charge). Same outcomes as
+     * finish_post_charge_payment, expressed on the Store API PaymentResult.
+     */
+    protected function finish_post_charge_payment_api(WC_Order $order, string $conekta_order_id, $result): void {
         $outcome = $this->complete_wc_order_from_conekta($order, $conekta_order_id);
 
         if ($outcome['success']) {
@@ -490,7 +580,7 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         } else {
             error_log(sprintf(
                 'Conekta - process_payment_api (blocks): FAILED for WC order #%s (Conekta order %s): %s',
-                $order ? $order->get_id() : 'null',
+                $order->get_id(),
                 $conekta_order_id,
                 $outcome['error'] ?? 'unknown'
             ));
@@ -590,42 +680,13 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 return $this->finish_post_charge_payment($order, $conekta_order_id);
             }
 
-            // Hard gate: the iframe charges whatever amount the Conekta order
-            // holds, so it MUST match the WC order the customer just placed.
-            // A mismatch means the cart changed after the last sync (e.g. a
-            // coupon in another tab) — refuse and let the JS remount.
-            $expected_amount = (int) round($order->get_total() * 100);
-            $actual_amount   = (int) $conekta_order->getAmount();
-            if ($expected_amount !== $actual_amount) {
-                error_log(sprintf(
-                    'Conekta - process_payment (classic, order-first): AMOUNT MISMATCH pre-charge — WC order #%d expects %d cents, Conekta order %s holds %d cents',
-                    $order_id,
-                    $expected_amount,
-                    $conekta_order_id,
-                    $actual_amount
-                ));
-                wc_add_notice(__('El total del pedido cambió. Revisa el formulario de pago e intenta de nuevo.', 'woocommerce'), 'error');
+            // Amount gate + pre-charge PUT + two-way link, shared with the
+            // blocks flow (process_payment_api).
+            $prepared = $this->prepare_order_for_charge($order, $api, $conekta_order, $conekta_order_id, 'classic');
+            if (empty($prepared['success'])) {
+                wc_add_notice($prepared['error'], 'error');
                 return ['result' => 'failure'];
             }
-
-            // Pre-charge PUT: stamp the WC order id (reference_id) and the REAL
-            // customer data from the just-created WC order onto the Conekta
-            // order. This is the last moment it's mutable (paid orders reject
-            // updates) and it's what kills both recurring complaints: the
-            // webhook can always find the WC order, and no paid Conekta order
-            // ever keeps the 'Cliente'/'Pendiente' placeholders.
-            $update = new OrderUpdate([]);
-            $update->setMetadata(WC_Conekta_REST_API::build_conekta_metadata($this, 'classic', $order_id));
-            $update->setCustomerInfo(new OrderUpdateCustomerInfo($this->customer_info_from_order($order)));
-            $shipping_contact = $this->shipping_contact_from_order($order);
-            if (!empty($shipping_contact)) {
-                $update->setShippingContact(new CustomerShippingContactsRequest($shipping_contact));
-            }
-            $api->updateOrder($conekta_order_id, $update, $this->get_user_locale());
-
-            self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
-            $order->update_status('pending');
-            $order->add_order_note(sprintf(__('Pedido creado, esperando el cobro con Conekta (orden %s).', 'woocommerce'), $conekta_order_id));
 
             return [
                 'result'                  => 'success',
@@ -648,6 +709,62 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
             wc_add_notice(__('Error al preparar el pago con Conekta: ', 'woocommerce') . $e->getMessage(), 'error');
             return ['result' => 'failure'];
         }
+    }
+
+    /**
+     * Order-first pre-charge preparation, shared by the classic
+     * (process_payment) and blocks (process_payment_api) flows. Runs AFTER
+     * WooCommerce validated and created the order and BEFORE any money moves:
+     *
+     *  - Hard amount gate: the iframe charges whatever amount the Conekta
+     *    order holds, so it MUST match the WC order the customer just placed.
+     *    A mismatch means the cart changed after the last sync (e.g. a coupon
+     *    in another tab) — refuse pre-charge, nothing was paid.
+     *  - Pre-charge PUT: stamp the WC order id (reference_id) and the REAL
+     *    customer data from the just-created WC order onto the Conekta order.
+     *    This is the last moment it's mutable (paid orders reject updates) and
+     *    it's what kills both recurring complaints: the webhook can always
+     *    find the WC order, and no paid Conekta order ever keeps the
+     *    'Cliente'/'Pendiente' placeholders.
+     *  - Reverse link + pending status: the WC order carries conekta-order-id
+     *    BEFORE the charge, so even if everything after the charge dies (tab
+     *    closed, confirm lost) the order.paid webhook completes THIS order —
+     *    never fabricates a degraded one from the payload.
+     *
+     * @return array{success: bool, error?: string}
+     */
+    protected function prepare_order_for_charge(WC_Order $order, $api, $conekta_order, string $conekta_order_id, string $checkout_type): array {
+        $expected_amount = (int) round($order->get_total() * 100);
+        $actual_amount   = (int) $conekta_order->getAmount();
+        if ($expected_amount !== $actual_amount) {
+            error_log(sprintf(
+                'Conekta - prepare_order_for_charge (%s): AMOUNT MISMATCH pre-charge — WC order #%d expects %d cents, Conekta order %s holds %d cents',
+                $checkout_type,
+                $order->get_id(),
+                $expected_amount,
+                $conekta_order_id,
+                $actual_amount
+            ));
+            return [
+                'success' => false,
+                'error'   => __('El total del pedido cambió. Revisa el formulario de pago e intenta de nuevo.', 'woocommerce'),
+            ];
+        }
+
+        $update = new OrderUpdate([]);
+        $update->setMetadata(WC_Conekta_REST_API::build_conekta_metadata($this, $checkout_type, $order->get_id()));
+        $update->setCustomerInfo(new OrderUpdateCustomerInfo($this->customer_info_from_order($order)));
+        $shipping_contact = $this->shipping_contact_from_order($order);
+        if (!empty($shipping_contact)) {
+            $update->setShippingContact(new CustomerShippingContactsRequest($shipping_contact));
+        }
+        $api->updateOrder($conekta_order_id, $update, $this->get_user_locale());
+
+        self::update_conekta_order_meta($order, $conekta_order_id, 'conekta-order-id');
+        $order->update_status('pending');
+        $order->add_order_note(sprintf(__('Pedido creado, esperando el cobro con Conekta (orden %s).', 'woocommerce'), $conekta_order_id));
+
+        return ['success' => true];
     }
 
     /**

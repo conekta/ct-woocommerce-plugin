@@ -69,6 +69,7 @@ const {
     pickSelectedShipping,
     addrFields,
     buildCheckoutCacheHash,
+    chargeAndConfirm,
 } = require('../../resources/js/frontend/index.js');
 
 describe('index.js (Blocks)', () => {
@@ -352,6 +353,171 @@ describe('index.js (Blocks)', () => {
         test('empty input still produces a deterministic string', () => {
             expect(buildCheckoutCacheHash()).toBe(buildCheckoutCacheHash());
             expect(typeof buildCheckoutCacheHash()).toBe('string');
+        });
+    });
+
+    // -------------------------------------------------------
+    // chargeAndConfirm — the order-first post-checkout charge driver.
+    // The charge now fires AFTER the Store API created/validated/linked the
+    // WC order (onCheckoutSuccess), and completion goes through the shared
+    // confirm endpoint. These tests pin the money-safety invariants.
+    // -------------------------------------------------------
+    describe('chargeAndConfirm (order-first)', () => {
+        // Emitter stand-in the driver charges through. `outcome` decides what
+        // submit() dispatches: {order} resolves onOrder, {error} rejects.
+        const makeEmitter = (outcome) => {
+            const emitter = {
+                submitCalls: 0,
+                _order: null,
+                _error: null,
+                onOrder(cb) { this._order = cb; },
+                onError(cb) { this._error = cb; },
+                submit() {
+                    this.submitCalls += 1;
+                    if (outcome.error) this._error(outcome.error);
+                    else this._order(outcome.order);
+                },
+            };
+            return emitter;
+        };
+
+        const makeDeps = (emitter, overrides = {}) => ({
+            orderEmitter: emitter,
+            chargedOrderIdRef: { current: null },
+            expectingChargeRef: { current: false },
+            confirmUrl: '/?wc-ajax=conekta_confirm_order',
+            nonce: 'test_nonce',
+            ...overrides,
+        });
+
+        const attempt = {
+            conektaOrderId: 'ord_prepared_1',
+            wcOrderId: '3401',
+            wcOrderKey: 'wc_order_key_3401',
+        };
+
+        afterEach(() => {
+            delete global.fetch;
+        });
+
+        test('charges once, confirms with the CHARGED order id and returns the redirect', async () => {
+            const emitter = makeEmitter({ order: { id: 'ord_prepared_1' } });
+            const deps = makeDeps(emitter);
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({ success: true, redirect: 'https://shop.test/order-received/3401/' }),
+            });
+
+            const result = await chargeAndConfirm(deps, attempt);
+
+            expect(result).toEqual({ ok: true, redirect: 'https://shop.test/order-received/3401/' });
+            expect(emitter.submitCalls).toBe(1);
+            // The money moved: the page-level guard must remember it.
+            expect(deps.chargedOrderIdRef.current).toBe('ord_prepared_1');
+            const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(body).toEqual({
+                nonce: 'test_nonce',
+                order_id: '3401',
+                order_key: 'wc_order_key_3401',
+                conekta_order_id: 'ord_prepared_1',
+            });
+        });
+
+        test('stands the wallet bridge down during the charge (expectingChargeRef)', async () => {
+            let expectingDuringSubmit = null;
+            const deps = makeDeps(null);
+            const emitter = {
+                submitCalls: 0,
+                onOrder(cb) { this._order = cb; },
+                onError() {},
+                submit() {
+                    this.submitCalls += 1;
+                    // Captured mid-charge: the wallet hook would otherwise
+                    // treat this onOrder as an Apple/Google Pay payment and
+                    // re-click Place Order.
+                    expectingDuringSubmit = deps.expectingChargeRef.current;
+                    this._order({ id: 'ord_prepared_1' });
+                },
+            };
+            deps.orderEmitter = emitter;
+            global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+
+            await chargeAndConfirm(deps, attempt);
+
+            expect(expectingDuringSubmit).toBe(true);
+            expect(deps.expectingChargeRef.current).toBe(false);
+        });
+
+        test('a decline moves no money: no confirm call, chargedOrderIdRef stays null, declined=true', async () => {
+            const emitter = makeEmitter({ error: new Error('Fondos insuficientes') });
+            const deps = makeDeps(emitter);
+            global.fetch = jest.fn();
+
+            const result = await chargeAndConfirm(deps, attempt);
+
+            expect(result.ok).toBe(false);
+            expect(result.declined).toBe(true);
+            expect(result.message).toBe('Fondos insuficientes');
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(deps.chargedOrderIdRef.current).toBeNull();
+        });
+
+        test('NEVER charges twice: with a charge already recorded it goes straight to confirm', async () => {
+            // The scenario behind the 2026-08-04 refund: a successful charge
+            // whose confirmation failed. The retry must re-run ONLY the
+            // idempotent confirm — a second submit() is a second payment.
+            const emitter = makeEmitter({ order: { id: 'ord_should_not_charge' } });
+            const deps = makeDeps(emitter, { chargedOrderIdRef: { current: 'ord_already_charged' } });
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({ success: true, redirect: 'https://shop.test/order-received/3401/' }),
+            });
+
+            const result = await chargeAndConfirm(deps, attempt);
+
+            expect(emitter.submitCalls).toBe(0);
+            expect(result.ok).toBe(true);
+            // The confirm carries the id of the order that actually charged.
+            const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+            expect(body.conekta_order_id).toBe('ord_already_charged');
+        });
+
+        test('charged but confirm fails: declined=false so the retry re-confirms without re-charging', async () => {
+            const emitter = makeEmitter({ order: { id: 'ord_prepared_1' } });
+            const deps = makeDeps(emitter);
+            global.fetch = jest.fn().mockRejectedValue(new Error('network down'));
+
+            const first = await chargeAndConfirm(deps, attempt);
+
+            expect(first.ok).toBe(false);
+            expect(first.declined).toBe(false);
+            expect(first.message).toMatch(/No se generará un segundo cargo/);
+            expect(deps.chargedOrderIdRef.current).toBe('ord_prepared_1');
+
+            // Retry with the same deps (what the "Reintentar pago" button does):
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({ success: true, redirect: 'https://shop.test/order-received/3401/' }),
+            });
+            const second = await chargeAndConfirm(deps, attempt);
+
+            expect(second.ok).toBe(true);
+            expect(emitter.submitCalls).toBe(1); // ONE charge total, ever
+        });
+
+        test('a confirm rejection surfaces the server message', async () => {
+            const emitter = makeEmitter({ order: { id: 'ord_prepared_1' } });
+            const deps = makeDeps(emitter);
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: false,
+                json: async () => ({ success: false, message: 'Order not found' }),
+            });
+
+            const result = await chargeAndConfirm(deps, attempt);
+
+            expect(result.ok).toBe(false);
+            expect(result.declined).toBe(false);
+            expect(result.message).toBe('Order not found');
         });
     });
 });

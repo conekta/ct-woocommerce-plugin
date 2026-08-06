@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.1.1
+Stable tag: 6.2.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,11 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.2.0 =
+* Change: order-first card checkout on WooCommerce Blocks — the same inversion 6.1.0 brought to classic. "Realizar el pedido" now creates and validates the WooCommerce order FIRST; the card is charged only after the order exists and is linked to the Conekta order (reference_id + conekta-order-id meta + real customer data). A card can no longer be charged for a checkout WooCommerce rejects or that fails mid-flight — the exact failure that produced a double charge in production: the charge used to fire before the Store API checkout, and when that call died the payment was left with no WooCommerce order at all.
+* Change: every card charge on Blocks is now preceded by a two-way Conekta<->WooCommerce link, so a lost confirmation leaves a pending order the order.paid webhook completes correctly — instead of fabricating a degraded guest order from the Conekta payload.
+* Feature: in-page "Reintentar pago" after a declined charge or a failed confirmation. The retry re-runs only what is pending (a decline re-charges; a lost confirmation only re-confirms) and never charges twice.
+
 = 6.1.1 =
 * Fix: the same cart could be charged twice in Conekta (two paid Conekta orders for one purchase). When a charge succeeded but the WooCommerce order was never completed — confirm call lost, a 3DS challenge navigating the page away, or the customer reloading the checkout — the plugin created a replacement Conekta order and showed a fresh payment form, so the customer paid again. The checkout now checks the payment status before replacing an order, never replaces a paid one, and instead completes the WooCommerce order that payment belongs to and sends the customer to it.
 * Fix: the checkout no longer shows a payable form after a successful charge. On Blocks, retrying "Place order" after a charge whose checkout failed reuses the existing payment instead of charging again.

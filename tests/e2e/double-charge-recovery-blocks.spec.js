@@ -1,50 +1,39 @@
 /**
- * E2E: Blocks Checkout — NO SECOND CHARGE after an orphaned payment (6.1.1)
+ * E2E: Blocks Checkout — ORDER-FIRST (6.2.0): a failed checkout costs $0 and
+ * a lost confirm never double-charges.
  *
- * Blocks analogue of double-charge-recovery-classic.spec.js, but for the
- * trigger that is specific to this flow. On Blocks the SDK charges the card
- * INSIDE onPaymentSetup, and only then does WC POST /wc/store/v1/checkout to
- * complete the order. When that POST fails (network drop, validation, stock)
- * the payment is orphaned — and pre-6.1.1 the retry made it worse: the
- * pre-charge gate re-POSTed /checkout-request, `updateOrder` failed *because
- * Conekta rejects updates on a paid order*, the plugin created a REPLACEMENT
- * Conekta order, mounted a fresh payable iframe, and the next click charged the
- * card a second time.
+ * The 2026-08-04 production double charge happened because Blocks charged the
+ * card INSIDE onPaymentSetup, BEFORE the Store API /checkout POST created and
+ * validated the WooCommerce order. When that POST died, the money had already
+ * moved with no WC order linked to it; the webhook fabricated a degraded guest
+ * order for the payment, and the customer — still on the checkout — paid a
+ * fresh Conekta order 7 minutes later.
  *
- * The spec:
- *   1) Mounts the Blocks checkout and captures the Conekta order id (A).
- *   2) ABORTS the Store API checkout POST and pays with the approved card. The
- *      card IS charged; the WooCommerce draft order is never completed —
- *      exactly the orphaned state seen in production.
- *   3) RETRIES "Realizar el pedido" with the Store API unblocked. Asserts the
- *      retry REUSES the already-charged Conekta order (the Store API POST
- *      carries conekta_order_id = A) instead of charging again, and that no
- *      replacement Conekta order was ever created.
- *   4) Asserts the customer was charged ONCE (a single paid charge on A) and
- *      that the payment completed the SAME WooCommerce order the charge was
- *      linked to — which for Blocks means the `checkout-draft` order was
- *      promoted and paid, not left invisible in the admin.
+ * 6.2.0 inverts the flow (mirror of classic's 6.1.0 order-first): the charge
+ * fires in onCheckoutSuccess, AFTER the WC order exists, passed validation and
+ * carries the conekta-order-id meta + reference_id. This spec pins the two
+ * structural guarantees that buys:
  *
- * Like the classic spec, it never calls h.waitForOrderReceivedWith3DS for the
- * orphaned charge: that helper waits for a navigation that cannot happen here.
- * The local driver below only touches the Conekta 3DS frames.
+ *   1) THE PRODUCTION FAILURE NOW COSTS $0: with the Store API checkout POST
+ *      blocked, "Realizar el pedido" moves NO money — the Conekta order stays
+ *      unpaid, because the charge only fires after a successful checkout.
+ *   2) A LOST CONFIRM CANNOT DOUBLE-CHARGE: with the confirm endpoint blocked,
+ *      the charge lands on an order that is ALREADY linked two-way. The
+ *      in-page "Reintentar pago" re-runs ONLY the idempotent confirm (never
+ *      the charge), and the payment completes the SAME WooCommerce order —
+ *      exactly one paid charge, exactly one paid WC order, reference_id
+ *      stamped (the link the incident's first charge never had).
  */
 const h = require('./checkout-helpers');
 
-h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged again',
+h.run('Blocks Checkout — order-first: failed checkout costs $0, lost confirm never double-charges',
   { checkoutType: 'blocks' },
   async ({ page, assert, config, STORE_URL, BILLING }) => {
     const checkoutRequests = [];   // conekta_checkout_request responses
     const storeApiPosts = [];      // Store API /checkout POST payloads
 
-    // Network INSTRUMENTATION here is deliberately passive — listeners only, no
-    // interception. Two sibling specs (decline-then-retry, duplicate-order)
-    // charge successfully with the same helpers, so the interception this spec
-    // adds is the one variable that can break a charge; the only route ever
-    // installed is the Store API block below, and only for the single click
-    // that must fail. Request bodies are readable from page.on('request')
-    // without touching the request at all.
     const STORE_API_CHECKOUT = /\/wc\/store\/v1\/checkout(\?|$)/;
+    const CONFIRM_ENDPOINT = /wc-ajax=conekta_confirm_order/;
 
     page.on('response', async (response) => {
       if (response.request().method() !== 'POST') return;
@@ -59,10 +48,8 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
       storeApiPosts.push({ payload });
     });
 
-    // Every 4xx/5xx of the run, with a body preview. When the charge fails to
-    // land, the answer is almost always in here (a checkout-request 400 such as
-    // 'Cart is empty', or a Conekta API rejection) — and without it the spec
-    // reports "not paid" with no way to tell why.
+    // Every 4xx/5xx of the run, with a body preview — the first place to look
+    // when a step fails without an obvious reason.
     const httpFailures = [];
     page.on('response', async (response) => {
       if (response.status() < 400) return;
@@ -70,17 +57,6 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
       try { preview = (await response.text()).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { /* body gone */ }
       httpFailures.push(`${response.status()} ${response.request().method()} ${response.url().slice(0, 160)} → ${preview}`);
     });
-
-    /** conekta_order_id sent on a Store API checkout POST (payment_data is a key/value list). */
-    const sentConektaOrderId = (payload) => {
-      const data = payload && payload.payment_data;
-      if (Array.isArray(data)) {
-        const entry = data.find(d => d && d.key === 'conekta_order_id');
-        return entry ? String(entry.value) : null;
-      }
-      if (data && typeof data === 'object' && data.conekta_order_id) return String(data.conekta_order_id);
-      return null;
-    };
 
     /** Paid charges on a Conekta order — Conekta returns lists as arrays or { data: [...] }. */
     const paidCharges = (order) => {
@@ -92,8 +68,7 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
 
     /**
      * Answers the 3DS challenge (when the card triggers one) and returns as
-     * soon as Conekta reports the order paid. Scoped to the Conekta 3DS frames
-     * on purpose — see the note at the top of this file.
+     * soon as Conekta reports the order paid. Scoped to the Conekta 3DS frames.
      */
     const driveThreeDsUntilPaid = async (conektaOrderId, timeoutMs = 90000) => {
       const otpSelector = [
@@ -168,41 +143,55 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
     };
     await waitFor(checkoutRequests, 1, 'checkout-request POSTs');
     await h.waitForIntegrationIframe();
-    // Read AFTER the iframe settles: an early POST can still be superseded
-    // (e.g. the order is recreated once the real customer name arrives), and
-    // only the last one is what the customer actually pays.
-    const paidOrderId = checkoutRequests[checkoutRequests.length - 1].conekta_order_id;
-    assert(typeof paidOrderId === 'string' && paidOrderId.length > 0,
-      `mounted Conekta order = ${paidOrderId}`);
-
-    // ---------------------------------------------------------------
-    // (1) ORPHAN THE PAYMENT — charge succeeds, Store API checkout fails
-    // ---------------------------------------------------------------
-    console.log('\n--- (1) charge with the Store API checkout blocked ---');
-    const requestsBeforeCharge = checkoutRequests.length;
     await h.fillIntegrationCard(h.SUCCESS_CARD);
 
-    // Installed as late as possible and removed as soon as the charge lands, so
-    // no interception is in place while the iframe mounts, while the pre-charge
-    // gate runs, or during the retry. Only the POST is aborted; anything else on
-    // that URL passes through untouched.
+    // ---------------------------------------------------------------
+    // (1) THE PRODUCTION FAILURE, NOW FREE — checkout blocked ⇒ $0 charged
+    // ---------------------------------------------------------------
+    console.log('\n--- (1) Place Order with the Store API checkout BLOCKED ---');
+    // The last mounted order is what a charge would land on.
+    const mountedBeforeBlock = checkoutRequests[checkoutRequests.length - 1].conekta_order_id;
+    assert(typeof mountedBeforeBlock === 'string' && mountedBeforeBlock.length > 0,
+      `mounted Conekta order = ${mountedBeforeBlock}`);
+
     await page.route(STORE_API_CHECKOUT, async (route) => (
+      route.request().method() === 'POST' ? route.abort() : route.continue()
+    ));
+    await h.clickPlaceOrder();
+
+    // Pre-6.2.0 the money was ALREADY gone at this point (the charge fired in
+    // onPaymentSetup, before the blocked POST). Under order-first the charge
+    // only fires after a successful checkout — give it ample time to prove no
+    // late charge lands.
+    await page.waitForTimeout(10000);
+    const afterBlockedCheckout = await h.fetchConektaOrder(mountedBeforeBlock).catch(() => null);
+    assert(!h.conektaOrderPaid(afterBlockedCheckout),
+      `NO money moved on a failed checkout (payment_status=${(afterBlockedCheckout && afterBlockedCheckout.payment_status) ?? 'unreachable'})`);
+    assert(!page.url().includes('order-received'),
+      'the blocked checkout never reached order-received');
+    await page.unroute(STORE_API_CHECKOUT);
+
+    // ---------------------------------------------------------------
+    // (2) LOST CONFIRM — charge lands on an already-linked order
+    // ---------------------------------------------------------------
+    console.log('\n--- (2) Place Order with the CONFIRM endpoint blocked ---');
+    const requestsBeforeCharge = checkoutRequests.length;
+    await page.route(CONFIRM_ENDPOINT, async (route) => (
       route.request().method() === 'POST' ? route.abort() : route.continue()
     ));
 
     await h.clickPlaceOrder();
 
+    // The checkout POST goes through now; the charge fires in
+    // onCheckoutSuccess. The order it lands on is whatever the last
+    // checkout-request mounted (normally the same as step 1).
+    await waitFor(storeApiPosts, 1, 'Store API checkout POSTs');
+    const paidOrderId = checkoutRequests[checkoutRequests.length - 1].conekta_order_id || mountedBeforeBlock;
     const charged = await driveThreeDsUntilPaid(paidOrderId);
-    assert(h.conektaOrderPaid(charged),
-      `Conekta order ${paidOrderId} is PAID (payment_status=${(charged && charged.payment_status) ?? 'unreachable'})`);
-
-    // Everything below needs a real charge to exist. assert() only counts,
-    // it does not throw, so stop here explicitly — with the evidence — instead
-    // of cascading into meaningless failures (or a TypeError on a null order).
     if (!h.conektaOrderPaid(charged)) {
       const notice = await h.waitForPaymentError(5000);
       throw new Error([
-        'The charge never landed, so the orphaned-payment scenario could not be set up.',
+        'The charge never landed, so the lost-confirm scenario could not be set up.',
         `Conekta payment_status=${(charged && charged.payment_status) ?? 'unreachable'}`,
         `checkout notice="${notice.message}"`,
         `Store API checkout POSTs seen=${storeApiPosts.length}`,
@@ -212,48 +201,38 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
           : 'no HTTP failures observed',
       ].join('\n  '));
     }
-
-    await page.unroute(STORE_API_CHECKOUT);
-
-    assert(storeApiPosts.length >= 1,
-      `the Store API checkout POST fired and was blocked (${storeApiPosts.length} POST(s) seen)`);
+    assert(h.conektaOrderPaid(charged), `Conekta order ${paidOrderId} is PAID`);
     assert(!page.url().includes('order-received'),
-      'the customer never reached order-received (the Store API checkout was blocked)');
+      'the customer did NOT reach order-received (the confirm was blocked)');
 
-    // NOTHING that identifies the WC order is looked up here, on purpose:
-    // h.wcApi() / h.findOrdersByConektaOrderId() navigate the page to
-    // /wp-admin, which would destroy the in-page JS state (the remembered
-    // charged order id) that the retry below exists to exercise. The orphaned
-    // state is already established by the blocked POST + a paid Conekta order +
-    // no order-received; the order itself is resolved after the retry.
-    //
-    // metadata.reference_id is NOT a reliable id source on blocks and is only
-    // logged: the pre-charge gate requires mode='unchanged' to allow the
-    // charge, and that short-circuit returns BEFORE the setMetadata() call, so
-    // the last checkout-request before a charge never pushes reference_id. When
-    // no earlier update ran while the Blocks draft existed, it stays null and
-    // the reverse `conekta-order-id` order meta is the only link — which is
-    // exactly what the assertions below rely on.
-    console.log(`  metadata.reference_id on the Conekta order: ${(charged.metadata || {}).reference_id ?? 'null (blocks, expected)'}`);
+    // Order-first stamps reference_id on the pre-charge PUT — the link whose
+    // absence let the incident's first charge orphan. It must exist NOW,
+    // while the confirm is still blocked: nothing after the charge is needed.
+    const referenceId = (charged.metadata || {}).reference_id;
+    assert(!!referenceId,
+      `the charged Conekta order carries metadata.reference_id=${referenceId} BEFORE any completion ran`);
+
+    // The in-page retry is offered instead of a payable iframe remount.
+    const retryButton = page.locator('.conekta-retry-payment');
+    const retryVisible = await retryButton.isVisible({ timeout: 15000 }).catch(() => false);
+    assert(retryVisible, 'the "Reintentar pago" button is shown after the lost confirm');
+
+    await page.unroute(CONFIRM_ENDPOINT);
 
     // ---------------------------------------------------------------
-    // (2) RETRY — must reuse the payment, never charge again
+    // (3) RETRY — re-confirms WITHOUT re-charging
     // ---------------------------------------------------------------
-    console.log('\n--- (2) retry Place Order with the Store API unblocked ---');
-    const postsBeforeRetry = storeApiPosts.length;
+    console.log('\n--- (3) click "Reintentar pago" with the confirm unblocked ---');
+    await retryButton.click();
 
-    await h.clickPlaceOrder();
-    await h.waitForOrderReceivedWith3DS();
+    const deadline = Date.now() + 60000;
+    while (!page.url().includes('order-received') && Date.now() < deadline) {
+      await page.waitForTimeout(500);
+    }
     assert(page.url().includes('order-received'), 'the retry reached order-received');
 
-    const retryPosts = storeApiPosts.slice(postsBeforeRetry);
-    assert(retryPosts.length > 0, `the retry POSTed the Store API checkout (${retryPosts.length})`);
-    const retryOrderId = sentConektaOrderId(retryPosts[retryPosts.length - 1].payload);
-    assert(retryOrderId === paidOrderId,
-      `the retry reused the ALREADY-CHARGED Conekta order (sent ${retryOrderId}, charged ${paidOrderId})`);
-
-    // No replacement order at any point after the charge: pre-fix the
-    // pre-charge gate recreated one here and the next click charged it.
+    // No replacement Conekta order after the charge: the retry never goes
+    // back through checkout-request.
     const newIds = checkoutRequests
       .slice(requestsBeforeCharge)
       .map(r => r && r.conekta_order_id)
@@ -262,37 +241,29 @@ h.run('Blocks Checkout — an orphaned payment is reused on retry, never charged
       `no replacement Conekta order was created after the charge (unexpected: ${newIds.join(', ') || 'none'})`);
 
     // ---------------------------------------------------------------
-    // (3) CHARGED ONCE, AND THE DRAFT ORDER IS PAID
+    // (4) CHARGED ONCE, AND THE LINKED ORDER IS THE ONE PAID
     // ---------------------------------------------------------------
-    console.log('\n--- (3) exactly one charge, and the orphan completed ---');
+    console.log('\n--- (4) exactly one charge, applied to the pre-linked WC order ---');
     console.log(`  Conekta order: https://panel.conekta.com/transactions/payments/${paidOrderId}`);
     const settled = await h.waitForConektaPaid(paidOrderId);
     const paidCount = paidCharges(settled).length;
     assert(paidCount === 1, `the customer was charged exactly ONCE (paid charges: ${paidCount})`);
 
-    // The WC order is resolved through the reverse link (the conekta-order-id
-    // meta the plugin stamps on every checkout-request) — safe to navigate now,
-    // the page work is done. A single paid order here is also what proves the
-    // draft was promoted rather than left behind: an unpromoted 'checkout-draft'
-    // is not a paid status, so it would not survive this filter.
+    // Resolved through the reverse link stamped PRE-charge by
+    // process_payment_api — safe to navigate now, the page work is done.
     const orders = await h.findOrdersByConektaOrderId(paidOrderId);
     const ids = orders.map(o => `#${o.id}(${o.status})`).join(', ');
     console.log(`  orders carrying ${paidOrderId}: ${ids || 'none'}`);
     const paid = orders.filter(o => h.PAID_STATUSES.includes(o.status));
     assert(paid.length === 1,
-      `exactly ONE paid WC order carries the payment (got ${paid.length}: ${ids || 'none'}) — no duplicate order, no duplicate charge`);
+      `exactly ONE paid WC order carries the payment (got ${paid.length}: ${ids || 'none'})`);
 
     const wcOrderId = String(paid[0].id);
+    assert(String(referenceId) === wcOrderId,
+      `metadata.reference_id (${referenceId}) points at the paid WC order #${wcOrderId} — the two-way link exists`);
+
     const finalOrder = await h.wcApi('GET', `wc/v3/orders/${wcOrderId}`);
     console.log(`  WC order #${wcOrderId} final status: ${finalOrder && finalOrder.status}`);
     assert(finalOrder && finalOrder.status !== 'checkout-draft',
       `WC order #${wcOrderId} is a real order (status=${finalOrder && finalOrder.status}), not a leftover draft`);
-
-    // Conekta -> WooCommerce back-reference: completion stamps the WC order id
-    // as reference_id on the card charge. In the production incident this was
-    // the tell — only the SECOND charge carried a "Referencia", proving the
-    // first payment had never completed an order. Informational: it is a
-    // best-effort PUT that never blocks completion.
-    const chargeReference = (paidCharges(settled)[0] || {}).reference_id;
-    console.log(`  charge reference_id: ${chargeReference ?? 'none'} (WC order #${wcOrderId})`);
   }).then(passed => process.exit(passed ? 0 : 1));

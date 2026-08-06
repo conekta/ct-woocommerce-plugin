@@ -297,6 +297,7 @@ if (!class_exists('WC_Order')) {
         }
 
         public function get_id() { return $this->id; }
+        public function get_order_key() { return 'wc_order_key_' . $this->id; }
         public function get_status() { return $this->status; }
         public function set_status($status) { $this->status = $status; }
         public function has_status($status) {
