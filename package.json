@@ -7,7 +7,8 @@
     "lib": "lib"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   },
   "author": "",
   "license": "ISC",
@@ -15,10 +16,10 @@
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@woocommerce/dependency-extraction-webpack-plugin": "^3.1.0",
-    "@wordpress/scripts": "^33.0.0",
+    "@wordpress/scripts": "^34.0.0",
     "conekta": "^8.0.7",
     "cross-env": "7.0.3",
-    "playwright": "^1.61.1",
+    "playwright": "^1.62.1",
     "react-dom": "^18.3.1"
   },
   "scripts": {
@@ -29,7 +30,7 @@
     "i18n:pot": "php -d xdebug.max_nesting_level=512 $(which wp) i18n make-pot --exclude=\"node_modules/,languages/,assets/\" --headers='{\"Report-Msgid-Bugs-To\":\"https://woocommerce.com/my-account/create-a-ticket/\", \"language-team\":\"LANGUAGE <EMAIL@ADDRESS>\"}' . languages/woocommerce-gateway-dummy.pot",
     "i18n:json": "$(which wp) i18n make-json languages --no-purge",
     "packages-update": "wp-scripts packages-update",
-    "test": "wp-scripts test-unit-js --testPathPattern=tests/js",
+    "test": "wp-scripts test-unit-js --testPathPatterns=tests/js",
     "test:e2e": "node tests/e2e/run.js",
     "check-engines": "wp-scripts check-engines",
     "zip": "rm deploy.zip || true && npm i && npm run build && composer install && zip -r deploy.zip ./ -x '*.git*' -x '*.idea*' -x '*.github*' -x 'node_modules*' -x 'tests*' -x 'test-results*' -x '.claude*' -x 'deploy.zip' -x '*.bak' -x 'phpunit.xml' -x 'composer.lock' -x 'package-lock.json'"
