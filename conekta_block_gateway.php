@@ -752,7 +752,12 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         }
 
         $update = new OrderUpdate([]);
-        $update->setMetadata(WC_Conekta_REST_API::build_conekta_metadata($this, $checkout_type, $order->get_id()));
+        $update->setMetadata(WC_Conekta_REST_API::build_conekta_metadata(
+            $this,
+            $checkout_type,
+            $order->get_id(),
+            (int) $order->get_customer_id()
+        ));
         $update->setCustomerInfo(new OrderUpdateCustomerInfo($this->customer_info_from_order($order)));
         $shipping_contact = $this->shipping_contact_from_order($order);
         if (!empty($shipping_contact)) {

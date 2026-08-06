@@ -37,8 +37,15 @@ if (!function_exists('update_post_meta')) {
 if (!function_exists('get_woocommerce_currency')) {
     function get_woocommerce_currency() { return 'MXN'; }
 }
+// Configurable current user — tests flip this to simulate a logged-in
+// shopper (the metadata builders only send woocommerce_customer_id then).
+global $test_current_user_id;
+$test_current_user_id = 0;
 if (!function_exists('get_current_user_id')) {
-    function get_current_user_id() { return 0; }
+    function get_current_user_id() {
+        global $test_current_user_id;
+        return (int) $test_current_user_id;
+    }
 }
 if (!function_exists('get_locale')) {
     function get_locale() { return 'es_MX'; }
@@ -298,6 +305,10 @@ if (!class_exists('WC_Order')) {
 
         public function get_id() { return $this->id; }
         public function get_order_key() { return 'wc_order_key_' . $this->id; }
+        // 0 = guest, like real WooCommerce.
+        private $customer_id = 0;
+        public function get_customer_id() { return $this->customer_id; }
+        public function set_customer_id($id) { $this->customer_id = (int) $id; }
         public function get_status() { return $this->status; }
         public function set_status($status) { $this->status = $status; }
         public function has_status($status) {

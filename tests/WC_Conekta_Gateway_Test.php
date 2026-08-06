@@ -37,11 +37,12 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     protected function tearDown(): void
     {
-        global $test_product_registry, $test_order_registry, $test_prices_include_tax;
+        global $test_product_registry, $test_order_registry, $test_prices_include_tax, $test_current_user_id;
         WC()->cart = null;
         $test_product_registry = [];
         $test_order_registry = null;
         $test_prices_include_tax = false;
+        $test_current_user_id = 0;
         parent::tearDown();
     }
 
@@ -428,6 +429,38 @@ class WC_Conekta_Gateway_Test extends TestCase
         $this->assertSame('blocks', $md['woocommerce_checkout_type']);
         // reference_id is the webhook's primary Conekta->Woo link.
         $this->assertSame('6100', $md['reference_id']);
+    }
+
+    /**
+     * woocommerce_customer_id: only sent when a real WooCommerce user exists.
+     * Guests (id 0) get no key at all — the merchant should never see a
+     * meaningless "0" on the Conekta panel.
+     */
+    public function test_build_conekta_metadata_includes_customer_id_only_when_a_user_exists()
+    {
+        global $test_current_user_id;
+        $gateway = new stdClass();
+        $gateway->version = '6.2.0';
+
+        // Guest session, no explicit id: key absent.
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', null);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $md);
+
+        // Logged-in shopper (checkout-request has no order yet, falls back to
+        // the current user).
+        $test_current_user_id = 13385;
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', null);
+        $this->assertSame('13385', $md['woocommerce_customer_id']);
+
+        // Explicit id from the placed order wins over the session user —
+        // covers the account created mid-checkout.
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'blocks', 6100, 777);
+        $this->assertSame('777', $md['woocommerce_customer_id']);
+
+        // Explicit 0 (guest order) while logged out: key absent.
+        $test_current_user_id = 0;
+        $md = WC_Conekta_REST_API::build_conekta_metadata($gateway, 'classic', null, 0);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $md);
     }
 
     public function test_build_conekta_metadata_omits_reference_id_when_absent()
@@ -933,12 +966,18 @@ class WC_Conekta_Gateway_Test extends TestCase
 
         $order = new WC_Order(3401);
         $order->set_status('pending'); // Store API already promoted the draft
+        $order->set_customer_id(13385); // logged-in shopper
         $test_order_registry[3401] = $order;
 
         $gateway = $this->blocksGatewayWithApi('pending_payment', 10000, $api);
         // The pre-charge PUT is the moment reference_id + the real customer
         // reach Conekta — the link the 2026-08-04 double charge never had.
-        $api->expects($this->once())->method('updateOrder');
+        $captured_update = null;
+        $api->expects($this->once())->method('updateOrder')
+            ->willReturnCallback(function ($id, $update) use (&$captured_update) {
+                $captured_update = $update;
+                return null;
+            });
 
         $context = $this->blocksPaymentContext($order, 'ord_unpaid_1');
         $result  = $this->blocksPaymentResult();
@@ -957,6 +996,13 @@ class WC_Conekta_Gateway_Test extends TestCase
             'the WC order must carry the Conekta id pre-charge so a lost confirm is webhook-recoverable');
         // ...and the order was NOT completed (no money has moved).
         $this->assertSame('pending', $order->get_status());
+
+        // The pre-charge PUT carries reference_id AND the WooCommerce user
+        // behind the order — traceable from the Conekta panel.
+        $this->assertNotNull($captured_update, 'the pre-charge PUT ran');
+        $put_metadata = $captured_update->getMetadata();
+        $this->assertSame('3401', $put_metadata['reference_id'] ?? null);
+        $this->assertSame('13385', $put_metadata['woocommerce_customer_id'] ?? null);
 
         Conekta_Gateway_With_Fake_Api::$fake_api = null;
     }
@@ -2344,6 +2390,31 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         // No REST_REQUEST in the PHPUnit CLI context -> classic.
         $this->assertSame('classic', ckpg_detect_checkout_type());
+    }
+
+    /**
+     * Cash/SPEI/BNPL/pay-by-bank mirror the card gateway: the WooCommerce user
+     * behind the order travels as woocommerce_customer_id, and guests (id 0)
+     * get no key at all.
+     */
+    public function test_build_order_metadata_includes_customer_id_only_when_a_user_exists()
+    {
+        $base = [
+            'order_id'               => 123,
+            'plugin_conekta_version' => '6.2.0',
+            'woocommerce_version'    => '9.0.0',
+            'payment_method'         => 'WC_Conekta_Cash_Gateway',
+        ];
+
+        $result = ckpg_build_order_metadata($base + ['customer_id' => 13385]);
+        $this->assertSame('13385', $result['woocommerce_customer_id']);
+
+        $result = ckpg_build_order_metadata($base + ['customer_id' => 0]);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $result);
+
+        // Callers that never learned the new key keep working unchanged.
+        $result = ckpg_build_order_metadata($base);
+        $this->assertArrayNotHasKey('woocommerce_customer_id', $result);
     }
 
     public function test_build_order_metadata_with_customer_message()
