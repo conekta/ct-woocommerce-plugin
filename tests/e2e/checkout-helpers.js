@@ -850,7 +850,7 @@ const INTEGRATION_CONTAINER = '#conektaITokenizerframeContainer';
 // accept both. The 3DS challenge additionally comes from the 3ds-pay/3ds-acs
 // subdomains or from the banks' Cardinal ACS.
 const CONEKTA_HOST_RE = /(^|\.)conekta\.(com|io)$/i;
-const CHALLENGE_HOST_RE = /(^3ds-(pay|acs)\.conekta\.(com|io)$)|(\.cardinalcommerce\.com$)/i;
+const CHALLENGE_HOST_RE = /(^3ds-(pay|acs)\.conekta\.(com|io)$)|(\.cardinalcommerce\.com$)|(\.cardinaltrusted\.com$)/i;
 const isConektaFrameHost = (hostname) => CONEKTA_HOST_RE.test(hostname);
 
 async function waitForIntegrationIframe() {
