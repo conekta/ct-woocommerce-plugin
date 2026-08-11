@@ -12,6 +12,7 @@ use Conekta\Model\OrderUpdate;
 use Conekta\Model\OrderUpdateCustomerInfo;
 use Conekta\Model\OrderCheckoutRequest;
 use Conekta\Model\CustomerShippingContactsRequest;
+use Conekta\Model\CompanyResponse;
 
 class WC_Conekta_REST_API {
 
@@ -524,6 +525,18 @@ class WC_Conekta_REST_API {
 
             if (!empty($snapshot['shipping_contact'])) {
                 $order_request->setShippingContact(new CustomerShippingContactsRequest($snapshot['shipping_contact']));
+            }
+
+            // three_ds_mode on the order root, taken from the request payload.
+            // ONLY 'strict' is honored — it can force a 3DS challenge but never
+            // relax the company's configured mode, so letting the client ask
+            // for it is upgrade-only and safe. Not merchant-configurable on
+            // purpose; the safari-mobile e2e spec sends it to guarantee an OTP
+            // challenge without touching the company/store 3DS config.
+            // (The SDK only declares the smart/strict constants on
+            // CompanyResponse, so that's the canonical source for the value.)
+            if ($request->get_param('three_ds_mode') === CompanyResponse::THREE_DS_MODE_STRICT) {
+                $order_request->setThreeDsMode(CompanyResponse::THREE_DS_MODE_STRICT);
             }
 
             $conekta_order = $api->createOrder($order_request, $gateway->get_user_locale());

@@ -5,21 +5,22 @@ const { join } = require('path');
 const dir = __dirname;
 let specs = readdirSync(dir).filter(f => f.endsWith('.spec.js')).sort();
 
-// Optional shard filter: E2E_SHARD=blocks|classic (or first CLI arg) runs only
-// the specs whose filename ends with that checkout flavor. Lets CI report and
-// retry each checkout type independently. NOTE: both shards target the SAME
+// Optional shard filter: E2E_SHARD=blocks|classic|safari-mobile (or first CLI
+// arg) runs only the specs whose filename ends with that flavor. Lets CI
+// report and retry each shard independently. NOTE: all shards target the SAME
 // staging store and setup() rewrites the checkout page content
 // (setCheckoutType), so shards must never run concurrently — ci.yml keeps the
 // matrix at max-parallel: 1.
+const SHARDS = ['blocks', 'classic', 'safari-mobile'];
 const SHARD = (process.env.E2E_SHARD || process.argv[2] || '').toLowerCase();
 if (SHARD) {
-  if (!['blocks', 'classic'].includes(SHARD)) {
-    console.error(`[run] unknown shard "${SHARD}" — expected "blocks" or "classic"`);
+  if (!SHARDS.includes(SHARD)) {
+    console.error(`[run] unknown shard "${SHARD}" — expected one of: ${SHARDS.join(', ')}`);
     process.exit(1);
   }
-  // A spec whose filename matches NEITHER flavor would silently run in no
-  // shard at all — fail loudly instead so the naming convention stays honest.
-  const orphans = specs.filter(f => !f.endsWith('-blocks.spec.js') && !f.endsWith('-classic.spec.js'));
+  // A spec whose filename matches NO flavor would silently run in no shard at
+  // all — fail loudly instead so the naming convention stays honest.
+  const orphans = specs.filter(f => !SHARDS.some(s => f.endsWith(`-${s}.spec.js`)));
   if (orphans.length) {
     console.error(`[run] spec(s) not named *-blocks.spec.js / *-classic.spec.js would be skipped by sharding: ${orphans.join(', ')}`);
     process.exit(1);
