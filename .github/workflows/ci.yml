@@ -85,7 +85,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        shard: [blocks, classic, safari-mobile]
+        shard: [safari-mobile, blocks, classic ]
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble
     steps:
