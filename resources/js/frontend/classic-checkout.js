@@ -29,6 +29,36 @@ const utils = {
       key
     );
   },
+  // The Conekta iframe must stay INTERACTIVE under the loading overlay: during
+  // the charge the SDK can show a 3DS challenge (OTP form) inside the iframe.
+  // We can't rely on raising the container's z-index above the overlay — any
+  // theme ancestor that creates a stacking context (transform, sticky,
+  // -webkit-overflow-scrolling on mobile Safari) traps the container below the
+  // overlay and every tap lands on the overlay instead of the OTP input (seen
+  // on iOS). Instead the overlay is click-through (pointer-events:none, purely
+  // visual) and interaction is blocked per-element via the conekta-processing
+  // class, with the iframe container explicitly re-enabled — pointer-events
+  // doesn't care about stacking contexts.
+  ensureProcessingStyles: () => {
+    if (document.getElementById('conekta-processing-style')) return;
+    const style = document.createElement('style');
+    style.id = 'conekta-processing-style';
+    style.textContent = `
+      form.checkout.conekta-processing input,
+      form.checkout.conekta-processing select,
+      form.checkout.conekta-processing textarea,
+      form.checkout.conekta-processing button,
+      form.checkout.conekta-processing label,
+      form.checkout.conekta-processing a {
+        pointer-events: none;
+      }
+      form.checkout.conekta-processing ${CONTAINER_SELECTOR},
+      form.checkout.conekta-processing ${CONTAINER_SELECTOR} * {
+        pointer-events: auto;
+      }
+    `;
+    document.head.appendChild(style);
+  },
   setLoading: (isLoading) => {
     const form = document.querySelector(FORM_SELECTOR);
     if (!form) return;
@@ -37,24 +67,23 @@ const utils = {
       form.querySelector('#place_order') ||
       form.querySelector('button[type="submit"]');
 
-    // The Conekta iframe must stay ABOVE the loading overlay: during the charge
-    // the SDK can show a 3DS challenge (OTP modal) inside the iframe, and the
-    // overlay (z-index 1000, covering the whole form) would otherwise intercept
-    // every click/keystroke so the customer can't type the OTP. We raise the
-    // iframe container above the overlay while keeping the rest of the form
-    // greyed-out and the place-order button disabled.
     const container = document.querySelector(CONTAINER_SELECTOR);
 
     if (isLoading) {
+      utils.ensureProcessingStyles();
+      form.classList.add('conekta-processing');
       if (!form.querySelector('.conekta-loading-overlay')) {
         const overlay = document.createElement('div');
         overlay.className = 'conekta-loading-overlay';
         overlay.style.cssText =
-          'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.6);z-index:1000;';
+          'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.6);z-index:1000;pointer-events:none;';
         form.style.position = 'relative';
         form.appendChild(overlay);
       }
       if (container) {
+        // Cosmetic only: where the theme's stacking allows it, keep the 3DS
+        // challenge visually above the white veil. Interactivity never
+        // depends on this (see ensureProcessingStyles).
         container.style.position = 'relative';
         container.style.zIndex = '1001';
       }
@@ -63,6 +92,7 @@ const utils = {
         placeOrderBtn.classList.add('conekta-disabled');
       }
     } else {
+      form.classList.remove('conekta-processing');
       const overlay = form.querySelector('.conekta-loading-overlay');
       if (overlay) overlay.remove();
       if (container) {

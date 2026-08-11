@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.2.0
+Stable tag: 6.2.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.2.1 =
+* Fix: on iOS Safari (classic checkout) the 3DS challenge could be unreachable — taps on the OTP field never landed because the loading overlay intercepted them. The overlay now lets the interaction through while the rest of the form stays blocked during the charge.
+
 = 6.2.0 =
 * Change: order-first card checkout on WooCommerce Blocks — the same inversion 6.1.0 brought to classic. "Realizar el pedido" now creates and validates the WooCommerce order FIRST; the card is charged only after the order exists and is linked to the Conekta order (reference_id + conekta-order-id meta + real customer data). A card can no longer be charged for a checkout WooCommerce rejects or that fails mid-flight — the exact failure that produced a double charge in production: the charge used to fire before the Store API checkout, and when that call died the payment was left with no WooCommerce order at all.
 * Change: every card charge on Blocks is now preceded by a two-way Conekta<->WooCommerce link, so a lost confirmation leaves a pending order the order.paid webhook completes correctly — instead of fabricating a degraded guest order from the Conekta payload.

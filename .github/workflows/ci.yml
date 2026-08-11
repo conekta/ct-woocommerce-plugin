@@ -76,14 +76,16 @@ jobs:
     runs-on: ubuntu-latest
     name: E2E Checkout (${{ matrix.shard }})
     strategy:
-      # Both shards hit the SAME shared staging store and setup() rewrites the
+      # All shards hit the SAME shared staging store and setup() rewrites the
       # checkout page content (blocks vs classic shortcode), so they must run
       # one at a time. The matrix still buys independent reporting and
-      # re-running a single failed shard.
+      # re-running a single failed shard. safari-mobile runs the classic
+      # checkout on WebKit (Safari engine) with iPhone emulation — the 3DS
+      # challenge/OTP regression lives there.
       max-parallel: 1
       fail-fast: false
       matrix:
-        shard: [blocks, classic]
+        shard: [blocks, classic, safari-mobile]
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble
     steps:

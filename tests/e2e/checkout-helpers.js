@@ -1,7 +1,7 @@
 /**
  * Shared helpers for E2E checkout tests (classic + blocks).
  */
-const { chromium } = require('playwright');
+const { chromium, webkit, devices } = require('playwright');
 const { mkdirSync, readFileSync } = require('fs');
 const { join } = require('path');
 const { Configuration, OrdersApi } = require('conekta');
@@ -191,7 +191,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType, taxInclusive, roundingPrice, roundingQty } = options;
+  const { checkoutType, taxInclusive, roundingPrice, roundingQty, browserName, device } = options;
 
   // Health gate: the shared staging store can be down entirely (frontend 500,
   // WooCommerce fataled/paused so wc/v3 never registers — observed 2026-07-14).
@@ -206,9 +206,23 @@ async function setup(options = {}) {
     );
   }
 
-  browser = await chromium.launch({ headless: config.headless });
-  const context = await browser.newContext({ recordVideo: config.video });
+  // browserName: 'webkit' runs the spec on Playwright WebKit (the Safari
+  // engine); device: any key of playwright's `devices` registry (e.g.
+  // 'iPhone 13') layers the mobile emulation (viewport, touch, iOS UA) on the
+  // context. Default stays desktop Chromium for every existing spec.
+  const launcher = browserName === 'webkit' ? webkit : chromium;
+  if (device && !devices[device]) {
+    throw new Error(`setup: unknown playwright device "${device}"`);
+  }
+  browser = await launcher.launch({ headless: config.headless });
+  const context = await browser.newContext({
+    recordVideo: config.video,
+    ...(device ? devices[device] : {}),
+  });
   page = await context.newPage();
+  if (browserName || device) {
+    console.log(`Setup: browser=${browserName || 'chromium'}${device ? ` device="${device}"` : ''}`);
+  }
 
   // Surface page errors and console warnings/errors so we can see SDK failures.
   page.on('pageerror', (err) => console.log(`  [page-error] ${err.message}`));
@@ -831,6 +845,14 @@ async function submitBlocksCheckoutRaw(conektaOrderId, billing) {
 
 const INTEGRATION_CONTAINER = '#conektaITokenizerframeContainer';
 
+// Conekta serves the SDK/checkout from *.conekta.com in production and
+// *.conekta.io on staging environments — every frame-sniffing helper must
+// accept both. The 3DS challenge additionally comes from the 3ds-pay/3ds-acs
+// subdomains or from the banks' Cardinal ACS.
+const CONEKTA_HOST_RE = /(^|\.)conekta\.(com|io)$/i;
+const CHALLENGE_HOST_RE = /(^3ds-(pay|acs)\.conekta\.(com|io)$)|(\.cardinalcommerce\.com$)/i;
+const isConektaFrameHost = (hostname) => CONEKTA_HOST_RE.test(hostname);
+
 async function waitForIntegrationIframe() {
   await page.waitForSelector(`${INTEGRATION_CONTAINER} iframe`, { timeout: config.timeouts.threeDs });
   // The element mounts before the SDK finishes navigating + initializing the
@@ -840,7 +862,7 @@ async function waitForIntegrationIframe() {
     for (const frame of page.frames()) {
       let hostname;
       try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
-      if (hostname.endsWith('.conekta.com') || hostname === 'conekta.com') return true;
+      if (isConektaFrameHost(hostname)) return true;
     }
     return false;
   };
@@ -892,7 +914,7 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
       if (frame === mainFrame) continue;
       let hostname;
       try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
-      if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
+      if (!isConektaFrameHost(hostname)) continue;
       try {
         // The Card method element exposes a stable test-id in both layouts:
         // "payment-method-Card" for the tile layout and "accordion-item-Card"
@@ -953,7 +975,7 @@ async function fillIntegrationCard(card, timeoutMs = 60000) {
     for (const frame of page.frames()) {
       let hostname;
       try { hostname = new URL(frame.url()).hostname; } catch (_) { continue; }
-      if (!hostname.endsWith('.conekta.com') && hostname !== 'conekta.com') continue;
+      if (!isConektaFrameHost(hostname)) continue;
       const inputEl = frame.locator('[data-testid="accordion-item-Card"] input[type="radio"]').first();
       if ((await inputEl.count().catch(() => 0)) > 0) {
         await inputEl.evaluate((node) => node.click()).catch(() => {});
@@ -1134,7 +1156,7 @@ async function waitForOrderReceivedWith3DS(timeoutMs = Number(process.env.E2E_NA
       try {
         let hostname;
         try { hostname = new URL(frame.url()).hostname; } catch (_) { hostname = ''; }
-        if (hostname === '3ds-pay.conekta.com' || hostname === '3ds-acs.conekta.com') {
+        if (CHALLENGE_HOST_RE.test(hostname)) {
           last3dsFrame = frame;
           // Dump the 3DS DOM whenever its body changes. Catches the brief
           // window where the challenge UI is mounted before being detached.
@@ -1302,7 +1324,7 @@ module.exports = {
   fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
   getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
-  INTEGRATION_CONTAINER, waitForIntegrationIframe,
+  INTEGRATION_CONTAINER, CONEKTA_HOST_RE, CHALLENGE_HOST_RE, isConektaFrameHost, waitForIntegrationIframe,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
   waitForPaymentError,
 };
