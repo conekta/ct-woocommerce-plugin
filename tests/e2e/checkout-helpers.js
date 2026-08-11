@@ -1300,7 +1300,11 @@ async function run(label, optionsOrFn, maybeFn) {
   } catch (error) {
     counters.failed++;
     console.error(`\n\x1b[31mError: ${error.message}\x1b[0m`);
-    const screenshotPath = `${config.screenshot.dir}${config.screenshot.prefix}${label.toLowerCase().replace(/\s+/g, '-')}-error.png`;
+    // Keep only [a-z0-9-] in the filename: spec labels carry colons, commas,
+    // "$0", em-dashes… and upload-artifact rejects several of those characters
+    // (`:` broke the CI artifact upload for both checkout shards).
+    const safeLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const screenshotPath = `${config.screenshot.dir}${config.screenshot.prefix}${safeLabel}-error.png`;
     try { await page.screenshot({ path: screenshotPath, fullPage: true }); console.log(`Screenshot: ${screenshotPath}`); } catch (_) {}
   } finally {
     await teardown();
