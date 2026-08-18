@@ -28,7 +28,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	 */
 	public const API_CLIENT = 'woocommerce';
 
-	public $version  = "6.2.1";
+	public $version  = "6.2.2";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit and debit cards, monthly installments (MSI) for Mexican cards, cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -104,22 +104,21 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
      */
     public static function handleOrderPaid(OrdersApi $ordersApi, array $event)
     {
-        $conekta_order = $event['data']['object'];
-        if (!self::validate_reference_id($conekta_order)) {
+        $payload          = $event['data']['object'] ?? [];
+        $conekta_order_id = isset($payload['id']) && is_string($payload['id']) ? $payload['id'] : '';
+        if ($conekta_order_id === '') {
             http_response_code(400);
             header('Content-Type: application/json');
             echo json_encode([
-                'error'  => 'Invalid order id: the event payload carries neither a numeric metadata.reference_id nor a Conekta order id, so the WooCommerce order cannot be resolved.',
+                'error'  => 'Invalid order id: the event payload carries no Conekta order id, so the payment cannot be verified.',
                 'source' => 'handleOrderPaid',
                 'event'  => $event['type'] ?? 'order.paid',
             ]);
             exit;
         }
 
-        // Never trust the event payload: re-read the payment status from the
-        // API. A mismatch here usually means the API is lagging the event —
-        // the 400 makes Conekta retry, and a later retry passes.
-        $api_payment_status = self::fetch_conekta_payment_status($ordersApi, $conekta_order['id']);
+        $verified_order     = self::fetch_conekta_order($ordersApi, $conekta_order_id);
+        $api_payment_status = (string) $verified_order->getPaymentStatus();
         if ($api_payment_status !== 'paid') {
             http_response_code(400);
             header('Content-Type: application/json');
@@ -131,12 +130,14 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 ),
                 'source'           => 'handleOrderPaid',
                 'event'            => $event['type'] ?? 'order.paid',
-                'conekta_order_id' => $conekta_order['id'] ?? null,
+                'conekta_order_id' => $conekta_order_id,
                 'payment_status'   => $api_payment_status,
                 'expected'         => ['paid'],
             ]);
             exit;
         }
+
+        $conekta_order = self::conekta_order_to_array($verified_order);
 
         $order = self::find_order_for_webhook($conekta_order);
         if (!$order) {
@@ -198,6 +199,60 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 'message'  => 'OK',
                 'order_id' => $order->get_id(),
                 'note'     => 'already paid (idempotent retry)',
+            ]);
+            exit;
+        }
+
+        $already_paid = self::find_paid_order_for_conekta_id($conekta_order_id, (int) $order->get_id());
+        if ($already_paid) {
+            error_log(sprintf(
+                'Conekta - handleOrderPaid: Conekta order %s already applied to WC order #%d; refusing to complete WC order #%d.',
+                $conekta_order_id,
+                $already_paid->get_id(),
+                $order->get_id()
+            ));
+            header('Content-Type: application/json');
+            echo json_encode([
+                'message'  => 'OK',
+                'order_id' => $already_paid->get_id(),
+                'note'     => sprintf('conekta order already applied to order #%d (idempotent, not completing twice)', $already_paid->get_id()),
+            ]);
+            exit;
+        }
+
+        // Amount + currency gate, mirroring the synchronous pre-charge gate
+        // (prepare_order_for_charge). The Conekta order was charged for a fixed
+        // amount; it MUST match the WooCommerce order being completed. A
+        // mismatch means this is not the order that was paid — refuse.
+        $expected_amount   = (int) round($order->get_total() * 100);
+        $actual_amount     = (int) $verified_order->getAmount();
+        $expected_currency = strtoupper((string) $order->get_currency());
+        $actual_currency   = strtoupper((string) $verified_order->getCurrency());
+        if ($expected_amount !== $actual_amount
+            || ($actual_currency !== '' && $expected_currency !== $actual_currency)) {
+            self::send_webhook_diagnostic($ordersApi, $conekta_order_id, 'mismatch_amount', array_filter([
+                'wc_order_id'       => (string) $order->get_id(),
+                'expected_amount'   => (string) $expected_amount,
+                'actual_amount'     => (string) $actual_amount,
+                'expected_currency' => $expected_currency,
+                'actual_currency'   => $actual_currency,
+            ]));
+            error_log(sprintf(
+                'Conekta - handleOrderPaid: AMOUNT/CURRENCY MISMATCH — WC order #%d expects %d %s, Conekta order %s holds %d %s. NOT completing.',
+                $order->get_id(),
+                $expected_amount,
+                $expected_currency,
+                $conekta_order_id,
+                $actual_amount,
+                $actual_currency
+            ));
+            http_response_code(409);
+            header('Content-Type: application/json');
+            echo json_encode([
+                'error'    => 'Amount/currency mismatch: the paid Conekta order does not match this WooCommerce order. Not completing.',
+                'order_id' => $order->get_id(),
+                'expected' => ['amount' => $expected_amount, 'currency' => $expected_currency],
+                'actual'   => ['amount' => $actual_amount, 'currency' => $actual_currency],
             ]);
             exit;
         }
@@ -479,9 +534,40 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
      */
     public static function fetch_conekta_payment_status(OrdersApi $ordersApi, string $conekta_order_id): string
     {
-        $conekta_order_api = $ordersApi->getorderbyid($conekta_order_id, 'es', null, self::API_CLIENT);
+        return (string) self::fetch_conekta_order($ordersApi, $conekta_order_id)->getPaymentStatus();
+    }
 
-        return (string) $conekta_order_api->getPaymentStatus();
+    public static function fetch_conekta_order(OrdersApi $ordersApi, string $conekta_order_id)
+    {
+        return $ordersApi->getOrderById($conekta_order_id, 'es', null, self::API_CLIENT);
+    }
+
+    public static function conekta_order_to_array($conekta_order): array
+    {
+        if (is_array($conekta_order)) {
+            return $conekta_order;
+        }
+        $data = json_decode(json_encode($conekta_order), true);
+        return is_array($data) ? $data : [];
+    }
+
+    public static function find_paid_order_for_conekta_id(string $conekta_order_id, int $exclude_order_id)
+    {
+        if ($conekta_order_id === '') {
+            return false;
+        }
+        $orders = wc_get_orders([
+            'meta_key'   => 'conekta-order-id',
+            'meta_value' => $conekta_order_id,
+            'exclude'    => [$exclude_order_id],
+            'limit'      => 10,
+        ]);
+        foreach ($orders as $candidate) {
+            if (in_array($candidate->get_status(), ['processing', 'completed'], true)) {
+                return $candidate;
+            }
+        }
+        return false;
     }
 
     /**

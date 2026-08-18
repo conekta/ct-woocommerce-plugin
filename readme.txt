@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 6.2.1
+Stable tag: 6.2.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.2.2 =
+* Security: harden the order.paid webhook against forged/replayed events (bind to the API-verified order, amount/currency check, idempotency per Conekta order).
+
 = 6.2.1 =
 * Fix: on iOS Safari (classic checkout) the 3DS challenge could be unreachable — taps on the OTP field never landed because the loading overlay intercepted them. The overlay now lets the interaction through while the rest of the form stays blocked during the charge.
 
