@@ -1,3 +1,6 @@
+## [6.2.2]() - 2026-08-18
+- Security: harden the `order.paid` webhook against forged/replayed events (bind to the API-verified order, amount/currency check, idempotency per Conekta order).
+
 ## [6.2.1]() - 2026-08-11
 - Fix: on iOS Safari (classic checkout) the 3DS challenge could be unreachable — taps on the OTP field never landed because the loading overlay intercepted them. The overlay is now click-through while the rest of the form stays blocked during the charge.
 - Tests: new `safari-mobile` e2e shard (WebKit + iPhone emulation) that forces a 3DS challenge via `three_ds_mode=strict` and verifies the OTP is tappable.

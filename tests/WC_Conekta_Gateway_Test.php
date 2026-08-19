@@ -342,6 +342,112 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // Webhook idempotency — find_paid_order_for_conekta_id()
+    // -------------------------------------------------------
+
+    /**
+     * A paid Conekta order must complete at most one WC order: when another
+     * PAID order already carries the conekta-order-id, the helper surfaces it
+     * so handleOrderPaid refuses to complete a second one (replay defense).
+     */
+    public function test_find_paid_order_for_conekta_id_returns_other_paid_order()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $paid = new WC_Order(2001);
+        $paid->set_status('processing');
+        $paid->update_meta_data('conekta-order-id', 'ord_shared');
+        $test_order_registry[2001] = $paid;
+
+        $target = new WC_Order(2002);
+        $target->set_status('pending');
+        $target->update_meta_data('conekta-order-id', 'ord_shared');
+        $test_order_registry[2002] = $target;
+
+        $found = WC_Conekta_Plugin::find_paid_order_for_conekta_id('ord_shared', 2002);
+        $this->assertNotFalse($found, 'A paid order owning the same conekta id must be surfaced');
+        $this->assertEquals(2001, $found->get_id());
+    }
+
+    /**
+     * A pending order sharing the conekta-order-id is a normal order-first
+     * retry leftover (the meta is stamped BEFORE the charge), NOT a double
+     * payment — it must not block completion.
+     */
+    public function test_find_paid_order_for_conekta_id_ignores_pending_sibling()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $sibling = new WC_Order(2010);
+        $sibling->set_status('pending');
+        $sibling->update_meta_data('conekta-order-id', 'ord_pendingdup');
+        $test_order_registry[2010] = $sibling;
+
+        $target = new WC_Order(2011);
+        $target->set_status('pending');
+        $target->update_meta_data('conekta-order-id', 'ord_pendingdup');
+        $test_order_registry[2011] = $target;
+
+        $this->assertFalse(WC_Conekta_Plugin::find_paid_order_for_conekta_id('ord_pendingdup', 2011));
+    }
+
+    /**
+     * The order being completed is excluded from its own duplicate check.
+     */
+    public function test_find_paid_order_for_conekta_id_excludes_self()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+
+        $self = new WC_Order(2020);
+        $self->set_status('processing');
+        $self->update_meta_data('conekta-order-id', 'ord_self');
+        $test_order_registry[2020] = $self;
+
+        $this->assertFalse(WC_Conekta_Plugin::find_paid_order_for_conekta_id('ord_self', 2020));
+    }
+
+    // -------------------------------------------------------
+    // Trusted payload conversion — conekta_order_to_array()
+    // -------------------------------------------------------
+
+    /**
+     * The API-fetched OrderResponse must serialize into the same array shape
+     * the webhook helpers consume, carrying the TRUSTED fields (id, amount,
+     * currency, metadata) — this is the object the webhook path uses instead
+     * of the attacker-controlled event body.
+     */
+    public function test_conekta_order_to_array_from_api_object()
+    {
+        $object = new \Conekta\Model\OrderResponse([
+            'id'             => 'ord_trusted',
+            'amount'         => 15000,
+            'currency'       => 'MXN',
+            'payment_status' => 'paid',
+            'metadata'       => ['reference_id' => '4242'],
+        ]);
+
+        $array = WC_Conekta_Plugin::conekta_order_to_array($object);
+
+        $this->assertIsArray($array);
+        $this->assertEquals('ord_trusted', $array['id']);
+        $this->assertEquals(15000, $array['amount']);
+        $this->assertEquals('MXN', $array['currency']);
+        $this->assertEquals('4242', $array['metadata']['reference_id']);
+    }
+
+    /**
+     * An array is returned unchanged (idempotent).
+     */
+    public function test_conekta_order_to_array_passes_arrays_through()
+    {
+        $array = ['id' => 'ord_x', 'metadata' => ['reference_id' => '7']];
+        $this->assertSame($array, WC_Conekta_Plugin::conekta_order_to_array($array));
+    }
+
+    // -------------------------------------------------------
     // get_blocks_draft_order_id — the blocks-only WC order id
     // written into the Conekta order metadata as reference_id.
     // -------------------------------------------------------
