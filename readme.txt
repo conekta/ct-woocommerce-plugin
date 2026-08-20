@@ -2,9 +2,9 @@
 Contributors: conekta, interfacesconekta
 Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 6.2.2
+Stable tag: 6.2.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,9 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.2.3 =
+* Compatibility: declare support for WordPress 7.1 (Tested up to: 7.1).
+
 = 6.2.2 =
 * Security: harden the order.paid webhook against forged/replayed events (bind to the API-verified order, amount/currency check, idempotency per Conekta order).
 
