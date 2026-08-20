@@ -1,3 +1,6 @@
+## [6.2.3]() - 2026-08-20
+- Compatibility: declare support for WordPress 7.1 (Tested up to: 7.1).
+
 ## [6.2.2]() - 2026-08-18
 - Security: harden the `order.paid` webhook against forged/replayed events (bind to the API-verified order, amount/currency check, idempotency per Conekta order).
 
