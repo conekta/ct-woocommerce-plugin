@@ -2854,6 +2854,63 @@ class WC_Conekta_Gateway_Test extends TestCase
     }
 
     // -------------------------------------------------------
+    // ckpg_build_cart_shipping_lines — order-first (card) path.
+    // Conekta requires shipping_lines whenever shipping_contact is sent, and
+    // the card checkout always sends shipping_contact, so a free-shipping
+    // cart must still produce one line (amount 0) instead of [].
+    // -------------------------------------------------------
+
+    public function test_cart_shipping_lines_free_shipping_sends_bare_amount_zero()
+    {
+        $result = ckpg_build_cart_shipping_lines(0, 'Envío gratuito');
+
+        $this->assertSame([['amount' => 0]], $result);
+    }
+
+    public function test_cart_shipping_lines_no_method_chosen_still_sends_amount_zero()
+    {
+        $this->assertSame([['amount' => 0]], ckpg_build_cart_shipping_lines(0));
+        $this->assertSame([['amount' => 0]], ckpg_build_cart_shipping_lines(0, ''));
+    }
+
+    public function test_cart_shipping_lines_negative_amount_is_clamped_to_zero()
+    {
+        $this->assertSame([['amount' => 0]], ckpg_build_cart_shipping_lines(-5, 'x'));
+    }
+
+    public function test_cart_shipping_lines_paid_shipping_keeps_carrier_and_method()
+    {
+        $result = ckpg_build_cart_shipping_lines(15000, 'Envío express');
+
+        $this->assertSame([[
+            'amount'  => 15000,
+            'carrier' => 'Envío express',
+            'method'  => 'Envío express',
+        ]], $result);
+    }
+
+    public function test_cart_shipping_lines_paid_shipping_without_label_sends_amount_only()
+    {
+        $this->assertSame([['amount' => 9900]], ckpg_build_cart_shipping_lines(9900, '  '));
+    }
+
+    public function test_cart_shipping_lines_amount_zero_balances_with_check_balance()
+    {
+        // The free-shipping line must be neutral for the total reconciliation.
+        $order = [
+            'line_items'     => [['unit_price' => 118800, 'quantity' => 1]],
+            'shipping_lines' => ckpg_build_cart_shipping_lines(0, 'Envío gratuito'),
+            'discount_lines' => [],
+            'tax_lines'      => [['amount' => 19008, 'description' => 'IVA']],
+        ];
+
+        $result = ckpg_check_balance($order, 137808);
+
+        $this->assertEquals(19008, $result['tax_lines'][0]['amount']);
+        $this->assertEmpty($result['discount_lines']);
+    }
+
+    // -------------------------------------------------------
     // ckpg_build_shipping_contact
     // -------------------------------------------------------
 
@@ -3099,9 +3156,9 @@ class WC_Conekta_Gateway_Test extends TestCase
         $order = new WC_Order(101);
         $data = ckpg_get_request_data($order);
 
-        // WC_Order stub returns 'flat_rate' as shipping method
-        $this->assertNotEmpty($data['shipping_lines']);
-        $this->assertEquals('flat_rate', $data['shipping_lines'][0]['carrier']);
+        // Stub order: shipping_method 'flat_rate' with shipping_total 0.00 —
+        // free shipping is reported as a bare amount-0 line, same as the card path.
+        $this->assertSame([['amount' => 0]], $data['shipping_lines']);
     }
 
     public function test_get_request_data_has_shipping_contact()
