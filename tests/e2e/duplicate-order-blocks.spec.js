@@ -13,11 +13,16 @@
  *   2) Re-adds the product and submits the Store API checkout AGAIN, forcing
  *      the same conekta_order_id X (the resubmission).
  *   3) Asserts the invariant: exactly ONE WC order carries conekta-order-id X
- *      in a paid status.
+ *      in a paid status; the duplicate is cancelled and flagged
+ *      `_conekta_duplicate_order` (mutes its emails).
+ *
+ * Checks out a VARIATION of the staging product "pegallinas" (color: rojo) so
+ * the Conekta line item metadata is verified too: it must carry the variation
+ * attribute and product_id, and none of Advanced Dynamic Pricing's `adp_*`.
  */
 const h = require('./checkout-helpers');
 
-h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks' }, async ({ page, assert, config, STORE_URL, BILLING, TEST_CARD }) => {
+h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks', product: h.STAGING_VARIABLE_PRODUCT }, async ({ page, assert, config, STORE_URL, BILLING, TEST_CARD }) => {
   const fillBlocksAddress = async () => {
     const emailField = page.locator('#email');
     if (await emailField.isVisible().catch(() => false)) await emailField.fill(BILLING.email);
@@ -72,12 +77,17 @@ h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks' }, a
   await h.waitForOrderReceivedWith3DS();
   assert(page.url().includes('order-received'), 'first order reached order-received');
 
+  const product = h.getProduct();
+  await h.verifyConektaLineItemMetadata(conektaOrderId, {
+    color: product.attributes.attribute_color,
+    product_id: String(product.variationId),
+  });
+
   // ---------------------------------------------------------------
   // (2) RESUBMISSION — Store API checkout reusing the SAME conekta_order_id
   // ---------------------------------------------------------------
   console.log('\n--- (2) resubmission via Store API with the same conekta_order_id ---');
-  const productId = h.getProductId();
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${h.QUANTITY}`);
+  await page.goto(h.addToCartUrl(h.QUANTITY));
   await page.waitForLoadState('networkidle');
 
   const resubmit = await h.submitBlocksCheckoutRaw(conektaOrderId, BILLING);
@@ -95,4 +105,13 @@ h.run('Blocks Checkout — duplicate-order guard', { checkoutType: 'blocks' }, a
   const paid = orders.filter(o => h.PAID_STATUSES.includes(o.status));
   assert(paid.length === 1,
     `exactly ONE paid order carries conekta-order-id ${conektaOrderId} (got ${paid.length}: ${ids})`);
+
+  // The duplicate is cancelled and flagged so it never emails the customer.
+  const duplicates = orders.filter(o => !h.PAID_STATUSES.includes(o.status));
+  assert(duplicates.length === 1, `exactly ONE duplicate order was created (got ${duplicates.length})`);
+  for (const dup of duplicates) {
+    const flag = (dup.meta_data || []).find(m => m.key === '_conekta_duplicate_order');
+    assert(dup.status === 'cancelled', `duplicate #${dup.id} is cancelled (status=${dup.status})`);
+    assert(flag && String(flag.value) === 'yes', `duplicate #${dup.id} carries _conekta_duplicate_order=yes`);
+  }
 }).then(passed => process.exit(passed ? 0 : 1));
