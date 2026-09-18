@@ -30,6 +30,23 @@ class WC_Conekta_REST_API {
     // yet (the order is created early to mount the iframe). Centralized so the
     // "is this still a placeholder?" checks and the fallbacks stay in sync.
     const DEFAULT_CUSTOMER_NAME = 'Cliente';
+
+    // Conekta metadata limits: 100 keys per hash, 250 chars per value, flat.
+    const LINE_ITEM_METADATA_MAX_KEYS   = 100;
+    const LINE_ITEM_METADATA_MAX_LENGTH = 250;
+    const LINE_ITEM_METADATA_MAX_DEPTH  = 3;
+
+    // WC cart item keys that are structure, not customer/merchant meta.
+    const CART_ITEM_INTERNAL_KEYS = [
+        'key', 'product_id', 'variation_id', 'variation', 'quantity', 'data', 'data_hash',
+        'line_tax_data', 'line_subtotal', 'line_subtotal_tax', 'line_total', 'line_tax',
+    ];
+
+    // Plugin state stored in the cart item (key or key_*), never customer data.
+    // Extend with the `conekta_line_item_ignored_cart_keys` filter.
+    const CART_ITEM_IGNORED_PREFIXES = [
+        'adp', // Advanced Dynamic Pricing
+    ];
     const DEFAULT_PHONE         = '0000000000';
 
     // Response mode returned by /checkout-request when the Conekta order backing
@@ -895,13 +912,13 @@ class WC_Conekta_REST_API {
                     'name'       => item_name_validation($product->get_name()),
                     'unit_price' => $unit_price_cents,
                     'quantity'   => (int) $cart_item['quantity'],
-                    'metadata'   => [
+                    // product_id lets the order.paid webhook rebuild the WC
+                    // order; the cart item meta (variation, custom fields)
+                    // rides along so the rebuilt items are complete.
+                    'metadata'   => self::line_item_metadata_from_cart_item($cart_item, [
                         'tax_included' => ckpg_item_tax_included($product),
-                        // Lets the order.paid webhook rebuild a real WC order
-                        // (right product, not just a name) when none exists —
-                        // the wallet-path last resort.
                         'product_id'   => (string) $product->get_id(),
-                    ],
+                    ]),
                 ];
             }
 
@@ -1043,6 +1060,80 @@ class WC_Conekta_REST_API {
     public static function resolve_checkout_type($request): string {
         $checkout_type = $request ? sanitize_text_field((string) $request->get_param('woocommerce_checkout_type')) : '';
         return in_array($checkout_type, ['blocks', 'classic'], true) ? $checkout_type : 'unknown';
+    }
+
+    /**
+     * Conekta line_item metadata for a WC cart item: $base keys first, then
+     * the variation attributes (attribute_pa_color -> pa_color) and every
+     * non-internal cart item key, flattened with "_" (no nested values),
+     * strings truncated to 250 chars, 100 keys max.
+     */
+    public static function line_item_metadata_from_cart_item(array $cart_item, array $base = []): array {
+        $metadata = $base;
+        foreach ((array) ($cart_item['variation'] ?? []) as $key => $value) {
+            self::put_line_item_meta($metadata, preg_replace('/^attribute_/', '', (string) $key), $value);
+        }
+        $ignored = self::CART_ITEM_IGNORED_PREFIXES;
+        if (function_exists('apply_filters')) {
+            $ignored = (array) apply_filters('conekta_line_item_ignored_cart_keys', $ignored, $cart_item);
+        }
+        foreach ($cart_item as $key => $value) {
+            $key = (string) $key;
+            if (in_array($key, self::CART_ITEM_INTERNAL_KEYS, true) || self::is_ignored_cart_key($key, $ignored)) {
+                continue;
+            }
+            self::flatten_line_item_meta($metadata, $key, $value, 0);
+        }
+        return $metadata;
+    }
+
+    /** True when $key equals an ignored prefix or starts with "<prefix>_". */
+    private static function is_ignored_cart_key(string $key, array $ignored): bool {
+        foreach ($ignored as $prefix) {
+            $prefix = (string) $prefix;
+            if ($prefix !== '' && ($key === $prefix || strpos($key, $prefix . '_') === 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function flatten_line_item_meta(array &$metadata, string $key, $value, int $depth): void {
+        if (!is_array($value)) {
+            self::put_line_item_meta($metadata, $key, $value);
+            return;
+        }
+        if ($depth >= self::LINE_ITEM_METADATA_MAX_DEPTH) {
+            return;
+        }
+        foreach ($value as $sub_key => $sub_value) {
+            self::flatten_line_item_meta($metadata, $key . '_' . $sub_key, $sub_value, $depth + 1);
+        }
+    }
+
+    /** Store one scalar meta value: objects/null dropped, bools as text, capped. */
+    private static function put_line_item_meta(array &$metadata, string $key, $value): void {
+        if ($value === null || is_object($value) || is_array($value)) {
+            return;
+        }
+        $key = self::truncate_meta((string) $key);
+        if ($key === '') {
+            return;
+        }
+        if (!array_key_exists($key, $metadata) && count($metadata) >= self::LINE_ITEM_METADATA_MAX_KEYS) {
+            return;
+        }
+        $value = is_bool($value) ? ($value ? 'true' : 'false') : (string) $value;
+        if (function_exists('sanitize_text_field')) {
+            $value = sanitize_text_field($value);
+        }
+        $metadata[$key] = self::truncate_meta($value);
+    }
+
+    private static function truncate_meta(string $text): string {
+        return function_exists('mb_substr')
+            ? mb_substr($text, 0, self::LINE_ITEM_METADATA_MAX_LENGTH)
+            : substr($text, 0, self::LINE_ITEM_METADATA_MAX_LENGTH);
     }
 
     /**

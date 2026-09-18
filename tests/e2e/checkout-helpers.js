@@ -77,6 +77,18 @@ const TEST_CARD = {
 // that varies is the PAN.
 const DECLINE_CARD = { ...TEST_CARD, number: '4000000000000127' };
 const SUCCESS_CARD = { ...TEST_CARD, number: '4242424242424242' };
+// Pre-existing VARIABLE product on staging ("pegallinas", attribute `color`
+// with variations azul/rojo). Specs pass it as setup({ product }) to check
+// out a variation instead of the throwaway simple product, so the Conekta
+// line item carries the variation attribute in its metadata. Override the
+// ids with E2E_VARIABLE_PRODUCT_ID / E2E_VARIATION_ID on another store.
+const STAGING_VARIABLE_PRODUCT = {
+  id: Number(process.env.E2E_VARIABLE_PRODUCT_ID) || 9578,
+  variationId: Number(process.env.E2E_VARIATION_ID) || 9580,
+  // Posted with add-to-cart; also what the line item metadata must echo
+  // (`attribute_color` -> `color`).
+  attributes: { attribute_color: 'rojo' },
+};
 const BILLING = {
   first_name: FIRST_NAME,
   last_name: LAST_NAME,
@@ -93,6 +105,8 @@ const BILLING = {
 // -------------------------------------------------------
 
 let browser, page, productId, couponId, couponCode, taxRateId, taxInclusiveEnabled;
+// setup({ product }) checks out a pre-existing product: never deleted in teardown.
+let existingProduct = null;
 // { zoneId, instanceId } of the free_shipping method added by setup({ freeShipping }).
 let freeShippingMethod = null;
 const counters = { passed: 0, failed: 0 };
@@ -193,7 +207,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType, taxInclusive, roundingPrice, roundingQty, browserName, device, freeShipping } = options;
+  const { checkoutType, taxInclusive, roundingPrice, roundingQty, browserName, device, freeShipping, product } = options;
 
   // Health gate: the shared staging store can be down entirely (frontend 500,
   // WooCommerce fataled/paused so wc/v3 never registers — observed 2026-07-14).
@@ -347,18 +361,37 @@ async function setup(options = {}) {
   } else {
     productPayload.sale_price = DISCOUNT_AMOUNT;
   }
-  const product = await wcApi('POST', 'wc/v3/products', productPayload);
-  productId = product?.id;
-  // Abort setup on a failed create: continuing with productId undefined only
-  // cascades (coupon create, add-to-cart and teardown all 404 confusingly).
-  if (!productId) {
-    throw new Error(`setup failed: product create returned ${JSON.stringify(product).slice(0, 300)}`);
+  if (product) {
+    // Pre-existing product: verify it (and the variation) exist so a missing
+    // fixture fails here with a clear message instead of a 404 add-to-cart.
+    const found = await wcApi('GET', `wc/v3/products/${product.id}`);
+    if (!found?.id) {
+      throw new Error(`setup failed: product ${product.id} not found on ${STORE_URL}: ${JSON.stringify(found).slice(0, 300)}`);
+    }
+    if (product.variationId) {
+      const variation = await wcApi('GET', `wc/v3/products/${product.id}/variations/${product.variationId}`);
+      if (!variation?.id) {
+        throw new Error(`setup failed: variation ${product.variationId} of product ${product.id} not found: ${JSON.stringify(variation).slice(0, 300)}`);
+      }
+    }
+    existingProduct = product;
+    productId = product.id;
+    console.log(`Setup: using existing ${found.type} product "${found.name}" (ID: ${productId}${product.variationId ? `, variation ${product.variationId}` : ''})`);
+  } else {
+    const created = await wcApi('POST', 'wc/v3/products', productPayload);
+    productId = created?.id;
+    // Abort setup on a failed create: continuing with productId undefined only
+    // cascades (coupon create, add-to-cart and teardown all 404 confusingly).
+    if (!productId) {
+      throw new Error(`setup failed: product create returned ${JSON.stringify(created).slice(0, 300)}`);
+    }
+    console.log(`Setup: Product created (ID: ${productId})`);
   }
-  console.log(`Setup: Product created (ID: ${productId})`);
 
   // The coupon is only needed by the discount specs; the tax-inclusive spec
-  // verifies tax classification on a plain full-price line item.
-  if (!taxInclusive) {
+  // verifies tax classification on a plain full-price line item, and a
+  // pre-existing product must not accumulate e2e coupons.
+  if (!taxInclusive && !product) {
     couponCode = 'e2e_' + Date.now();
     const coupon = await wcApi('POST', 'wc/v3/coupons', {
       code: couponCode,
@@ -391,8 +424,24 @@ async function setup(options = {}) {
   await page.context().clearCookies();
 
   const cartQty = roundingQty || QUANTITY;
-  await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${cartQty}`);
+  await page.goto(addToCartUrl(cartQty));
   await page.waitForLoadState('networkidle');
+}
+
+/**
+ * Add-to-cart URL for the spec's product. For a variation it targets the
+ * variation id and posts its attributes, which is what WooCommerce needs to
+ * resolve `attribute_*` into the cart item's `variation` data.
+ */
+function addToCartUrl(qty = QUANTITY) {
+  const params = new URLSearchParams({
+    'add-to-cart': String(existingProduct?.variationId || productId),
+    quantity: String(qty),
+  });
+  for (const [key, value] of Object.entries(existingProduct?.attributes || {})) {
+    params.set(key, value);
+  }
+  return `${STORE_URL}/?${params.toString()}`;
 }
 
 // Title of the free_shipping method the free-shipping spec adds. Also used to
@@ -545,7 +594,7 @@ async function applyBlocksCoupon(code) {
 async function teardown() {
   console.log('\nTeardown...');
   try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
-  try { if (productId) { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } } catch (_) {}
+  try { if (productId && !existingProduct) { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } } catch (_) {}
   // Remove the free_shipping method so the shared store keeps only its paid rate.
   try {
     if (freeShippingMethod) {
@@ -794,6 +843,31 @@ async function payClassicCardOrder() {
 }
 
 function getProductId() { return productId; }
+function getProduct() { return existingProduct; }
+
+/**
+ * Assert the Conekta order's first line item carries the expected metadata
+ * (e.g. the variation attribute `color` and the variation `product_id`) and
+ * none of the forbidden prefixes (plugin state such as ADP's `adp_*`).
+ * Needs CONEKTA_API_KEY; skips loudly without it.
+ */
+async function verifyConektaLineItemMetadata(conektaOrderId, expected, forbiddenPrefixes = ['adp']) {
+  console.log('\n--- Conekta line item metadata ---');
+  if (!CONEKTA_API_KEY) {
+    console.log('  [skip] CONEKTA_API_KEY not set — cannot read the Conekta order');
+    return;
+  }
+  const order = await fetchConektaOrder(conektaOrderId);
+  const items = Array.isArray(order.line_items) ? order.line_items : (order.line_items && order.line_items.data) || [];
+  assert(items.length > 0, `Conekta order has ${items.length} line item(s)`);
+  const meta = (items[0] && items[0].metadata) || {};
+  console.log(`  metadata: ${JSON.stringify(meta)}`);
+  for (const [key, value] of Object.entries(expected)) {
+    assert(String(meta[key]) === String(value), `line item metadata.${key} = ${JSON.stringify(meta[key])} (expected ${JSON.stringify(value)})`);
+  }
+  const leaked = Object.keys(meta).filter(k => forbiddenPrefixes.some(p => k === p || k.startsWith(`${p}_`)));
+  assert(leaked.length === 0, `no plugin-state keys in line item metadata (found: ${leaked.join(', ') || 'none'})`);
+}
 
 /**
  * Find every WooCommerce order that carries the given conekta-order-id meta.
@@ -816,6 +890,25 @@ async function findOrdersByConektaOrderId(conektaOrderId, { perPage = 50 } = {})
 }
 
 const PAID_STATUSES = ['processing', 'completed', 'on-hold'];
+
+/**
+ * Find the WooCommerce order(s) the duplicate guard cancelled for this run.
+ * The duplicate never gets the conekta-order-id meta (the guard cancels it
+ * before the pre-charge PUT that stamps it), so it is located by its own
+ * `_conekta_duplicate_order=yes` flag, the run's shopper email and an id
+ * newer than the paid order.
+ */
+async function findDuplicateOrders({ email, afterOrderId, perPage = 50 }) {
+  await loginAsAdmin();
+  const orders = await wcApi('GET', `wc/v3/orders?per_page=${perPage}&orderby=date&order=desc&status=any`);
+  if (!Array.isArray(orders)) return [];
+  return orders.filter(o =>
+    Number(o.id) > Number(afterOrderId) &&
+    String(o.billing?.email || '').toLowerCase() === String(email).toLowerCase() &&
+    Array.isArray(o.meta_data) &&
+    o.meta_data.some(m => m.key === '_conekta_duplicate_order' && String(m.value) === 'yes')
+  );
+}
 
 /**
  * Submit the classic checkout form directly to the WC AJAX endpoint, forcing a
@@ -1394,13 +1487,13 @@ async function run(label, optionsOrFn, maybeFn) {
 
 module.exports = {
   STORE_URL, CONEKTA_API_KEY, REGULAR_PRICE, DISCOUNT_AMOUNT, COUPON_AMOUNT, QUANTITY,
-  TEST_CARD, DECLINE_CARD, SUCCESS_CARD, BILLING,
+  TEST_CARD, DECLINE_CARD, SUCCESS_CARD, BILLING, STAGING_VARIABLE_PRODUCT,
   assert, getPage, getCounters, wcApi, setCheckoutType,
   applyCheckoutCoupon, applyBlocksCoupon,
   setup, teardown, testOrderStatus, run,
   fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
-  getProductId, getFreeShippingMethod, E2E_FREE_SHIPPING_TITLE, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
+  getProductId, getProduct, addToCartUrl, verifyConektaLineItemMetadata, getFreeShippingMethod, E2E_FREE_SHIPPING_TITLE, findOrdersByConektaOrderId, findDuplicateOrders, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, CONEKTA_HOST_RE, CHALLENGE_HOST_RE, isConektaFrameHost, waitForIntegrationIframe,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
   waitForPaymentError,

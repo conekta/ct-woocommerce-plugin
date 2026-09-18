@@ -17,6 +17,7 @@ use Conekta\Model\CustomerShippingContactsRequest;
 
 class WC_Conekta_Gateway extends WC_Conekta_Plugin
 {
+    public const DUPLICATE_ORDER_META = '_conekta_duplicate_order';
     protected $GATEWAY_NAME = "WC_Conekta_Gateway";
     protected $order = null;
     protected $currencies = array('MXN', 'USD');
@@ -420,6 +421,8 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
         if (in_array($order->get_status(), ['cancelled', 'processing', 'completed'], true)) {
             return;
         }
+        // Flag before the status change so the transition emails see it.
+        $order->update_meta_data(self::DUPLICATE_ORDER_META, 'yes');
         $order->update_status(
             'cancelled',
             sprintf(
@@ -427,6 +430,46 @@ class WC_Conekta_Gateway extends WC_Conekta_Plugin
                 $existing->get_id()
             )
         );
+    }
+
+    /** Whether this WC order was cancelled as a duplicate. */
+    public static function is_duplicate_order($order): bool {
+        return $order instanceof WC_Order
+            && $order->get_meta(self::DUPLICATE_ORDER_META) === 'yes';
+    }
+
+    /**
+     * `woocommerce_email` hook: disable every registered WC_Email (core and
+     * third-party) for duplicate orders via woocommerce_email_enabled_{id}.
+     *
+     * @param WC_Emails $mailer
+     */
+    public static function register_duplicate_order_email_suppression($mailer): void {
+        if (!is_object($mailer) || !method_exists($mailer, 'get_emails')) {
+            return;
+        }
+        foreach ((array) $mailer->get_emails() as $email) {
+            if (!is_object($email) || empty($email->id)) {
+                continue;
+            }
+            add_filter(
+                'woocommerce_email_enabled_' . $email->id,
+                [self::class, 'suppress_duplicate_order_emails'],
+                10,
+                2
+            );
+        }
+    }
+
+    /**
+     * `woocommerce_email_enabled_{id}` callback: false for duplicate orders,
+     * otherwise the store setting is left untouched.
+     */
+    public static function suppress_duplicate_order_emails($enabled, $object = null) {
+        if (self::is_duplicate_order($object)) {
+            return false;
+        }
+        return $enabled;
     }
 
     /**
