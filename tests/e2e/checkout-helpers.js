@@ -93,6 +93,8 @@ const BILLING = {
 // -------------------------------------------------------
 
 let browser, page, productId, couponId, couponCode, taxRateId, taxInclusiveEnabled;
+// { zoneId, instanceId } of the free_shipping method added by setup({ freeShipping }).
+let freeShippingMethod = null;
 const counters = { passed: 0, failed: 0 };
 
 const STATUS = { true: '\x1b[32m✓\x1b[0m', false: '\x1b[31m✗\x1b[0m' };
@@ -191,7 +193,7 @@ async function setCheckoutType(type) {
 // -------------------------------------------------------
 
 async function setup(options = {}) {
-  const { checkoutType, taxInclusive, roundingPrice, roundingQty, browserName, device } = options;
+  const { checkoutType, taxInclusive, roundingPrice, roundingQty, browserName, device, freeShipping } = options;
 
   // Health gate: the shared staging store can be down entirely (frontend 500,
   // WooCommerce fataled/paused so wc/v3 never registers — observed 2026-07-14).
@@ -368,6 +370,15 @@ async function setup(options = {}) {
     console.log(`Setup: Coupon created (${couponCode})`);
   }
 
+  // Free-shipping mode: add a free_shipping method to the store's active
+  // shipping zone so the checkout offers a $0 shipping rate next to the
+  // existing paid one. Used by the free-shipping spec to prove Conekta accepts
+  // the order (shipping_lines must be present even when shipping is free).
+  if (freeShipping) {
+    freeShippingMethod = await addFreeShippingMethod();
+    console.log(`Setup: free_shipping method added (zone ${freeShippingMethod.zoneId}, instance ${freeShippingMethod.instanceId})`);
+  }
+
   if (checkoutType) {
     await setCheckoutType(checkoutType);
     console.log(`Setup: checkout page set to ${checkoutType}`);
@@ -383,6 +394,61 @@ async function setup(options = {}) {
   await page.goto(`${STORE_URL}/?add-to-cart=${productId}&quantity=${cartQty}`);
   await page.waitForLoadState('networkidle');
 }
+
+// Title of the free_shipping method the free-shipping spec adds. Also used to
+// mop up instances left behind by a crashed run.
+const E2E_FREE_SHIPPING_TITLE = 'E2E Free Shipping';
+
+/**
+ * Pick the shipping zone the store actually uses for the e2e shopper and add a
+ * free_shipping method to it. Must run while authenticated as admin.
+ *
+ * Zone choice: the first zone (other than "rest of the world", id 0) that has
+ * at least one enabled method — on staging that's the "Mexico" zone with the
+ * paid flat_rate every other spec pays. Appending the free method to THAT zone
+ * (instead of creating a new one) guarantees it shows up on the checkout, since
+ * WooCommerce evaluates zones in order and stops at the first match. Falls back
+ * to zone 0 when no zone has a method.
+ */
+async function addFreeShippingMethod() {
+  const zones = await wcApi('GET', 'wc/v3/shipping/zones');
+  if (!Array.isArray(zones)) {
+    throw new Error(`addFreeShippingMethod: could not list shipping zones: ${JSON.stringify(zones).slice(0, 300)}`);
+  }
+  let zoneId = 0;
+  for (const zone of zones) {
+    if (zone.id === 0) continue;
+    const methods = await wcApi('GET', `wc/v3/shipping/zones/${zone.id}/methods`);
+    if (Array.isArray(methods) && methods.some(m => m.enabled)) {
+      zoneId = zone.id;
+      break;
+    }
+  }
+
+  // Orphan cleanup: a crashed previous run may have left our method behind.
+  const existing = await wcApi('GET', `wc/v3/shipping/zones/${zoneId}/methods`);
+  if (Array.isArray(existing)) {
+    for (const m of existing) {
+      if (m.method_id === 'free_shipping' && m.title === E2E_FREE_SHIPPING_TITLE) {
+        await wcApi('DELETE', `wc/v3/shipping/zones/${zoneId}/methods/${m.instance_id}?force=true`);
+        console.log(`  [cleanup] removed orphaned free_shipping instance ${m.instance_id} from zone ${zoneId}`);
+      }
+    }
+  }
+
+  const created = await wcApi('POST', `wc/v3/shipping/zones/${zoneId}/methods`, {
+    method_id: 'free_shipping',
+    enabled: true,
+    // requires '' = no coupon / minimum amount condition: always free.
+    settings: { title: E2E_FREE_SHIPPING_TITLE, requires: '' },
+  });
+  if (!created?.instance_id) {
+    throw new Error(`addFreeShippingMethod: POST returned ${JSON.stringify(created).slice(0, 300)}`);
+  }
+  return { zoneId, instanceId: created.instance_id };
+}
+
+function getFreeShippingMethod() { return freeShippingMethod; }
 
 async function clearWCSession() {
   const cookies = await page.context().cookies();
@@ -480,6 +546,13 @@ async function teardown() {
   console.log('\nTeardown...');
   try { if (couponId) { await wcApi('DELETE', `wc/v3/coupons/${couponId}?force=true`); console.log(`  Deleted coupon ${couponCode}`); } } catch (_) {}
   try { if (productId) { await wcApi('DELETE', `wc/v3/products/${productId}?force=true`); console.log(`  Deleted product ${productId}`); } } catch (_) {}
+  // Remove the free_shipping method so the shared store keeps only its paid rate.
+  try {
+    if (freeShippingMethod) {
+      await wcApi('DELETE', `wc/v3/shipping/zones/${freeShippingMethod.zoneId}/methods/${freeShippingMethod.instanceId}?force=true`);
+      console.log(`  Deleted free_shipping method ${freeShippingMethod.instanceId} (zone ${freeShippingMethod.zoneId})`);
+    }
+  } catch (_) {}
   // Undo the tax-inclusive store config so other specs/store state stay clean.
   try { if (taxRateId) { await wcApi('DELETE', `wc/v3/taxes/${taxRateId}?force=true`); console.log(`  Deleted tax rate ${taxRateId}`); } } catch (_) {}
   try {
@@ -1327,7 +1400,7 @@ module.exports = {
   setup, teardown, testOrderStatus, run,
   fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
-  getProductId, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
+  getProductId, getFreeShippingMethod, E2E_FREE_SHIPPING_TITLE, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, CONEKTA_HOST_RE, CHALLENGE_HOST_RE, isConektaFrameHost, waitForIntegrationIframe,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
   waitForPaymentError,

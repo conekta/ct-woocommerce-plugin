@@ -926,22 +926,23 @@ class WC_Conekta_REST_API {
                 }
             }
 
+            // Always emit one shipping line, even at amount 0 (free shipping /
+            // local pickup): Conekta requires shipping_lines whenever
+            // shipping_contact is sent, and this path always sends it.
+            // See ckpg_build_cart_shipping_lines.
             $chosen_methods = WC()->session ? (WC()->session->get('chosen_shipping_methods') ?: []) : [];
             $shipping_total = amount_validation(WC()->cart->get_shipping_total());
-            if ($shipping_total > 0 && !empty($chosen_methods[0])) {
-                $method_label = $chosen_methods[0];
+            $method_label   = '';
+            if (!empty($chosen_methods[0])) {
+                $method_label = (string) $chosen_methods[0];
                 foreach (WC()->shipping()->get_packages() as $package) {
                     if (isset($package['rates'][$chosen_methods[0]])) {
-                        $method_label = $package['rates'][$chosen_methods[0]]->get_label();
+                        $method_label = (string) $package['rates'][$chosen_methods[0]]->get_label();
                         break;
                     }
                 }
-                $shipping_lines[] = [
-                    'amount'  => $shipping_total,
-                    'carrier' => $method_label,
-                    'method'  => $method_label,
-                ];
             }
+            $shipping_lines = ckpg_build_cart_shipping_lines((int) $shipping_total, $method_label);
             // NOTE: rounding reconciliation happens once in the request handler
             // (ckpg_check_balance against $current_amount), which emits the
             // round_adjustment discount / tax delta. build_snapshot returns the
