@@ -253,6 +253,39 @@ function ckpg_build_shipping_lines($data)
     return $shipping_lines;
 }
 
+/**
+ * The single shipping_lines builder for every payment method: the order-first
+ * card checkout feeds it the live cart (build_snapshot), and cash / SPEI /
+ * BNPL / pay-by-bank feed it the placed WC order (ckpg_get_request_data).
+ *
+ * Conekta requires shipping_lines whenever shipping_contact is present, and
+ * the card checkout ALWAYS sends shipping_contact (the real address or the
+ * 'Pendiente' placeholder). A free-shipping cart (shipping total 0) used to
+ * send shipping_lines = [] on the card path and Conekta rejected the
+ * create/update with a 422 ("shipping_lines" required), so the shopper could
+ * not pay at all.
+ *
+ * Always return exactly one line:
+ *  - the amount (0 for free shipping / local pickup — Conekta accepts it, the
+ *    legacy cash/SPEI path has always sent it), plus the chosen method label as
+ *    carrier/method whenever a method IS chosen — even at amount 0, so the
+ *    merchant still sees "Envío gratis" vs "Recoger en tienda" on the Conekta
+ *    order (the card path falls back to the rate id when the label is unknown);
+ *  - a bare ['amount' => 0] only when there is no method at all (virtual cart,
+ *    shipping not calculated yet).
+ */
+function ckpg_build_cart_shipping_lines(int $amount_cents, string $method_label = ''): array
+{
+    $method_label = trim($method_label);
+    $line         = array('amount' => max(0, $amount_cents));
+    if ($method_label !== '') {
+        $line['carrier'] = $method_label;
+        $line['method']  = $method_label;
+    }
+
+    return array($line);
+}
+
 function ckpg_build_discount_lines($data): array
 {
     $discount_lines = array();
@@ -396,17 +429,11 @@ function ckpg_get_request_data($order)
         //PARAMS VALIDATION
         $amountShipping = amount_validation($order->get_shipping_total());
 
-        // Shipping Lines
+        // Shipping Lines — one line always, shared with the card path so every
+        // payment method reports free shipping the same way (bare amount 0).
         $shipping_method = $order->get_shipping_method();
+        $shipping_lines  = ckpg_build_cart_shipping_lines($amountShipping, (string) $shipping_method);
         if (!empty($shipping_method)) {
-            $shipping_lines  = array(
-                array(
-                    'amount'  => $amountShipping,
-                    'carrier' => $shipping_method,
-                    'method'  => $shipping_method
-                )
-            );
-
             //PARAM VALIDATION
             $name      = string_validation($order->get_shipping_first_name());
             $last      = string_validation($order->get_shipping_last_name());
@@ -439,13 +466,6 @@ function ckpg_get_request_data($order)
             $state     = string_validation($order->get_billing_state());
             $country   = string_validation($order->get_billing_country());
             $postal    = post_code_validation($order->get_billing_postcode());
-            $shipping_lines  = array(
-                array(
-                    'amount'   => 0,
-                    'carrier'  => 'carrier',
-                    'method'   => 'pickup'
-                )
-            );
             $shipping_contact = array(
                 'phone'    => $order->get_billing_phone(),
                 'receiver' => sprintf('%s %s', $name, $last),
