@@ -892,6 +892,25 @@ async function findOrdersByConektaOrderId(conektaOrderId, { perPage = 50 } = {})
 const PAID_STATUSES = ['processing', 'completed', 'on-hold'];
 
 /**
+ * Find the WooCommerce order(s) the duplicate guard cancelled for this run.
+ * The duplicate never gets the conekta-order-id meta (the guard cancels it
+ * before the pre-charge PUT that stamps it), so it is located by its own
+ * `_conekta_duplicate_order=yes` flag, the run's shopper email and an id
+ * newer than the paid order.
+ */
+async function findDuplicateOrders({ email, afterOrderId, perPage = 50 }) {
+  await loginAsAdmin();
+  const orders = await wcApi('GET', `wc/v3/orders?per_page=${perPage}&orderby=date&order=desc&status=any`);
+  if (!Array.isArray(orders)) return [];
+  return orders.filter(o =>
+    Number(o.id) > Number(afterOrderId) &&
+    String(o.billing?.email || '').toLowerCase() === String(email).toLowerCase() &&
+    Array.isArray(o.meta_data) &&
+    o.meta_data.some(m => m.key === '_conekta_duplicate_order' && String(m.value) === 'yes')
+  );
+}
+
+/**
  * Submit the classic checkout form directly to the WC AJAX endpoint, forcing a
  * specific conekta_order_id. This reproduces a resubmission (double-click /
  * timeout / retry) where a second WC order is created while the hidden
@@ -1474,7 +1493,7 @@ module.exports = {
   setup, teardown, testOrderStatus, run,
   fetchConektaOrder, waitForConektaPaid, conektaOrderPaid, verifyTaxInclusiveOrder, verifyConektaTotalMatchesWoo,
   classicCheckoutCreateOrder, payClassicCardOrder,
-  getProductId, getProduct, addToCartUrl, verifyConektaLineItemMetadata, getFreeShippingMethod, E2E_FREE_SHIPPING_TITLE, findOrdersByConektaOrderId, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
+  getProductId, getProduct, addToCartUrl, verifyConektaLineItemMetadata, getFreeShippingMethod, E2E_FREE_SHIPPING_TITLE, findOrdersByConektaOrderId, findDuplicateOrders, submitClassicCheckoutRaw, submitBlocksCheckoutRaw, PAID_STATUSES,
   INTEGRATION_CONTAINER, CONEKTA_HOST_RE, CHALLENGE_HOST_RE, isConektaFrameHost, waitForIntegrationIframe,
   fillIntegrationCard, clickPlaceOrder, waitForCheckoutStable, waitForOrderReceivedWith3DS,
   waitForPaymentError,
