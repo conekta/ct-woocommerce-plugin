@@ -11,8 +11,9 @@
  *   1) Fills the classic checkout and SELECTS the free rate (shipping total 0).
  *   2) Selecting Conekta fires checkout-request: every response must be
  *      success=true with a conekta_order_id (before the fix: 422).
- *   3) Conekta API: shipping_lines has exactly ONE line with amount 0 and the
- *      shipping_contact carries the real address.
+ *   3) Conekta API: shipping_lines has exactly ONE line with amount 0 that still
+ *      names the chosen method (carrier/method), and the shipping_contact
+ *      carries the real address.
  *   4) Pays with the test card; the WC order has shipping_total 0 on a
  *      free_shipping line, the Conekta order is paid, its shipping line is
  *      still the single amount-0 entry and its amount equals the WC total.
@@ -115,6 +116,9 @@ h.run('Classic Checkout — free shipping sends shipping_lines [{amount: 0}] and
       console.log(`  ${label} shipping_lines=${JSON.stringify(lines.map(l => ({ amount: l.amount, carrier: l.carrier, method: l.method })))}`);
       assert(lines.length === 1, `${label}: exactly one shipping line (got ${lines.length})`);
       assert(lines.length === 1 && Number(lines[0].amount) === 0, `${label}: shipping line amount is 0`);
+      // The merchant must still see WHICH method was chosen on a $0 line.
+      assert(lines.length === 1 && lines[0].carrier === h.E2E_FREE_SHIPPING_TITLE && lines[0].method === h.E2E_FREE_SHIPPING_TITLE,
+        `${label}: shipping line keeps the method label (carrier="${lines[0] && lines[0].carrier}")`);
       return order;
     };
 

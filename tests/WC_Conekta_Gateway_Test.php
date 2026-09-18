@@ -2860,11 +2860,18 @@ class WC_Conekta_Gateway_Test extends TestCase
     // cart must still produce one line (amount 0) instead of [].
     // -------------------------------------------------------
 
-    public function test_cart_shipping_lines_free_shipping_sends_bare_amount_zero()
+    public function test_cart_shipping_lines_free_shipping_keeps_method_label_at_amount_zero()
     {
-        $result = ckpg_build_cart_shipping_lines(0, 'Envío gratuito');
-
-        $this->assertSame([['amount' => 0]], $result);
+        // Free shipping / local pickup: amount 0 but the merchant must still see
+        // WHICH method was chosen on the Conekta order.
+        $this->assertSame(
+            [['amount' => 0, 'carrier' => 'Envío gratuito', 'method' => 'Envío gratuito']],
+            ckpg_build_cart_shipping_lines(0, 'Envío gratuito')
+        );
+        $this->assertSame(
+            [['amount' => 0, 'carrier' => 'Recoger en tienda', 'method' => 'Recoger en tienda']],
+            ckpg_build_cart_shipping_lines(0, ' Recoger en tienda ')
+        );
     }
 
     public function test_cart_shipping_lines_no_method_chosen_still_sends_amount_zero()
@@ -2875,7 +2882,8 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     public function test_cart_shipping_lines_negative_amount_is_clamped_to_zero()
     {
-        $this->assertSame([['amount' => 0]], ckpg_build_cart_shipping_lines(-5, 'x'));
+        $this->assertSame([['amount' => 0, 'carrier' => 'x', 'method' => 'x']], ckpg_build_cart_shipping_lines(-5, 'x'));
+        $this->assertSame([['amount' => 0]], ckpg_build_cart_shipping_lines(-5));
     }
 
     public function test_cart_shipping_lines_paid_shipping_keeps_carrier_and_method()
@@ -3157,8 +3165,8 @@ class WC_Conekta_Gateway_Test extends TestCase
         $data = ckpg_get_request_data($order);
 
         // Stub order: shipping_method 'flat_rate' with shipping_total 0.00 —
-        // free shipping is reported as a bare amount-0 line, same as the card path.
-        $this->assertSame([['amount' => 0]], $data['shipping_lines']);
+        // amount 0 but the method label is kept, same as the card path.
+        $this->assertSame([['amount' => 0, 'carrier' => 'flat_rate', 'method' => 'flat_rate']], $data['shipping_lines']);
     }
 
     public function test_get_request_data_has_shipping_contact()

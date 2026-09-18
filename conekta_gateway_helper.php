@@ -266,19 +266,18 @@ function ckpg_build_shipping_lines($data)
  * not pay at all.
  *
  * Always return exactly one line:
- *  - shipping total 0 (free shipping, local pickup, virtual cart, shipping not
- *    calculated yet): a bare ['amount' => 0] — that is all Conekta needs;
- *  - shipping total > 0: the amount plus the chosen method label as
- *    carrier/method (falls back to the rate id when the label is unknown).
+ *  - the amount (0 for free shipping / local pickup — Conekta accepts it, the
+ *    legacy cash/SPEI path has always sent it), plus the chosen method label as
+ *    carrier/method whenever a method IS chosen — even at amount 0, so the
+ *    merchant still sees "Envío gratis" vs "Recoger en tienda" on the Conekta
+ *    order (the card path falls back to the rate id when the label is unknown);
+ *  - a bare ['amount' => 0] only when there is no method at all (virtual cart,
+ *    shipping not calculated yet).
  */
 function ckpg_build_cart_shipping_lines(int $amount_cents, string $method_label = ''): array
 {
-    if ($amount_cents <= 0) {
-        return array(array('amount' => 0));
-    }
-
     $method_label = trim($method_label);
-    $line         = array('amount' => $amount_cents);
+    $line         = array('amount' => max(0, $amount_cents));
     if ($method_label !== '') {
         $line['carrier'] = $method_label;
         $line['method']  = $method_label;
