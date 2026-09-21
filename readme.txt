@@ -4,7 +4,7 @@ Tags: free, cash, conekta, mexico, payment gateway
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 6.2.4
+Stable tag: 6.2.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,11 @@ By following these steps, you'll successfully install and configure the Conekta 
 `/assets/screenshot-2.png`
 
 == Changelog ==
+= 6.2.5 =
+* Fix: a WooCommerce order cancelled as a duplicate (a resubmission whose Conekta payment already completed another order) no longer emails the customer. The duplicate is flagged before cancelling and every registered WooCommerce email (core and third-party) is disabled for that order only via woocommerce_email_enabled_{id}; the customer keeps receiving the emails of the order that was actually paid.
+* Fix: the WooCommerce order rebuilt by the order.paid webhook (paid in Conekta, no order in WooCommerce) now carries the Conekta order metadata on the order and each line item's metadata on its order item, keeping the original keys, and is linked to the customer account via woocommerce_customer_id.
+* Change: the card checkout sends each cart item's meta (variation attributes, custom fields) in the Conekta line_item metadata, flat and bounded to 100 keys of 250 chars, so rebuilt orders keep them.
+
 = 6.2.4 =
 * Fix: the card checkout failed on carts with free shipping (or local pickup / virtual products). Conekta requires shipping_lines whenever shipping_contact is sent, and a shipping total of 0 produced an empty shipping_lines, so the order create/update was rejected. All payment methods now build shipping_lines through one shared helper and always send exactly one line: the amount (0 when shipping is free) plus the chosen method as carrier/method, so free-shipping and pickup orders keep the method name on the Conekta order.
 

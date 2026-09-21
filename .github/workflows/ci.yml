@@ -87,7 +87,7 @@ jobs:
       matrix:
         shard: [safari-mobile, blocks, classic ]
     container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

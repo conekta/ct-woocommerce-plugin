@@ -37,10 +37,11 @@ class WC_Conekta_Gateway_Test extends TestCase
 
     protected function tearDown(): void
     {
-        global $test_product_registry, $test_order_registry, $test_prices_include_tax, $test_current_user_id;
+        global $test_product_registry, $test_order_registry, $test_prices_include_tax, $test_current_user_id, $test_user_registry;
         WC()->cart = null;
         $test_product_registry = [];
         $test_order_registry = null;
+        $test_user_registry = [];
         $test_prices_include_tax = false;
         $test_current_user_id = 0;
         parent::tearDown();
@@ -445,6 +446,260 @@ class WC_Conekta_Gateway_Test extends TestCase
     {
         $array = ['id' => 'ord_x', 'metadata' => ['reference_id' => '7']];
         $this->assertSame($array, WC_Conekta_Plugin::conekta_order_to_array($array));
+    }
+
+    // -------------------------------------------------------
+    // create_order_from_conekta_payload — the rebuilt WC order must carry the
+    // Conekta order metadata, each line item's metadata and the customer id.
+    // -------------------------------------------------------
+
+    private function conektaPaidPayload(array $overrides = []): array
+    {
+        return array_replace_recursive([
+            'id'             => 'ord_rebuild_1',
+            'amount'         => 25000,
+            'currency'       => 'MXN',
+            'payment_status' => 'paid',
+            'metadata'       => [
+                'plugin'                    => 'woocommerce',
+                'plugin_conekta_version'    => '6.2.5',
+                'woocommerce_checkout_type' => 'blocks',
+                'woocommerce_customer_id'   => '42',
+                '_erp_folio'                => 'F-0099',
+                '_billing_rfc'              => 'XAXX010101000',
+            ],
+            'line_items'     => ['data' => [[
+                'name'       => 'Camiseta',
+                'unit_price' => 12500,
+                'quantity'   => 2,
+                'metadata'   => [
+                    'product_id'   => '77',
+                    'tax_included' => true,
+                    '_sku_interno' => 'CAM-77',
+                ],
+            ]]],
+            'customer_info'  => ['name' => 'Ana Lopez', 'email' => 'ana@example.com', 'phone' => '5555555555'],
+        ], $overrides);
+    }
+
+    public function test_create_order_from_conekta_payload_copies_order_metadata_and_customer()
+    {
+        global $test_order_registry, $test_user_registry;
+        $test_order_registry = [];
+        $test_user_registry  = [42 => (object) ['ID' => 42]];
+        $this->registerProduct(77, 125.0);
+
+        $order = WC_Conekta_Plugin::create_order_from_conekta_payload($this->conektaPaidPayload());
+
+        $this->assertInstanceOf(WC_Order::class, $order);
+        // Order metadata, original keys.
+        $this->assertSame('woocommerce', $order->get_meta('plugin'));
+        $this->assertSame('blocks', $order->get_meta('woocommerce_checkout_type'));
+        $this->assertSame('42', $order->get_meta('woocommerce_customer_id'));
+        // "_" (protected) keys included.
+        $this->assertSame('F-0099', $order->get_meta('_erp_folio'));
+        $this->assertSame('XAXX010101000', $order->get_meta('_billing_rfc'));
+        $this->assertSame('ord_rebuild_1', $order->get_meta('conekta-order-id'));
+        // Linked to the account, not a guest order.
+        $this->assertSame(42, $order->get_customer_id());
+    }
+
+    public function test_create_order_from_conekta_payload_ignores_unknown_customer_id()
+    {
+        global $test_order_registry, $test_user_registry;
+        $test_order_registry = [];
+        $test_user_registry  = []; // user 42 does not exist on this site
+        $this->registerProduct(77, 125.0);
+
+        $order = WC_Conekta_Plugin::create_order_from_conekta_payload($this->conektaPaidPayload());
+
+        $this->assertSame(0, $order->get_customer_id());
+        // Raw value kept as meta.
+        $this->assertSame('42', $order->get_meta('woocommerce_customer_id'));
+    }
+
+    public function test_create_order_from_conekta_payload_copies_line_item_metadata()
+    {
+        global $test_order_registry;
+        $test_order_registry = [];
+        $this->registerProduct(77, 125.0);
+
+        $order = WC_Conekta_Plugin::create_order_from_conekta_payload($this->conektaPaidPayload());
+
+        $items = $order->get_line_items();
+        $this->assertCount(1, $items);
+        $item = $items[0];
+        $this->assertInstanceOf(WC_Order_Item_Product::class, $item);
+        $this->assertSame(77, $item->get_product_id());
+        $this->assertSame(2, $item->get_quantity());
+        // Line item metadata, original keys.
+        $this->assertSame('77', $item->get_meta('product_id'));
+        $this->assertSame('true', $item->get_meta('tax_included'));
+        $this->assertSame('CAM-77', $item->get_meta('_sku_interno'));
+        // Meta added after add_product() must be saved.
+        $this->assertGreaterThan(0, $item->saved);
+    }
+
+    public function test_create_order_from_conekta_payload_copies_line_item_metadata_onto_fee_fallback()
+    {
+        global $test_order_registry, $test_product_registry;
+        $test_order_registry = [];
+        $test_product_registry = [];
+
+        // No product_id -> fee line; metadata still copied.
+        $payload = $this->conektaPaidPayload();
+        unset($payload['line_items']['data'][0]['metadata']['product_id']);
+        $order = WC_Conekta_Plugin::create_order_from_conekta_payload($payload);
+
+        $items = $order->get_line_items();
+        $this->assertCount(1, $items);
+        $this->assertInstanceOf(WC_Order_Item_Fee::class, $items[0]);
+        $this->assertSame('Camiseta', $items[0]->get_name());
+        $this->assertSame('true', $items[0]->get_meta('tax_included'));
+        $this->assertSame('CAM-77', $items[0]->get_meta('_sku_interno'));
+    }
+
+    /** Reserved WooCommerce keys are skipped; values are normalized to strings. */
+    public function test_copy_conekta_metadata_skips_wc_internal_keys_and_normalizes_values()
+    {
+        $order  = new WC_Order(8001);
+        $copied = WC_Conekta_Plugin::copy_conekta_metadata($order, [
+            '_customer_user' => '1',          // reserved -> skipped
+            '_order_total'   => '0.01',       // reserved -> skipped
+            '_transaction_id'=> 'evil',       // reserved -> skipped
+            'flag'           => false,        // bool -> "false"
+            'nested'         => ['a' => 1],   // array -> JSON
+            'nothing'        => null,         // null -> ""
+            'count'          => 3,            // int -> "3"
+            ''               => 'no-key',     // invalid -> skipped
+        ]);
+
+        $this->assertSame(4, $copied);
+        $this->assertSame('', $order->get_meta('_customer_user'));
+        $this->assertSame('', $order->get_meta('_order_total'));
+        $this->assertSame('', $order->get_meta('_transaction_id'));
+        $this->assertSame('false', $order->get_meta('flag'));
+        $this->assertSame('{"a":1}', $order->get_meta('nested'));
+        $this->assertSame('', $order->get_meta('nothing'));
+        $this->assertSame('3', $order->get_meta('count'));
+
+        // Line items have their own reserved keys.
+        $item   = new WC_Order_Item_Product();
+        $copied = WC_Conekta_Plugin::copy_conekta_metadata($item, ['_qty' => '99', 'product_id' => '77']);
+        $this->assertSame(1, $copied);
+        $this->assertSame('', $item->get_meta('_qty'));
+        $this->assertSame('77', $item->get_meta('product_id'));
+
+        // Nothing to copy -> 0.
+        $this->assertSame(0, WC_Conekta_Plugin::copy_conekta_metadata($order, []));
+        $this->assertSame(0, WC_Conekta_Plugin::copy_conekta_metadata($order, 'not-an-array'));
+        $this->assertSame(0, WC_Conekta_Plugin::copy_conekta_metadata(new stdClass(), ['a' => 'b']));
+    }
+
+    // -------------------------------------------------------
+    // line_item_metadata_from_cart_item — cart item meta sent to Conekta so
+    // the webhook rebuild can restore variations and custom fields.
+    // -------------------------------------------------------
+
+    public function test_line_item_metadata_keeps_base_variation_and_custom_keys()
+    {
+        $cart_item = [
+            'key'            => 'abc123',
+            'product_id'     => 77,
+            'variation_id'   => 78,
+            'quantity'       => 2,
+            'data'           => new WC_Product(78),
+            'line_subtotal'  => 250.0,
+            'line_total'     => 250.0,
+            'line_tax'       => 0,
+            'line_tax_data'  => ['subtotal' => [], 'total' => []],
+            'variation'      => ['attribute_pa_color' => 'rojo', 'attribute_talla' => 'M'],
+            'custom_message' => 'Feliz cumpleaños',
+            'engraving'      => true,
+        ];
+
+        $metadata = WC_Conekta_REST_API::line_item_metadata_from_cart_item($cart_item, [
+            'tax_included' => true,
+            'product_id'   => '78',
+        ]);
+
+        $this->assertSame([
+            'tax_included'   => true,   // base values are passed through as-is
+            'product_id'     => '78',
+            'pa_color'       => 'rojo',
+            'talla'          => 'M',
+            'custom_message' => 'Feliz cumpleaños',
+            'engraving'      => 'true',
+        ], $metadata);
+    }
+
+    public function test_line_item_metadata_flattens_arrays_and_drops_objects_and_nulls()
+    {
+        $cart_item = [
+            'addons'  => [
+                ['name' => 'Mensaje', 'value' => 'Hola', 'price' => 10.5],
+                ['name' => 'Color', 'value' => 'Azul'],
+            ],
+            'deep'    => ['a' => ['b' => ['c' => ['d' => 'too deep']]]],
+            'object'  => new stdClass(),
+            'nothing' => null,
+            'count'   => 3,
+        ];
+
+        $metadata = WC_Conekta_REST_API::line_item_metadata_from_cart_item($cart_item);
+
+        $this->assertSame([
+            'addons_0_name'  => 'Mensaje',
+            'addons_0_value' => 'Hola',
+            'addons_0_price' => '10.5',
+            'addons_1_name'  => 'Color',
+            'addons_1_value' => 'Azul',
+            'count'          => '3',
+        ], $metadata);
+        // Nothing nested ever leaves: every value is a string.
+        foreach ($metadata as $value) {
+            $this->assertIsString($value);
+        }
+    }
+
+    /** Plugin state (Advanced Dynamic Pricing's `adp`) never reaches Conekta. */
+    public function test_line_item_metadata_ignores_plugin_state_keys()
+    {
+        $cart_item = [
+            'adp'            => ['original_price' => 100, 'history' => ['rule_1']],
+            'adp_discount'   => '10',
+            'adaptive_note'  => 'kept',   // shares letters, not the prefix
+            'custom_message' => 'Hola',
+        ];
+
+        $metadata = WC_Conekta_REST_API::line_item_metadata_from_cart_item($cart_item);
+
+        $this->assertSame([
+            'adaptive_note'  => 'kept',
+            'custom_message' => 'Hola',
+        ], $metadata);
+    }
+
+    public function test_line_item_metadata_enforces_250_chars_and_100_keys()
+    {
+        $long = str_repeat('x', 300);
+        $many = [];
+        for ($i = 0; $i < 150; $i++) {
+            $many['field_' . $i] = 'v' . $i;
+        }
+        $cart_item = ['message' => $long] + $many;
+
+        $metadata = WC_Conekta_REST_API::line_item_metadata_from_cart_item($cart_item, [
+            'tax_included' => false,
+            'product_id'   => '77',
+        ]);
+
+        $this->assertSame(250, strlen($metadata['message']));
+        $this->assertCount(WC_Conekta_REST_API::LINE_ITEM_METADATA_MAX_KEYS, $metadata);
+        // Base keys are never evicted by the customer's fields.
+        $this->assertSame('77', $metadata['product_id']);
+        $this->assertArrayHasKey('field_0', $metadata);
+        $this->assertArrayNotHasKey('field_149', $metadata);
     }
 
     // -------------------------------------------------------
@@ -933,8 +1188,10 @@ class WC_Conekta_Gateway_Test extends TestCase
         // ...the duplicate order 1309 is NOT marked paid...
         $this->assertNotEquals('completed', $dup->get_status());
         $this->assertNotEquals('processing', $dup->get_status());
-        // ...and it's cancelled so it doesn't linger as pending.
+        // ...and it's cancelled so it doesn't linger as pending...
         $this->assertEquals('cancelled', $dup->get_status());
+        // ...flagged as a duplicate so its emails are suppressed.
+        $this->assertEquals('yes', $dup->get_meta(WC_Conekta_Gateway::DUPLICATE_ORDER_META));
     }
 
     /**
@@ -986,8 +1243,94 @@ class WC_Conekta_Gateway_Test extends TestCase
         // ...the duplicate order 1309 is NOT marked paid...
         $this->assertNotEquals('completed', $dup->get_status());
         $this->assertNotEquals('processing', $dup->get_status());
-        // ...and it's cancelled so it doesn't linger as pending.
+        // ...and it's cancelled so it doesn't linger as pending...
         $this->assertEquals('cancelled', $dup->get_status());
+        // ...flagged as a duplicate so its emails are suppressed.
+        $this->assertEquals('yes', $dup->get_meta(WC_Conekta_Gateway::DUPLICATE_ORDER_META));
+    }
+
+    // -------------------------------------------------------
+    // Duplicate-order email suppression: a WC order cancelled as a duplicate
+    // must not email the customer (third-party "cancelled" emails included).
+    // -------------------------------------------------------
+
+    /** Only a flagged duplicate order is muted; everything else passes through. */
+    public function test_suppress_duplicate_order_emails_only_mutes_flagged_orders()
+    {
+        $dup = new WC_Order(1309);
+        $dup->update_meta_data(WC_Conekta_Gateway::DUPLICATE_ORDER_META, 'yes');
+        $this->assertFalse(WC_Conekta_Gateway::suppress_duplicate_order_emails(true, $dup));
+        $this->assertFalse(WC_Conekta_Gateway::suppress_duplicate_order_emails(false, $dup));
+
+        $normal = new WC_Order(1308);
+        $this->assertTrue(WC_Conekta_Gateway::suppress_duplicate_order_emails(true, $normal));
+        $this->assertFalse(WC_Conekta_Gateway::suppress_duplicate_order_emails(false, $normal));
+
+        // Emails whose object is not an order.
+        $this->assertTrue(WC_Conekta_Gateway::suppress_duplicate_order_emails(true, new stdClass()));
+        $this->assertTrue(WC_Conekta_Gateway::suppress_duplicate_order_emails(true, null));
+        $this->assertTrue(WC_Conekta_Gateway::suppress_duplicate_order_emails(true));
+    }
+
+    /** The duplicate is flagged before cancelling; a paid order is left alone. */
+    public function test_cancel_duplicate_order_flags_order_before_cancelling()
+    {
+        $gateway  = $this->createConfiguredGateway();
+        $existing = new WC_Order(1308);
+        $existing->update_status('processing');
+
+        $ref = new ReflectionMethod(WC_Conekta_Gateway::class, 'cancel_duplicate_order');
+        $ref->setAccessible(true);
+
+        $dup = new WC_Order(1309);
+        $ref->invoke($gateway, $dup, $existing);
+        $this->assertEquals('cancelled', $dup->get_status());
+        $this->assertTrue(WC_Conekta_Gateway::is_duplicate_order($dup));
+
+        // A paid order is never touched, even if passed in by mistake.
+        $paid = new WC_Order(1310);
+        $paid->update_status('processing');
+        $ref->invoke($gateway, $paid, $existing);
+        $this->assertEquals('processing', $paid->get_status());
+        $this->assertFalse(WC_Conekta_Gateway::is_duplicate_order($paid));
+    }
+
+    /** The suppression is hooked into every registered email id. */
+    public function test_register_duplicate_order_email_suppression_hooks_every_registered_email()
+    {
+        global $test_added_filters;
+        $test_added_filters = [];
+
+        $mailer = new class {
+            public function get_emails() {
+                $mk = function ($id) { $e = new stdClass(); $e->id = $id; return $e; };
+                return [
+                    'WC_Email_Cancelled_Order'          => $mk('cancelled_order'),
+                    'WC_Email_Customer_Processing_Order' => $mk('customer_processing_order'),
+                    'Third_Party_Customer_Cancelled'    => $mk('customer_cancelled_order'),
+                    'Broken_Email_Without_Id'           => new stdClass(),
+                ];
+            }
+        };
+
+        WC_Conekta_Gateway::register_duplicate_order_email_suppression($mailer);
+
+        $hooked = array_column($test_added_filters, 'hook');
+        $this->assertEqualsCanonicalizing([
+            'woocommerce_email_enabled_cancelled_order',
+            'woocommerce_email_enabled_customer_processing_order',
+            'woocommerce_email_enabled_customer_cancelled_order',
+        ], $hooked);
+        foreach ($test_added_filters as $f) {
+            $this->assertSame([WC_Conekta_Gateway::class, 'suppress_duplicate_order_emails'], $f['callback']);
+            $this->assertSame(2, $f['args']);
+        }
+
+        // Not a mailer: ignored.
+        $test_added_filters = [];
+        WC_Conekta_Gateway::register_duplicate_order_email_suppression(null);
+        WC_Conekta_Gateway::register_duplicate_order_email_suppression(new stdClass());
+        $this->assertSame([], $test_added_filters);
     }
 
     // -------------------------------------------------------

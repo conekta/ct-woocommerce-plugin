@@ -28,7 +28,7 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
 	 */
 	public const API_CLIENT = 'woocommerce';
 
-	public $version  = "6.2.4";
+	public $version  = "6.2.5";
 	public $name = "WooCommerce 2";
 	public $description = "Payment Gateway via Conekta.io for WooCommerce: accepts credit and debit cards, monthly installments (MSI) for Mexican cards, cash, bank transfers, buy now pay later (BNPL), and direct bank payments (pay by bank).";
 	public $plugin_name = "Conekta Payment Gateway for Woocommerce";
@@ -307,15 +307,23 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
                 $product_id = isset($item['metadata']['product_id']) ? absint($item['metadata']['product_id']) : 0;
                 $product    = $product_id ? wc_get_product($product_id) : false;
 
+                $item_metadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+
                 if ($product) {
-                    $order->add_product($product, $quantity, [
+                    $item_id = $order->add_product($product, $quantity, [
                         'subtotal' => $line_total,
                         'total'    => $line_total,
                     ]);
+                    // Copy the Conekta line_item metadata onto the WC item.
+                    $wc_item = $item_id ? $order->get_item($item_id, false) : null;
+                    if ($wc_item && self::copy_conekta_metadata($wc_item, $item_metadata) > 0) {
+                        $wc_item->save();
+                    }
                 } else {
                     $fee = new WC_Order_Item_Fee();
                     $fee->set_name((string) ($item['name'] ?? 'Producto'));
                     $fee->set_total((string) $line_total);
+                    self::copy_conekta_metadata($fee, $item_metadata);
                     $order->add_item($fee);
                 }
             }
@@ -369,6 +377,15 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             }
 
             $order->set_payment_method('conekta');
+
+            // Link the WC account and copy the Conekta order metadata.
+            $order_metadata = is_array($conekta_order['metadata'] ?? null) ? $conekta_order['metadata'] : [];
+            $customer_id    = absint($order_metadata['woocommerce_customer_id'] ?? 0);
+            if ($customer_id > 0 && get_user_by('id', $customer_id)) {
+                $order->set_customer_id($customer_id);
+            }
+            self::copy_conekta_metadata($order, $order_metadata);
+
             // Force the total to what Conekta actually charged — item math may
             // drift (taxes, rounding) and the money already moved.
             $order->set_total(((int) ($conekta_order['amount'] ?? 0)) / 100);
@@ -387,6 +404,59 @@ class WC_Conekta_Plugin extends WC_Payment_Gateway
             error_log('Conekta - create_order_from_conekta_payload: ' . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Copy a Conekta metadata map (order or line_item) onto a WC_Data object,
+     * keeping the original keys. "_" keys stay protected/hidden in WooCommerce;
+     * keys reserved by WooCommerce for core props are skipped. Returns the
+     * number of keys written.
+     */
+    public static function copy_conekta_metadata($target, $metadata): int
+    {
+        if (!is_object($target) || !method_exists($target, 'update_meta_data') || !is_array($metadata) || empty($metadata)) {
+            return 0;
+        }
+        $reserved = self::wc_internal_meta_keys($target);
+        $copied   = 0;
+
+        foreach ($metadata as $key => $value) {
+            $key = (string) $key;
+            if ($key === '' || strlen($key) > 255) {
+                error_log(sprintf('Conekta - copy_conekta_metadata: skipping invalid meta key "%s"', substr($key, 0, 50)));
+                continue;
+            }
+            if (in_array($key, $reserved, true)) {
+                error_log(sprintf('Conekta - copy_conekta_metadata: "%s" is a WooCommerce internal meta key, not copied', $key));
+                continue;
+            }
+            if (is_bool($value)) {
+                $value = $value ? 'true' : 'false';
+            } elseif (is_array($value) || is_object($value)) {
+                $value = wp_json_encode($value);
+            } elseif ($value === null) {
+                $value = '';
+            } else {
+                $value = (string) $value;
+            }
+            $target->update_meta_data($key, $value);
+            $copied++;
+        }
+        return $copied;
+    }
+
+    /** Meta keys reserved by the object's data store (empty if unknown). */
+    protected static function wc_internal_meta_keys($target): array
+    {
+        try {
+            if (method_exists($target, 'get_data_store')) {
+                $keys = $target->get_data_store()->get_internal_meta_keys();
+                return is_array($keys) ? array_values(array_map('strval', $keys)) : [];
+            }
+        } catch (\Throwable $e) {
+            // No get_internal_meta_keys() on this store.
+        }
+        return [];
     }
 
     /**

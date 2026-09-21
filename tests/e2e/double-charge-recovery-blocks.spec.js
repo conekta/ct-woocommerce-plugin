@@ -214,7 +214,7 @@ h.run('Blocks Checkout — order-first: failed checkout costs $0, lost confirm n
 
     // The in-page retry is offered instead of a payable iframe remount.
     const retryButton = page.locator('.conekta-retry-payment');
-    const retryVisible = await retryButton.isVisible({ timeout: 15000 }).catch(() => false);
+    const retryVisible = await retryButton.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
     assert(retryVisible, 'the "Reintentar pago" button is shown after the lost confirm');
 
     await page.unroute(CONFIRM_ENDPOINT);
@@ -223,7 +223,10 @@ h.run('Blocks Checkout — order-first: failed checkout costs $0, lost confirm n
     // (3) RETRY — re-confirms WITHOUT re-charging
     // ---------------------------------------------------------------
     console.log('\n--- (3) click "Reintentar pago" with the confirm unblocked ---');
-    await retryButton.click();
+    await Promise.race([
+      retryButton.click({ timeout: 30000 }).catch(() => {}),
+      page.waitForURL(/order-received/, { timeout: 30000 }).catch(() => {}),
+    ]);
 
     const deadline = Date.now() + 60000;
     while (!page.url().includes('order-received') && Date.now() < deadline) {

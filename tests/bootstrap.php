@@ -25,8 +25,17 @@ if (!function_exists('plugin_basename')) {
 if (!function_exists('add_action')) {
     function add_action($hook, $callback, $priority = 10, $args = 1) {}
 }
+// Records add_filter() calls so tests can assert what the plugin hooks.
+global $test_added_filters;
+$test_added_filters = [];
+if (!function_exists('apply_filters')) {
+    function apply_filters($hook, $value, ...$args) { return $value; }
+}
 if (!function_exists('add_filter')) {
-    function add_filter($hook, $callback, $priority = 10, $args = 1) {}
+    function add_filter($hook, $callback, $priority = 10, $args = 1) {
+        global $test_added_filters;
+        $test_added_filters[] = ['hook' => $hook, 'callback' => $callback, 'priority' => $priority, 'args' => $args];
+    }
 }
 if (!function_exists('get_option')) {
     function get_option($option, $default = false) { return $default; }
@@ -62,6 +71,40 @@ if (!function_exists('wc_add_notice')) {
 global $test_order_registry;
 $test_order_registry = null; // null = not active (legacy), array = active registry
 
+if (!function_exists('is_wp_error')) {
+    function is_wp_error($thing) { return $thing instanceof WP_Error; }
+}
+if (!class_exists('WP_Error')) {
+    class WP_Error { public function get_error_message() { return 'error'; } }
+}
+if (!function_exists('sanitize_email')) {
+    function sanitize_email($email) { return filter_var($email, FILTER_SANITIZE_EMAIL); }
+}
+if (!function_exists('absint')) {
+    function absint($n) { return abs((int) $n); }
+}
+// Users resolvable via get_user_by('id', $id).
+global $test_user_registry;
+$test_user_registry = [];
+if (!function_exists('get_user_by')) {
+    function get_user_by($field, $value) {
+        global $test_user_registry;
+        return ($field === 'id' && isset($test_user_registry[(int) $value])) ? $test_user_registry[(int) $value] : false;
+    }
+}
+// wc_create_order stub: new WC_Order with an auto id, registered for lookups.
+if (!function_exists('wc_create_order')) {
+    function wc_create_order($args = []) {
+        global $test_order_registry;
+        static $next_id = 90000;
+        $order = new WC_Order(++$next_id);
+        $order->set_status($args['status'] ?? 'pending');
+        if (is_array($test_order_registry)) {
+            $test_order_registry[$order->get_id()] = $order;
+        }
+        return $order;
+    }
+}
 if (!function_exists('wc_get_order')) {
     function wc_get_order($order_id) {
         global $test_order_registry;
@@ -395,8 +438,86 @@ if (!class_exists('WC_Order')) {
 
         public function save() {}
         public function delete($force = false) {}
+
+        // Order rebuild support (create_order_from_conekta_payload).
+        private $props = [];
+        private $line_items = [];
+        private $next_item_id = 1;
+        public function set_currency($c) { $this->props['currency'] = $c; }
+        public function get_currency() { return $this->props['currency'] ?? 'MXN'; }
+        public function set_total($t) { $this->props['total'] = $t; }
+        // Generic set_*/get_* for billing/shipping props.
+        public function __call($name, $args) {
+            if (strpos($name, 'set_') === 0) { $this->props[substr($name, 4)] = $args[0] ?? null; return; }
+            if (strpos($name, 'get_') === 0) { return $this->props[substr($name, 4)] ?? ''; }
+            throw new BadMethodCallException("WC_Order stub: unknown method {$name}");
+        }
+        public function add_product($product, $qty = 1, $args = []) {
+            $item = new WC_Order_Item_Product();
+            $item->set_id($this->next_item_id++);
+            $item->set_product_id($product->get_id());
+            $item->set_quantity($qty);
+            $item->set_name($product->get_name());
+            $item->set_subtotal($args['subtotal'] ?? 0);
+            $item->set_total($args['total'] ?? 0);
+            $this->line_items[$item->get_id()] = $item;
+            return $item->get_id();
+        }
+        public function add_item($item) {
+            if (!$item->get_id()) { $item->set_id($this->next_item_id++); }
+            $this->line_items[$item->get_id()] = $item;
+        }
+        public function get_item($item_id, $load_from_db = true) {
+            return $this->line_items[$item_id] ?? false;
+        }
+        /** All items in insertion order. */
+        public function get_line_items() { return array_values($this->line_items); }
+        // Reserved keys, like WC_Data_Store_WP::get_internal_meta_keys().
+        public function get_data_store() {
+            return new class {
+                public function get_internal_meta_keys() {
+                    return ['_customer_user', '_order_total', '_billing_email', '_payment_method', '_transaction_id'];
+                }
+            };
+        }
     }
 }
+
+// WC_Order_Item stubs with WC_Data-like meta.
+if (!class_exists('WC_Order_Item')) {
+    class WC_Order_Item {
+        private $id = 0;
+        private $props = [];
+        private $meta = [];
+        public $saved = 0;
+        public function set_id($id) { $this->id = (int) $id; }
+        public function get_id() { return $this->id; }
+        public function set_name($n) { $this->props['name'] = $n; }
+        public function get_name() { return $this->props['name'] ?? ''; }
+        public function set_total($t) { $this->props['total'] = $t; }
+        public function get_total() { return $this->props['total'] ?? 0; }
+        public function get_meta($key) { return $this->meta[$key] ?? ''; }
+        public function get_meta_data() { return $this->meta; }
+        public function update_meta_data($key, $value) { $this->meta[$key] = $value; }
+        public function add_meta_data($key, $value, $unique = false) { $this->meta[$key] = $value; }
+        public function save() { $this->saved++; return $this->id; }
+        public function __call($name, $args) {
+            if (strpos($name, 'set_') === 0) { $this->props[substr($name, 4)] = $args[0] ?? null; return; }
+            if (strpos($name, 'get_') === 0) { return $this->props[substr($name, 4)] ?? ''; }
+            throw new BadMethodCallException("WC_Order_Item stub: unknown method {$name}");
+        }
+        public function get_data_store() {
+            return new class {
+                public function get_internal_meta_keys() {
+                    return ['_product_id', '_variation_id', '_qty', '_line_total', '_line_subtotal'];
+                }
+            };
+        }
+    }
+}
+if (!class_exists('WC_Order_Item_Product'))  { class WC_Order_Item_Product extends WC_Order_Item {} }
+if (!class_exists('WC_Order_Item_Fee'))      { class WC_Order_Item_Fee extends WC_Order_Item {} }
+if (!class_exists('WC_Order_Item_Shipping')) { class WC_Order_Item_Shipping extends WC_Order_Item {} }
 
 // WC_Admin_Settings stub
 if (!class_exists('WC_Admin_Settings')) {
