@@ -90,6 +90,9 @@ h.run('Classic Checkout — duplicate-order guard', { checkoutType: 'classic', p
   await page.goto(h.addToCartUrl(h.QUANTITY));
   await page.waitForLoadState('networkidle');
 
+  const blockCheckoutRequest = route => route.abort();
+  await page.route('**/conekta_checkout_request**', blockCheckoutRequest);
+
   await page.goto(`${STORE_URL}/checkout/`);
   await page.waitForLoadState('networkidle');
   await page.waitForSelector('form.checkout', { timeout: config.timeouts.selector });
@@ -107,6 +110,7 @@ h.run('Classic Checkout — duplicate-order guard', { checkoutType: 'classic', p
   await page.waitForTimeout(500);
 
   const resubmit = await h.submitClassicCheckoutRaw(conektaOrderId);
+  await page.unroute('**/conekta_checkout_request**', blockCheckoutRequest);
   console.log(`  resubmission response: status=${resubmit.status} result=${resubmit.json && resubmit.json.result}`);
   // The guard makes the gateway treat this as already-paid and redirect to the
   // existing order, so the WC AJAX result is still "success" (not an error the

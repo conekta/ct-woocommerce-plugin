@@ -99,7 +99,7 @@ h.run('Blocks Checkout — decline then successful retry stays paid in Conekta A
     // Order-first: the WC order already exists (pending), so the retry is the
     // in-page button — not a second Place Order through the Store API.
     const retryButton = page.locator('.conekta-retry-payment');
-    const retryVisible = await retryButton.isVisible({ timeout: 15000 }).catch(() => false);
+    const retryVisible = await retryButton.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
     assert(retryVisible, 'the "Reintentar pago" button is offered after the decline');
 
     // ---------------------------------------------------------------

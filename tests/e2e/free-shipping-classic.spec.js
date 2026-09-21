@@ -67,19 +67,23 @@ h.run('Classic Checkout — free shipping sends shipping_lines [{amount: 0}] and
 
     // WooCommerce renders one radio per rate (name shipping_method[0]); when a
     // single rate exists it's a hidden input already selected. Pick the free one.
-    const freeRate = page.locator('input[name^="shipping_method"][value^="free_shipping:"]').first();
-    await freeRate.waitFor({ state: 'attached', timeout: config.timeouts.selector });
-    if (!(await freeRate.isChecked())) {
-      const pending = waitOrderReview();
-      await freeRate.check({ force: true });
-      await pending;
-      await page.waitForTimeout(500);
-    }
-    const chosen = await page.evaluate(() => {
+    const freeRateSelector = 'input[name^="shipping_method"][value^="free_shipping:"]';
+    await page.locator(freeRateSelector).first().waitFor({ state: 'attached', timeout: config.timeouts.selector });
+    const chosenRate = () => page.evaluate(() => {
       const el = document.querySelector('input[name^="shipping_method"]:checked')
         || document.querySelector('input[name^="shipping_method"][type="hidden"]');
       return el ? el.value : null;
     });
+    let chosen = await chosenRate();
+    for (let attempt = 1; attempt <= 4 && !String(chosen || '').startsWith('free_shipping:'); attempt++) {
+      const pending = waitOrderReview();
+      await page.locator(freeRateSelector).first().click({ force: true }).catch(() => {});
+      await pending;
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(500);
+      chosen = await chosenRate();
+      console.log(`  attempt ${attempt}: chosen shipping rate = ${chosen}`);
+    }
     assert(typeof chosen === 'string' && chosen.startsWith('free_shipping:'),
       `free shipping rate selected (${chosen})`);
 
