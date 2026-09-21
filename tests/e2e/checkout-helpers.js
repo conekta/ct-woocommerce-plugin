@@ -147,11 +147,13 @@ async function wcApi(method, endpoint, body) {
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     result = await page.evaluate(async ({ baseUrl, method, endpoint, body }) => {
       try {
-        const nonce = (await (await fetch('/wp-admin/admin-ajax.php?action=rest-nonce')).text()).trim();
+        const nonce = (await (await fetch(`/wp-admin/admin-ajax.php?action=rest-nonce&_=${Date.now()}`, {
+          cache: 'no-store', credentials: 'same-origin',
+        })).text()).trim();
         if (!/^[A-Za-z0-9]+$/.test(nonce)) {
           return { code: 'e2e_bad_nonce_response', message: nonce.slice(0, 200) };
         }
-        const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' } };
+        const opts = { method, headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' }, cache: 'no-store', credentials: 'same-origin' };
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(`${baseUrl}/wp-json/${endpoint}`, opts);
         return await res.json();
@@ -162,6 +164,11 @@ async function wcApi(method, endpoint, body) {
     if (!TRANSIENT_CODES.includes(result?.code)) break;
     console.log(`  [wcApi] ${method} ${endpoint} attempt ${attempt}/${ATTEMPTS} failed with ${result.code}, retrying...`);
     await new Promise(r => setTimeout(r, 2500 * attempt));
+    // A nonce the server keeps rejecting means the admin session behind it
+    // is gone (or never took): log in again before the next attempt.
+    if (result.code === 'rest_cookie_invalid_nonce') {
+      await loginAsAdmin().catch(e => console.log(`  [wcApi] re-login failed: ${e.message}`));
+    }
   }
   return result;
 }
@@ -176,7 +183,9 @@ const CHECKOUT_CONTENT = {
 };
 
 async function loginAsAdmin() {
-  await page.goto(`${STORE_URL}/wp-login.php`);
+  // reauth=1 always shows the form (and clears any stale auth cookie), so
+  // this is safe to call when a previous login is still active.
+  await page.goto(`${STORE_URL}/wp-login.php?reauth=1&redirect_to=${encodeURIComponent(`${STORE_URL}/wp-admin/`)}`);
   await page.waitForSelector('#user_login', { state: 'visible' });
   await page.fill('#user_login', WP_USER);
   await page.fill('#user_pass', WP_PASS);

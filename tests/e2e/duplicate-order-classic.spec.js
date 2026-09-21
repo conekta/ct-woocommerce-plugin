@@ -133,9 +133,10 @@ h.run('Classic Checkout — duplicate-order guard', { checkoutType: 'classic', p
   // The duplicate is cancelled and flagged so it never emails the customer.
   // It carries no conekta-order-id (cancelled before the pre-charge PUT), so
   // it is looked up by its flag + shopper email + an id after the paid order.
-  const duplicates = await h.findDuplicateOrders({ email: BILLING.email, afterOrderId: paid[0].id });
+  const paidId = paid[0] ? paid[0].id : 0;
+  const duplicates = await h.findDuplicateOrders({ email: BILLING.email, afterOrderId: paidId });
   const dupIds = duplicates.map(o => `#${o.id}(${o.status})`).join(', ');
-  assert(duplicates.length === 1, `exactly ONE flagged duplicate order was created after #${paid[0].id} (got ${duplicates.length}: ${dupIds || 'none'})`);
+  assert(duplicates.length === 1, `exactly ONE flagged duplicate order was created after #${paidId} (got ${duplicates.length}: ${dupIds || 'none'})`);
   for (const dup of duplicates) {
     assert(dup.status === 'cancelled', `duplicate #${dup.id} is cancelled (status=${dup.status})`);
   }
