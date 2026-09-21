@@ -1260,7 +1260,13 @@ async function clickPlaceOrder() {
   const btn = page.locator(
     'button.wc-block-components-checkout-place-order-button, button:has-text("Realizar el pedido"), button:has-text("Place order"), #place_order'
   ).first();
-  await btn.click();
+  try {
+    await btn.click({ timeout: 10000 });
+  } catch (e) {
+    console.log(`  [clickPlaceOrder] pointer click failed (${String(e.message).split('\n')[0]}), dispatching a DOM click`);
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.evaluate(b => b.click());
+  }
 }
 
 /**
